@@ -1,4 +1,4 @@
-use crate::packet::{decode_payload, encode_payload, Error, Packet};
+use crate::packet::{Error, Packet, PacketId, decode_payload, encode_payload};
 use crypto::{digest::Digest, sha1::Sha1};
 use rand::{thread_rng, Rng};
 use reqwest::{Client, Url};
@@ -50,7 +50,7 @@ impl TransportClient {
     }
 
     pub async fn open(&mut self, address: String) -> Result<(), Error> {
-        // TODO: Check if Relaxed is appropiate
+        // TODO: Check if Relaxed is appropiate -> change all occurences if not
         if self.connected.load(std::sync::atomic::Ordering::Relaxed) {
             return Ok(());
         }
@@ -116,6 +116,67 @@ impl TransportClient {
         }
     }
 
+    async fn poll(&mut self) -> Result<(), Error> {
+        if self.connected.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(Error::ActionBeforeOpen);
+        }
+
+        match &mut self.transport {
+            TransportType::Polling(client) => {
+                let query_path = &format!(
+                    "/engine.io/?EIO=4&transport=polling&t={}&sid={}",
+                    TransportClient::get_random_t(),
+                    self.connection_data.as_ref().unwrap().sid
+                );
+
+                let address = Url::parse(&(self.address.as_ref().unwrap().to_owned() + query_path)[..])
+                .unwrap();
+
+                // TODO: check if to_vec is inefficient here
+                let response = client.get(address).send().await?.bytes().await?.to_vec();
+                let packets = decode_payload(response)?;
+                for packet in packets {
+                    // call the packet callback
+                    if let Some(function) = self.on_packet.as_ref() {
+                        function(packet.clone());
+                    }
+
+                    // check for the appropiate action or callback
+                    match packet.packet_id {
+                        PacketId::Message => {
+                            if let Some(function) = self.on_data.as_ref() {
+                                function(packet.data);
+                            }
+                        }
+                        PacketId::Close => {
+                            dbg!("Received close!");
+                            todo!("Close the connection");
+                        }
+                        PacketId::Open => {
+                            dbg!("Received open!");
+                            todo!("Think about this, we just receive it in the 'open' method.")
+                        }
+                        PacketId::Upgrade => {
+                            dbg!("Received upgrade!");
+                            todo!("Upgrade the connection, but only if possible");
+                        }
+                        PacketId::Ping => {
+                            dbg!("Received ping!");
+                            todo!("Update ping state and send pong");
+                        }
+                        PacketId::Pong => {
+                            dbg!("Received pong!");
+                            todo!("Won't really happen, just the server sends those");
+                        }
+                        PacketId::Noop => ()
+                    }
+                }
+
+                Ok(())
+            }
+        }
+    }
+
     // Produces a random String that is used to prevent browser caching.
     // TODO: Check if there is a more efficient way
     fn get_random_t() -> String {
@@ -130,6 +191,7 @@ impl TransportClient {
 #[cfg(test)]
 mod test {
     use crate::packet::PacketId;
+    use std::str;
 
     use super::*;
 
@@ -148,5 +210,11 @@ mod test {
             ))
             .await
             .unwrap();
+
+        socket.on_data = Arc::new(Some(Box::new(|data| {
+            println!("Received: {:?}", str::from_utf8(&data).unwrap());
+        })));
+ 
+        socket.poll().await.unwrap();
     }
 }

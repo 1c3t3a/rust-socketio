@@ -5,6 +5,8 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::str;
 
+
+/// Enumeration of the engineio Packet types.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum PacketId {
     Open = 0,
@@ -16,6 +18,7 @@ pub enum PacketId {
     Noop = 6,
 }
 
+/// An enumeration of all possible Errors in this context.
 #[derive(Debug)]
 pub enum Error {
     InvalidPacketId(u8),
@@ -30,10 +33,11 @@ pub enum Error {
     ActionBeforeOpen,
 }
 
-#[derive(Debug)]
+/// A packet send in the engineio protocol.
+#[derive(Debug, Clone)]
 pub struct Packet {
-    packet_id: PacketId,
-    data: Vec<u8>,
+    pub packet_id: PacketId,
+    pub data: Vec<u8>,
 }
 
 // see https://en.wikipedia.org/wiki/Delimiter#ASCII_delimited_text
@@ -88,6 +92,7 @@ impl Display for Error {
     }
 }
 
+/// Converts a byte into the corresponding packet id.
 fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
     match b as char {
         '0' => Ok(PacketId::Open),
@@ -102,6 +107,7 @@ fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
 }
 
 impl Packet {
+    /// Creates a new packet.
     pub fn new(packet_id: PacketId, data: Vec<u8>) -> Self {
         Packet { packet_id, data }
     }
