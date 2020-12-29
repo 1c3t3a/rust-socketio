@@ -23,6 +23,11 @@ pub enum Error {
     IncompletePacket,
     Utf8Error(str::Utf8Error),
     Base64Error(DecodeError),
+    InvalidUrl(String),
+    ReqwestError(reqwest::Error),
+    HttpError(u16),
+    HandshakeError(String),
+    ActionBeforeOpen,
 }
 
 #[derive(Debug)]
@@ -46,18 +51,39 @@ impl From<str::Utf8Error> for Error {
     }
 }
 
+impl From<reqwest::Error> for Error {
+    fn from(error: reqwest::Error) -> Self {
+        Error::ReqwestError(error)
+    }
+}
+
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match &self {
-            &Error::InvalidPacketId(id) => write!(f, "Invalid packet id: {}", id),
-            &Error::EmptyPacket => write!(f, "Error while parsing an empty packet"),
-            &Error::IncompletePacket => write!(f, "Error while parsing an incomplete packet"),
-            &Error::Utf8Error(e) => {
+            Error::InvalidPacketId(id) => write!(f, "Invalid packet id: {}", id),
+            Error::EmptyPacket => write!(f, "Error while parsing an empty packet"),
+            Error::IncompletePacket => write!(f, "Error while parsing an incomplete packet"),
+            Error::Utf8Error(e) => {
                 write!(f, "An error occured while decoding the utf-8 text: {}", e)
             }
-            &Error::Base64Error(e) => {
+            Error::Base64Error(e) => {
                 write!(f, "An error occured while encoding/decoding base64: {}", e)
             }
+            Error::InvalidUrl(url) => write!(f, "Unable to connect to: {}", url),
+            Error::ReqwestError(error) => {
+                write!(f, "Error during connection via Reqwest: {}", error)
+            }
+            Error::HandshakeError(response) => {
+                write!(f, "Got illegal handshake response: {}", response)
+            }
+            Error::ActionBeforeOpen => {
+                write!(f, "Called an action before the connection was established")
+            }
+            Error::HttpError(status_code) => write!(
+                f,
+                "Network request returned with status code: {}",
+                status_code
+            ),
         }
     }
 }
@@ -76,9 +102,13 @@ fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
 }
 
 impl Packet {
+    pub fn new(packet_id: PacketId, data: Vec<u8>) -> Self {
+        Packet { packet_id, data }
+    }
+
     // TODO: Maybe replace the Vec<u8> by a u8 array as this might be inefficient
     fn decode_packet(bytes: Vec<u8>) -> Result<Self, Error> {
-        if bytes.len() == 0 {
+        if bytes.is_empty() {
             return Err(Error::EmptyPacket);
         }
 
