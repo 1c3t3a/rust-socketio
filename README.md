@@ -7,4 +7,4 @@ Therefore it's necessary to implement the underlying engine.io protocol, which i
 protocol. All further information could be found here: https://socket.io/docs/v2/internals/index.html.
 
 Looking at the component chart, the following parts need to be implemented:
-![](docs/res/dependencies.pdf)
+![](docs/res/dependencies.jpg)
