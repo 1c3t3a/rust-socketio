@@ -1,4 +1,4 @@
-use crate::packet::{decode_payload, encode_payload, Error, Packet, PacketId};
+use crate::engineio::packet::{decode_payload, encode_payload, Error, Packet, PacketId};
 use crypto::{digest::Digest, sha1::Sha1};
 
 use rand::{thread_rng, Rng};
@@ -252,7 +252,7 @@ impl TransportClient {
 
 #[cfg(test)]
 mod test {
-    use crate::packet::PacketId;
+    use crate::engineio::packet::{Packet, PacketId};
 
     use super::*;
 

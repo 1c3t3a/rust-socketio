@@ -5,7 +5,6 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::str;
 
-
 /// Enumeration of the engineio Packet types.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum PacketId {
