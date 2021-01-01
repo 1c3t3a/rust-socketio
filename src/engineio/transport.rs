@@ -4,27 +4,23 @@ use crypto::{digest::Digest, sha1::Sha1};
 use rand::{thread_rng, Rng};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
-use std::{
-    sync::{atomic::AtomicBool, Arc, Mutex},
-    time::Instant,
-};
+use std::{sync::{atomic::AtomicBool, Arc, Mutex}, time::Instant};
 
 #[derive(Debug, Clone)]
 enum TransportType {
     Polling(Arc<Mutex<Client>>),
 }
 
-// do we might need a lock here? -> I would say yes, at least for message events
 type Callback<I> = Arc<Mutex<Option<Box<dyn Fn(I)>>>>;
 
 #[derive(Clone)]
-struct TransportClient {
+pub struct TransportClient {
     transport: TransportType,
-    on_error: Callback<String>,
-    on_open: Callback<()>,
-    on_close: Callback<()>,
-    on_data: Callback<Vec<u8>>,
-    on_packet: Callback<Packet>,
+    pub on_error: Callback<String>,
+    pub on_open: Callback<()>,
+    pub on_close: Callback<()>,
+    pub on_data: Callback<Vec<u8>>,
+    pub on_packet: Callback<Packet>,
     connected: Arc<AtomicBool>,
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
@@ -43,6 +39,7 @@ struct HandshakeData {
 }
 
 unsafe impl Send for TransportClient {}
+unsafe impl Sync for TransportClient {}
 
 impl TransportClient {
     pub fn new() -> Self {
@@ -59,6 +56,46 @@ impl TransportClient {
             host_address: Arc::new(Mutex::new(None)),
             connection_data: None,
         }
+    }
+
+    pub fn set_on_open<F>(&mut self, function: F)
+        where F: Fn(()) + 'static
+    {
+       let mut on_open = self.on_open.lock().unwrap();
+       *on_open = Some(Box::new(function));
+       drop(on_open);
+    }
+
+    pub fn set_on_error<F>(&mut self, function: F)
+        where F: Fn(String) + 'static
+    {
+       let mut on_error = self.on_error.lock().unwrap();
+       *on_error = Some(Box::new(function));
+       drop(on_error);
+    }
+
+    pub fn set_on_packet<F>(&mut self, function: F)
+        where F: Fn(Packet) + 'static
+    {
+       let mut on_packet = self.on_packet.lock().unwrap();
+       *on_packet = Some(Box::new(function));
+       drop(on_packet);
+    }
+
+    pub fn set_on_data<F>(&mut self, function: F)
+        where F: Fn(Vec<u8>) + 'static
+    {
+       let mut on_data = self.on_data.lock().unwrap();
+       *on_data = Some(Box::new(function));
+       drop(on_data);
+    }
+
+    pub fn set_on_close<F>(&mut self, function: F)
+        where F: Fn(()) + 'static
+    {
+       let mut on_close = self.on_close.lock().unwrap();
+       *on_close = Some(Box::new(function));
+       drop(on_close);
     }
 
     pub async fn open(&mut self, address: String) -> Result<(), Error> {
@@ -87,6 +124,7 @@ impl TransportClient {
 
                         let function = self.on_open.lock().unwrap();
                         if let Some(function) = function.as_ref() {
+                            println!("About to call");
                             function(());
                         }
                         drop(function);
@@ -113,13 +151,13 @@ impl TransportClient {
                     self.connection_data.as_ref().unwrap().sid
                 );
 
-                let host = self.host_address.lock().unwrap();
+                let host = self.host_address.lock().unwrap().clone();
                 let address =
                     Url::parse(&(host.as_ref().unwrap().to_owned() + query_path)[..]).unwrap();
                 drop(host);
 
                 let data = encode_payload(vec![packet]);
-                let client = client.lock().unwrap();
+                let client = client.lock().unwrap().clone();
                 let status = client
                     .post(address)
                     .body(data)
@@ -137,11 +175,10 @@ impl TransportClient {
         }
     }
 
-    async fn poll_cycle(&mut self) -> Result<(), Error> {
+    pub async fn poll_cycle(&mut self) -> Result<(), Error> {
         if !self.connected.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
         }
-        println!("Here");
 
         while self.connected.load(std::sync::atomic::Ordering::Relaxed) {
             match &mut self.transport {
@@ -152,25 +189,25 @@ impl TransportClient {
                         self.connection_data.as_ref().unwrap().sid
                     );
 
-                    let host = self.host_address.lock().unwrap();
+                    let host = self.host_address.lock().unwrap().clone();
                     let address =
                         Url::parse(&(host.as_ref().unwrap().to_owned() + query_path)[..]).unwrap();
                     drop(host);
 
-                    let client = client.lock().unwrap();
+                    let client = client.lock().unwrap().clone();
                     // TODO: check if to_vec is inefficient here
-                    let response = client.get(address).send().await?.bytes().await?.to_vec();
+                    let response = dbg!(client.get(address).send().await?.bytes().await?.to_vec());
                     drop(client);
                     let packets = decode_payload(response)?;
 
                     for packet in packets {
-                        let on_packet = self.on_packet.lock().unwrap();
+                        /*let on_packet = self.on_packet.lock().unwrap();
                         // call the packet callback
                         // TODO: execute this in a new thread
                         if let Some(function) = on_packet.as_ref() {
                             function(packet.clone());
                         }
-                        drop(on_packet);
+                        drop(on_packet);*/
 
                         // check for the appropiate action or callback
                         match packet.packet_id {
@@ -178,7 +215,10 @@ impl TransportClient {
                                 let on_data = self.on_data.lock().unwrap();
                                 // TODO: execute this in a new thread
                                 if let Some(function) = on_data.as_ref() {
+                                    dbg!("Executing on data");
                                     function(packet.data);
+                                } else {
+                                    dbg!("No on data");
                                 }
                                 drop(on_data);
                             }
@@ -205,8 +245,8 @@ impl TransportClient {
                             PacketId::Ping => {
                                 dbg!("Received ping!");
 
-                                let mut last_ping = self.last_ping.lock().unwrap();
-                                *last_ping = Instant::now();
+                                let mut last_ping = self.last_ping.lock().unwrap().clone();
+                                last_ping = Instant::now();
                                 drop(last_ping);
 
                                 self.emit(Packet::new(PacketId::Pong, Vec::new())).await?;
@@ -223,7 +263,7 @@ impl TransportClient {
                         }
                     }
 
-                    let last_pong = self.last_pong.lock().unwrap();
+                    let last_pong = self.last_pong.lock().unwrap().clone();
                     let is_server_inactive = last_pong.elapsed().as_millis()
                         > self.connection_data.as_ref().unwrap().ping_timeout as u128;
                     drop(last_pong);
