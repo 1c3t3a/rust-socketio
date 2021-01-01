@@ -44,7 +44,7 @@ impl Socket {
 
     pub fn on_open<F>(&mut self, function: F) -> Result<(), Error>
     where
-        F: Fn(()) + 'static,
+        F: Fn(()) + 'static + Sync,
     {
         if self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
@@ -55,7 +55,7 @@ impl Socket {
 
     pub fn on_close<F>(&mut self, function: F) -> Result<(), Error>
     where
-        F: Fn(()) + 'static,
+        F: Fn(()) + 'static + Sync,
     {
         if self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
@@ -69,7 +69,7 @@ impl Socket {
 
     pub fn on_packet<F>(&mut self, function: F) -> Result<(), Error>
     where
-        F: Fn(Packet) + 'static,
+        F: Fn(Packet) + 'static + Sync,
     {
         if self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
@@ -83,7 +83,7 @@ impl Socket {
 
     pub fn on_data<F>(&mut self, function: F) -> Result<(), Error>
     where
-        F: Fn(Vec<u8>) + 'static,
+        F: Fn(Vec<u8>) + 'static + Sync,
     {
         if self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
@@ -94,7 +94,7 @@ impl Socket {
 
     pub fn on_error<F>(&mut self, function: F) -> Result<(), Error>
     where
-        F: Fn(String) + 'static,
+        F: Fn(String) + 'static + Sync,
     {
         if self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);

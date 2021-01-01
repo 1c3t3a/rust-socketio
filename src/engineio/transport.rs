@@ -1,6 +1,6 @@
 use crate::engineio::packet::{decode_payload, encode_payload, Error, Packet, PacketId};
 use crypto::{digest::Digest, sha1::Sha1};
-
+use crossbeam_utils::thread;
 use rand::{thread_rng, Rng};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ enum TransportType {
     Polling(Arc<Mutex<Client>>),
 }
 
-type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I)>>>>;
+type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync>>>>;
 
 #[derive(Clone)]
 pub struct TransportClient {
@@ -63,7 +63,7 @@ impl TransportClient {
 
     pub fn set_on_open<F>(&mut self, function: F)
     where
-        F: Fn(()) + 'static,
+        F: Fn(()) + 'static + Sync,
     {
         let mut on_open = self.on_open.write().unwrap();
         *on_open = Some(Box::new(function));
@@ -72,7 +72,7 @@ impl TransportClient {
 
     pub fn set_on_error<F>(&mut self, function: F)
     where
-        F: Fn(String) + 'static,
+        F: Fn(String) + 'static + Sync,
     {
         let mut on_error = self.on_error.write().unwrap();
         *on_error = Some(Box::new(function));
@@ -81,7 +81,7 @@ impl TransportClient {
 
     pub fn set_on_packet<F>(&mut self, function: F)
     where
-        F: Fn(Packet) + 'static,
+        F: Fn(Packet) + 'static + Sync,
     {
         let mut on_packet = self.on_packet.write().unwrap();
         *on_packet = Some(Box::new(function));
@@ -90,7 +90,7 @@ impl TransportClient {
 
     pub fn set_on_data<F>(&mut self, function: F)
     where
-        F: Fn(Vec<u8>) + 'static,
+        F: Fn(Vec<u8>) + 'static + Sync,
     {
         let mut on_data = self.on_data.write().unwrap();
         *on_data = Some(Box::new(function));
@@ -99,7 +99,7 @@ impl TransportClient {
 
     pub fn set_on_close<F>(&mut self, function: F)
     where
-        F: Fn(()) + 'static,
+        F: Fn(()) + 'static + Sync,
     {
         let mut on_close = self.on_close.write().unwrap();
         *on_close = Some(Box::new(function));
@@ -137,7 +137,11 @@ impl TransportClient {
 
                         let function = self.on_open.read().unwrap();
                         if let Some(function) = function.as_ref() {
-                            function(());
+                            thread::scope(|s| {
+                                s.spawn(|_| {
+                                    function(());
+                                });
+                            }).unwrap();
                         }
                         drop(function);
 
@@ -220,28 +224,37 @@ impl TransportClient {
                         {
                             let on_packet = self.on_packet.read().unwrap();
                             // call the packet callback
-                            // TODO: execute this in a new thread
                             if let Some(function) = on_packet.as_ref() {
-                                function(packet.clone());
+                                thread::scope(|s| {
+                                    s.spawn(|_| {
+                                        function(packet.clone());
+                                    });
+                                }).unwrap();
                             }
                         }
                         // check for the appropiate action or callback
                         match packet.packet_id {
                             PacketId::Message => {
                                 let on_data = self.on_data.read().unwrap();
-                                // TODO: execute this in a new thread
                                 if let Some(function) = on_data.as_ref() {
-                                    function(packet.data);
+                                    thread::scope(|s| {
+                                        s.spawn(|_| {
+                                            function(packet.data);
+                                        });
+                                    }).unwrap();
                                 }
                                 drop(on_data);
                             }
 
                             PacketId::Close => {
                                 dbg!("Received close!");
-                                // TODO: set close to false
                                 let on_close = self.on_close.read().unwrap();
                                 if let Some(function) = on_close.as_ref() {
-                                    function(());
+                                    thread::scope(|s| {
+                                        s.spawn(|_| {
+                                            function(());
+                                        });
+                                    }).unwrap();
                                 }
                                 drop(on_close);
                                 break;

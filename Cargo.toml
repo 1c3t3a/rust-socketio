@@ -8,6 +8,7 @@ edition = "2018"
 base64 = "0.13.0"
 url = "2.2.0"
 rand = "0.7.3"
+crossbeam-utils = "0.8.1"
 reqwest = "0.10.10"
 tokio = { version = "0.2", features = ["full"] }
 rust-crypto = "0.2.36"
