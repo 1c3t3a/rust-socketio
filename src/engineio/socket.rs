@@ -163,28 +163,21 @@ mod test {
             .unwrap();
 
         socket
-            .emit(Packet::new(
-                PacketId::Pong,
-                Vec::new(),
-            ))
+            .emit(Packet::new(PacketId::Pong, Vec::new()))
             .await
             .unwrap();
 
-            socket
-            .emit(Packet::new(
-                PacketId::Ping,
-                Vec::new(),
-            ))
+        socket
+            .emit(Packet::new(PacketId::Ping, Vec::new()))
             .await
             .unwrap();
 
-
-        std::thread::sleep(Duration::from_secs(26));
+        tokio::time::delay_for(Duration::from_secs(26)).await;
 
         socket
             .emit(Packet::new(
                 PacketId::Message,
-                "Hello World2".to_string().into_bytes(),
+                "Hello World3".to_string().into_bytes(),
             ))
             .await
             .unwrap();

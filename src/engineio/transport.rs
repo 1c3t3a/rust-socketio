@@ -4,7 +4,10 @@ use crypto::{digest::Digest, sha1::Sha1};
 use rand::{thread_rng, Rng};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
-use std::{sync::{Arc, Mutex, RwLock, atomic::AtomicBool, mpsc::{Receiver, channel}}, time::Instant};
+use std::{
+    sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
+    time::Instant,
+};
 
 #[derive(Debug, Clone)]
 enum TransportType {
@@ -120,9 +123,14 @@ impl TransportClient {
                 if let Ok(full_address) = Url::parse(&(address.clone() + query_path)[..]) {
                     self.host_address = Arc::new(Mutex::new(Some(address)));
 
-                    let client = client.lock().unwrap();
-                    let response = client.get(full_address).send().await?.text().await?;
-                    drop(client);
+                    let response = client
+                        .lock()
+                        .unwrap()
+                        .get(full_address)
+                        .send()
+                        .await?
+                        .text()
+                        .await?;
 
                     if let Ok(connection_data) = serde_json::from_str(&response[1..]) {
                         self.connection_data = dbg!(connection_data);
@@ -186,10 +194,13 @@ impl TransportClient {
         if !self.connected.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
         }
+        let client = Client::new();
 
         while self.connected.load(std::sync::atomic::Ordering::Relaxed) {
             match &self.transport {
-                TransportType::Polling(client) => {
+                // we wont't use the shared client as this blocks the ressource
+                // in the long polling requests
+                TransportType::Polling(_) => {
                     let query_path = &format!(
                         "/engine.io/?EIO=4&transport=polling&t={}&sid={}",
                         TransportClient::get_random_t(),
@@ -201,10 +212,8 @@ impl TransportClient {
                         Url::parse(&(host.as_ref().unwrap().to_owned() + query_path)[..]).unwrap();
                     drop(host);
 
-                    let client = client.lock().unwrap().clone();
                     // TODO: check if to_vec is inefficient here
                     let response = client.get(address).send().await?.bytes().await?.to_vec();
-                    drop(client);
                     let packets = decode_payload(response)?;
 
                     for packet in packets {
@@ -257,6 +266,8 @@ impl TransportClient {
                             PacketId::Noop => (),
                         }
                     }
+
+                    // TODO: check if server is still available
                 }
             }
         }
