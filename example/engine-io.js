@@ -13,6 +13,14 @@ server.on('connection', socket => {
         console.log(message.toString());
     });
 
+    socket.on('ping', () => {
+        console.log("Ping");
+    });
+
+    socket.on('pong', () => {
+        console.log("Pong");
+    });
+
     socket.on('error', message => {
         console.log(message.toString());
     });

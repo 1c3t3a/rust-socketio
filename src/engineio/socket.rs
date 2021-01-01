@@ -1,96 +1,192 @@
+use super::packet::{Error, Packet};
 use crate::engineio::transport::TransportClient;
-use std::sync::Arc;
-use tokio::runtime::Handle;
-use super::{packet::{Error, Packet}, transport};
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, RwLock,
+};
 
 #[derive(Clone)]
 struct Socket {
-    transport_client: Arc<TransportClient>,
+    transport_client: Arc<RwLock<TransportClient>>,
+    serving: Arc<AtomicBool>,
 }
 
 impl Socket {
-    async fn new(address: String) -> Self {
-        let mut transport_client = Arc::new(TransportClient::new());
+    pub fn new() -> Self {
+        Socket {
+            transport_client: Arc::new(RwLock::new(TransportClient::new())),
+            serving: Arc::new(AtomicBool::default()),
+        }
+    }
 
-        Arc::get_mut(&mut transport_client).unwrap().open(address).await.unwrap();
-        
-        let handle = Handle::current();
+    pub async fn bind(&mut self, address: String) {
+        self.transport_client
+            .write()
+            .unwrap()
+            .open(address)
+            .await
+            .expect("Error while opening connection");
 
-        let mut cl = Arc::clone(&transport_client);
+        let cl = Arc::clone(&self.transport_client);
         tokio::spawn(async move {
-            println!("Polling");
-            Arc::get_mut(&mut cl).unwrap().poll_cycle().await.unwrap();
+            let s = cl.read().unwrap().clone();
+            s.poll_cycle().await.unwrap();
         });
-
-        Socket { transport_client }
+        self.serving.swap(true, Ordering::SeqCst);
     }
 
     pub async fn emit(&mut self, packet: Packet) -> Result<(), Error> {
-        Arc::get_mut(&mut self.transport_client).unwrap().emit(packet).await
+        if !self.serving.load(Ordering::Relaxed) {
+            return Err(Error::ActionBeforeOpen);
+        }
+        self.transport_client.read().unwrap().emit(packet).await
     }
 
-    pub fn on_open<F>(&mut self, function: F)
+    pub fn on_open<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(()) + 'static,
     {
-        Arc::get_mut(&mut self.transport_client).unwrap().set_on_open(function);
+        if self.serving.load(Ordering::Relaxed) {
+            return Err(Error::ActionBeforeOpen);
+        }
+        self.transport_client.write().unwrap().set_on_open(function);
+        Ok(())
     }
 
-    pub fn on_close<F>(&mut self, function: F)
+    pub fn on_close<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(()) + 'static,
     {
-        Arc::get_mut(&mut self.transport_client).unwrap().set_on_close(function);
+        if self.serving.load(Ordering::Relaxed) {
+            return Err(Error::ActionBeforeOpen);
+        }
+        self.transport_client
+            .write()
+            .unwrap()
+            .set_on_close(function);
+        Ok(())
     }
 
-    pub fn on_packet<F>(&mut self, function: F)
+    pub fn on_packet<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(Packet) + 'static,
     {
-        Arc::get_mut(&mut self.transport_client).unwrap().set_on_packet(function);
+        if self.serving.load(Ordering::Relaxed) {
+            return Err(Error::ActionBeforeOpen);
+        }
+        self.transport_client
+            .write()
+            .unwrap()
+            .set_on_packet(function);
+        Ok(())
     }
 
-    pub fn on_data<F>(&mut self, function: F)
+    pub fn on_data<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(Vec<u8>) + 'static,
     {
-        Arc::get_mut(&mut self.transport_client).unwrap().set_on_data(function);
+        if self.serving.load(Ordering::Relaxed) {
+            return Err(Error::ActionBeforeOpen);
+        }
+        self.transport_client.write().unwrap().set_on_data(function);
+        Ok(())
     }
 
-    pub fn on_error<F>(&mut self, function: F)
+    pub fn on_error<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(String) + 'static,
     {
-        Arc::get_mut(&mut self.transport_client).unwrap().set_on_error(function);
+        if self.serving.load(Ordering::Relaxed) {
+            return Err(Error::ActionBeforeOpen);
+        }
+        self.transport_client
+            .write()
+            .unwrap()
+            .set_on_error(function);
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod test {
+
+    use std::time::Duration;
+
     use crate::engineio::packet::PacketId;
 
     use super::*;
 
     #[actix_rt::test]
     async fn test_basic_connection() {
-        let mut socket = Socket::new(String::from("http://localhost:4200")).await;
+        let mut socket = Socket::new();
 
-        println!("Started!");
-        /**socket.on_open(|_| {
-            println!("Connected!");
-        });
+        socket
+            .on_open(|_| {
+                println!("Open event!");
+            })
+            .unwrap();
 
-        socket.on_packet(|packet| {
-            println!("Received packet: {:?}", packet);
-        });
+        socket
+            .on_close(|_| {
+                println!("Close event!");
+            })
+            .unwrap();
 
-        socket.on_data(|data| {
-            println!("Received data: {}", std::str::from_utf8(&data).unwrap());
-        });*/
-        socket.emit(Packet::new(
-            PacketId::Message,
-            "Hello World".to_string().into_bytes(),
-        )).await.unwrap();
+        socket
+            .on_packet(|packet| {
+                println!("Received packet: {:?}", packet);
+            })
+            .unwrap();
+
+        socket
+            .on_data(|data| {
+                println!("Received packet: {:?}", std::str::from_utf8(&data));
+            })
+            .unwrap();
+
+        socket.bind(String::from("http://localhost:4200")).await;
+
+        socket
+            .emit(Packet::new(
+                PacketId::Message,
+                "Hello World".to_string().into_bytes(),
+            ))
+            .await
+            .unwrap();
+
+        socket
+            .emit(Packet::new(
+                PacketId::Message,
+                "Hello World2".to_string().into_bytes(),
+            ))
+            .await
+            .unwrap();
+
+        socket
+            .emit(Packet::new(
+                PacketId::Pong,
+                Vec::new(),
+            ))
+            .await
+            .unwrap();
+
+            socket
+            .emit(Packet::new(
+                PacketId::Ping,
+                Vec::new(),
+            ))
+            .await
+            .unwrap();
+
+
+        std::thread::sleep(Duration::from_secs(26));
+
+        socket
+            .emit(Packet::new(
+                PacketId::Message,
+                "Hello World2".to_string().into_bytes(),
+            ))
+            .await
+            .unwrap();
     }
 }

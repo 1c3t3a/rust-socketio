@@ -4,14 +4,14 @@ use crypto::{digest::Digest, sha1::Sha1};
 use rand::{thread_rng, Rng};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
-use std::{sync::{atomic::AtomicBool, Arc, Mutex}, time::Instant};
+use std::{sync::{Arc, Mutex, RwLock, atomic::AtomicBool, mpsc::{Receiver, channel}}, time::Instant};
 
 #[derive(Debug, Clone)]
 enum TransportType {
     Polling(Arc<Mutex<Client>>),
 }
 
-type Callback<I> = Arc<Mutex<Option<Box<dyn Fn(I)>>>>;
+type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I)>>>>;
 
 #[derive(Clone)]
 pub struct TransportClient {
@@ -45,11 +45,11 @@ impl TransportClient {
     pub fn new() -> Self {
         TransportClient {
             transport: TransportType::Polling(Arc::new(Mutex::new(Client::new()))),
-            on_error: Arc::new(Mutex::new(None)),
-            on_open: Arc::new(Mutex::new(None)),
-            on_close: Arc::new(Mutex::new(None)),
-            on_data: Arc::new(Mutex::new(None)),
-            on_packet: Arc::new(Mutex::new(None)),
+            on_error: Arc::new(RwLock::new(None)),
+            on_open: Arc::new(RwLock::new(None)),
+            on_close: Arc::new(RwLock::new(None)),
+            on_data: Arc::new(RwLock::new(None)),
+            on_packet: Arc::new(RwLock::new(None)),
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
@@ -59,43 +59,48 @@ impl TransportClient {
     }
 
     pub fn set_on_open<F>(&mut self, function: F)
-        where F: Fn(()) + 'static
+    where
+        F: Fn(()) + 'static,
     {
-       let mut on_open = self.on_open.lock().unwrap();
-       *on_open = Some(Box::new(function));
-       drop(on_open);
+        let mut on_open = self.on_open.write().unwrap();
+        *on_open = Some(Box::new(function));
+        drop(on_open);
     }
 
     pub fn set_on_error<F>(&mut self, function: F)
-        where F: Fn(String) + 'static
+    where
+        F: Fn(String) + 'static,
     {
-       let mut on_error = self.on_error.lock().unwrap();
-       *on_error = Some(Box::new(function));
-       drop(on_error);
+        let mut on_error = self.on_error.write().unwrap();
+        *on_error = Some(Box::new(function));
+        drop(on_error);
     }
 
     pub fn set_on_packet<F>(&mut self, function: F)
-        where F: Fn(Packet) + 'static
+    where
+        F: Fn(Packet) + 'static,
     {
-       let mut on_packet = self.on_packet.lock().unwrap();
-       *on_packet = Some(Box::new(function));
-       drop(on_packet);
+        let mut on_packet = self.on_packet.write().unwrap();
+        *on_packet = Some(Box::new(function));
+        drop(on_packet);
     }
 
     pub fn set_on_data<F>(&mut self, function: F)
-        where F: Fn(Vec<u8>) + 'static
+    where
+        F: Fn(Vec<u8>) + 'static,
     {
-       let mut on_data = self.on_data.lock().unwrap();
-       *on_data = Some(Box::new(function));
-       drop(on_data);
+        let mut on_data = self.on_data.write().unwrap();
+        *on_data = Some(Box::new(function));
+        drop(on_data);
     }
 
     pub fn set_on_close<F>(&mut self, function: F)
-        where F: Fn(()) + 'static
+    where
+        F: Fn(()) + 'static,
     {
-       let mut on_close = self.on_close.lock().unwrap();
-       *on_close = Some(Box::new(function));
-       drop(on_close);
+        let mut on_close = self.on_close.write().unwrap();
+        *on_close = Some(Box::new(function));
+        drop(on_close);
     }
 
     pub async fn open(&mut self, address: String) -> Result<(), Error> {
@@ -122,14 +127,15 @@ impl TransportClient {
                     if let Ok(connection_data) = serde_json::from_str(&response[1..]) {
                         self.connection_data = dbg!(connection_data);
 
-                        let function = self.on_open.lock().unwrap();
+                        let function = self.on_open.read().unwrap();
                         if let Some(function) = function.as_ref() {
-                            println!("About to call");
                             function(());
                         }
                         drop(function);
 
                         *Arc::get_mut(&mut self.connected).unwrap() = AtomicBool::from(true);
+                        self.emit(Packet::new(PacketId::Pong, Vec::new())).await?;
+
                         return Ok(());
                     }
                     return Err(Error::HandshakeError(response));
@@ -139,11 +145,11 @@ impl TransportClient {
         }
     }
 
-    pub async fn emit(&mut self, packet: Packet) -> Result<(), Error> {
+    pub async fn emit(&self, packet: Packet) -> Result<(), Error> {
         if !self.connected.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
         }
-        match &mut self.transport {
+        match &self.transport {
             TransportType::Polling(client) => {
                 let query_path = &format!(
                     "/engine.io/?EIO=4&transport=polling&t={}&sid={}",
@@ -166,6 +172,7 @@ impl TransportClient {
                     .status()
                     .as_u16();
                 drop(client);
+
                 if status != 200 {
                     return Err(Error::HttpError(status));
                 }
@@ -175,13 +182,13 @@ impl TransportClient {
         }
     }
 
-    pub async fn poll_cycle(&mut self) -> Result<(), Error> {
+    pub async fn poll_cycle(&self) -> Result<(), Error> {
         if !self.connected.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
         }
 
         while self.connected.load(std::sync::atomic::Ordering::Relaxed) {
-            match &mut self.transport {
+            match &self.transport {
                 TransportType::Polling(client) => {
                     let query_path = &format!(
                         "/engine.io/?EIO=4&transport=polling&t={}&sid={}",
@@ -196,42 +203,39 @@ impl TransportClient {
 
                     let client = client.lock().unwrap().clone();
                     // TODO: check if to_vec is inefficient here
-                    let response = dbg!(client.get(address).send().await?.bytes().await?.to_vec());
+                    let response = client.get(address).send().await?.bytes().await?.to_vec();
                     drop(client);
                     let packets = decode_payload(response)?;
 
                     for packet in packets {
-                        /*let on_packet = self.on_packet.lock().unwrap();
-                        // call the packet callback
-                        // TODO: execute this in a new thread
-                        if let Some(function) = on_packet.as_ref() {
-                            function(packet.clone());
+                        {
+                            let on_packet = self.on_packet.read().unwrap();
+                            // call the packet callback
+                            // TODO: execute this in a new thread
+                            if let Some(function) = on_packet.as_ref() {
+                                function(packet.clone());
+                            }
                         }
-                        drop(on_packet);*/
-
                         // check for the appropiate action or callback
                         match packet.packet_id {
                             PacketId::Message => {
-                                let on_data = self.on_data.lock().unwrap();
+                                let on_data = self.on_data.read().unwrap();
                                 // TODO: execute this in a new thread
                                 if let Some(function) = on_data.as_ref() {
-                                    dbg!("Executing on data");
                                     function(packet.data);
-                                } else {
-                                    dbg!("No on data");
                                 }
                                 drop(on_data);
                             }
 
                             PacketId::Close => {
                                 dbg!("Received close!");
-                                *Arc::get_mut(&mut self.connected).unwrap() =
-                                    AtomicBool::from(false);
-                                let on_close = self.on_close.lock().unwrap();
+                                // TODO: set close to false
+                                let on_close = self.on_close.read().unwrap();
                                 if let Some(function) = on_close.as_ref() {
                                     function(());
                                 }
                                 drop(on_close);
+                                break;
                             }
                             PacketId::Open => {
                                 // this will never happen as the client connects to the server and the open packet
@@ -244,16 +248,7 @@ impl TransportClient {
                             }
                             PacketId::Ping => {
                                 dbg!("Received ping!");
-
-                                let mut last_ping = self.last_ping.lock().unwrap().clone();
-                                last_ping = Instant::now();
-                                drop(last_ping);
-
                                 self.emit(Packet::new(PacketId::Pong, Vec::new())).await?;
-
-                                let mut last_pong = self.last_pong.lock().unwrap();
-                                *last_pong = Instant::now();
-                                drop(last_pong);
                             }
                             PacketId::Pong => {
                                 // this will never happen as the pong packet is only sent by the client
@@ -261,17 +256,6 @@ impl TransportClient {
                             }
                             PacketId::Noop => (),
                         }
-                    }
-
-                    let last_pong = self.last_pong.lock().unwrap().clone();
-                    let is_server_inactive = last_pong.elapsed().as_millis()
-                        > self.connection_data.as_ref().unwrap().ping_timeout as u128;
-                    drop(last_pong);
-
-                    if is_server_inactive {
-                        // server is unresponsive, send close packet and close connection
-                        self.emit(Packet::new(PacketId::Close, Vec::new())).await?;
-                        *Arc::get_mut(&mut self.connected).unwrap() = AtomicBool::from(false);
                     }
                 }
             }
@@ -312,7 +296,7 @@ mod test {
             .await
             .unwrap();
 
-        socket.on_data = Arc::new(Mutex::new(Some(Box::new(|data| {
+        socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
             println!("Received: {:?}", std::str::from_utf8(&data).unwrap());
         }))));
 

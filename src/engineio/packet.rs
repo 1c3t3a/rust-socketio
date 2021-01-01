@@ -126,7 +126,7 @@ impl Packet {
             u8_to_packet_id(bytes[0])?
         };
 
-        if bytes.len() == 1 {
+        if bytes.len() == 1 && packet_id == PacketId::Message {
             return Err(Error::IncompletePacket);
         }
 
