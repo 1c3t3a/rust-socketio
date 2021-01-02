@@ -222,8 +222,8 @@ impl TransportClient {
         }
     }
 
-    /// Performs the server long polling procedure as long as the client is connected or the server
-    /// timed. This should run seperately at all time to ensure proper response handling from the server.
+    /// Performs the server long polling procedure as long as the client is connected.
+    /// This should run seperately at all time to ensure proper response handling from the server.
     pub async fn poll_cycle(&self) -> Result<(), Error> {
         if !self.connected.load(std::sync::atomic::Ordering::Relaxed) {
             let error = Error::ActionBeforeOpen;
