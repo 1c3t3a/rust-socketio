@@ -1,12 +1,12 @@
 use crate::engineio::packet::{decode_payload, encode_payload, Error, Packet, PacketId};
-use crypto::{digest::Digest, sha1::Sha1};
 use crossbeam_utils::thread;
+use crypto::{digest::Digest, sha1::Sha1};
 use rand::{thread_rng, Rng};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use std::{
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 #[derive(Debug, Clone)]
@@ -28,7 +28,7 @@ pub struct TransportClient {
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     host_address: Arc<Mutex<Option<String>>>,
-    connection_data: Option<HandshakeData>,
+    connection_data: Arc<Option<HandshakeData>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -36,9 +36,20 @@ struct HandshakeData {
     sid: String,
     upgrades: Vec<String>,
     #[serde(rename = "pingInterval")]
-    ping_interval: i32,
+    ping_interval: u64,
     #[serde(rename = "pingTimeout")]
-    ping_timeout: i32,
+    ping_timeout: u64,
+}
+
+/// A small macro that spawns a scoped thread.
+/// Used for calling the callback functions.
+macro_rules! spawn_scoped {
+    ($e:expr) => {
+        thread::scope(|s| {
+            s.spawn(|_| $e);
+        })
+        .unwrap();
+    };
 }
 
 unsafe impl Send for TransportClient {}
@@ -57,7 +68,7 @@ impl TransportClient {
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
             host_address: Arc::new(Mutex::new(None)),
-            connection_data: None,
+            connection_data: Arc::new(None),
         }
     }
 
@@ -106,6 +117,7 @@ impl TransportClient {
         drop(on_close);
     }
 
+    /// Opens the connection to a certain server
     pub async fn open(&mut self, address: String) -> Result<(), Error> {
         // TODO: Check if Relaxed is appropiate -> change all occurences if not
         if self.connected.load(std::sync::atomic::Ordering::Relaxed) {
@@ -132,48 +144,62 @@ impl TransportClient {
                         .text()
                         .await?;
 
-                    if let Ok(connection_data) = serde_json::from_str(&response[1..]) {
-                        self.connection_data = dbg!(connection_data);
+                    // the response contains the handshake data
+                    if let Ok(conn_data) = serde_json::from_str(&response[1..]) {
+                        self.connection_data = dbg!(Arc::new(conn_data));
 
+                        // call the on_open callback
                         let function = self.on_open.read().unwrap();
                         if let Some(function) = function.as_ref() {
-                            thread::scope(|s| {
-                                s.spawn(|_| {
-                                    function(());
-                                });
-                            }).unwrap();
+                            spawn_scoped!(function(()));
                         }
                         drop(function);
 
+                        // set the last ping to now and set the connected state
+                        *self.last_ping.lock().unwrap() = Instant::now();
                         *Arc::get_mut(&mut self.connected).unwrap() = AtomicBool::from(true);
+
+                        // emit a pong packet to keep trigger the ping cycle on the server
                         self.emit(Packet::new(PacketId::Pong, Vec::new())).await?;
 
                         return Ok(());
                     }
-                    return Err(Error::HandshakeError(response));
+
+                    let error = Error::HandshakeError(response);
+                    self.call_error_callback(format!("{}", error));
+                    return Err(error);
                 }
-                return Err(Error::InvalidUrl(address));
+
+                let error = Error::InvalidUrl(address);
+                self.call_error_callback(format!("{}", error));
+                return Err(error);
             }
         }
     }
 
+    /// Sends a packet to the server
     pub async fn emit(&self, packet: Packet) -> Result<(), Error> {
         if !self.connected.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(Error::ActionBeforeOpen);
+            let error = Error::ActionBeforeOpen;
+            self.call_error_callback(format!("{}", error));
+            return Err(error);
         }
+
         match &self.transport {
             TransportType::Polling(client) => {
                 let query_path = &format!(
                     "/engine.io/?EIO=4&transport=polling&t={}&sid={}",
                     TransportClient::get_random_t(),
-                    self.connection_data.as_ref().unwrap().sid
+                    Arc::as_ref(&self.connection_data).as_ref().unwrap().sid
                 );
 
+                // build the target address
                 let host = self.host_address.lock().unwrap().clone();
                 let address =
                     Url::parse(&(host.as_ref().unwrap().to_owned() + query_path)[..]).unwrap();
                 drop(host);
 
+                // send a post request with the encoded payload as body
                 let data = encode_payload(vec![packet]);
                 let client = client.lock().unwrap().clone();
                 let status = client
@@ -186,7 +212,9 @@ impl TransportClient {
                 drop(client);
 
                 if status != 200 {
-                    return Err(Error::HttpError(status));
+                    let error = Error::HttpError(status);
+                    self.call_error_callback(format!("{}", error));
+                    return Err(error);
                 }
 
                 Ok(())
@@ -194,11 +222,29 @@ impl TransportClient {
         }
     }
 
+    /// Performs the server long polling procedure as long as the client is connected or the server
+    /// timed. This should run seperately at all time to ensure proper response handling from the server.
     pub async fn poll_cycle(&self) -> Result<(), Error> {
         if !self.connected.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(Error::ActionBeforeOpen);
+            let error = Error::ActionBeforeOpen;
+            self.call_error_callback(format!("{}", error));
+            return Err(error);
         }
         let client = Client::new();
+
+        // as we don't have a mut self, the last_ping needs to be safed for later
+        let mut last_ping = self.last_ping.clone().lock().unwrap().clone();
+        // the time after we assume the server to be timed out
+        let server_timeout = Duration::from_millis(
+            Arc::as_ref(&self.connection_data)
+                .as_ref()
+                .unwrap()
+                .ping_timeout
+                + Arc::as_ref(&self.connection_data)
+                    .as_ref()
+                    .unwrap()
+                    .ping_interval,
+        );
 
         while self.connected.load(std::sync::atomic::Ordering::Relaxed) {
             match &self.transport {
@@ -208,7 +254,7 @@ impl TransportClient {
                     let query_path = &format!(
                         "/engine.io/?EIO=4&transport=polling&t={}&sid={}",
                         TransportClient::get_random_t(),
-                        self.connection_data.as_ref().unwrap().sid
+                        Arc::as_ref(&self.connection_data).as_ref().unwrap().sid
                     );
 
                     let host = self.host_address.lock().unwrap().clone();
@@ -225,11 +271,7 @@ impl TransportClient {
                             let on_packet = self.on_packet.read().unwrap();
                             // call the packet callback
                             if let Some(function) = on_packet.as_ref() {
-                                thread::scope(|s| {
-                                    s.spawn(|_| {
-                                        function(packet.clone());
-                                    });
-                                }).unwrap();
+                                spawn_scoped!(function(packet.clone()));
                             }
                         }
                         // check for the appropiate action or callback
@@ -237,11 +279,7 @@ impl TransportClient {
                             PacketId::Message => {
                                 let on_data = self.on_data.read().unwrap();
                                 if let Some(function) = on_data.as_ref() {
-                                    thread::scope(|s| {
-                                        s.spawn(|_| {
-                                            function(packet.data);
-                                        });
-                                    }).unwrap();
+                                    spawn_scoped!(function(packet.data));
                                 }
                                 drop(on_data);
                             }
@@ -250,11 +288,7 @@ impl TransportClient {
                                 dbg!("Received close!");
                                 let on_close = self.on_close.read().unwrap();
                                 if let Some(function) = on_close.as_ref() {
-                                    thread::scope(|s| {
-                                        s.spawn(|_| {
-                                            function(());
-                                        });
-                                    }).unwrap();
+                                    spawn_scoped!(function(()));
                                 }
                                 drop(on_close);
                                 break;
@@ -270,6 +304,7 @@ impl TransportClient {
                             }
                             PacketId::Ping => {
                                 dbg!("Received ping!");
+                                last_ping = Instant::now();
                                 self.emit(Packet::new(PacketId::Pong, Vec::new())).await?;
                             }
                             PacketId::Pong => {
@@ -280,14 +315,18 @@ impl TransportClient {
                         }
                     }
 
-                    // TODO: check if server is still available
+                    if server_timeout < last_ping.elapsed() {
+                        // the server is unreachable
+                        // TODO: Inform the others about the stop (maybe through a channel)
+                        break;
+                    }
                 }
             }
         }
         return Ok(());
     }
 
-    // Produces a random String that is used to prevent browser caching.
+    /// Produces a random String that is used to prevent browser caching.
     // TODO: Check if there is a more efficient way
     fn get_random_t() -> String {
         let mut hasher = Sha1::new();
@@ -295,6 +334,15 @@ impl TransportClient {
         let arr: [u8; 32] = rng.gen();
         hasher.input(&arr);
         hasher.result_str()
+    }
+
+    /// Calls the error callback with a given message.
+    fn call_error_callback(&self, text: String) {
+        let function = self.on_error.read().unwrap();
+        if let Some(function) = function.as_ref() {
+            spawn_scoped!(function(text));
+        }
+        drop(function);
     }
 }
 

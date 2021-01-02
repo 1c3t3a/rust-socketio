@@ -5,6 +5,8 @@ use std::sync::{
     Arc, RwLock,
 };
 
+/// An engineio socket that manages the connection with the server
+/// and allows the common callbacks.
 #[derive(Clone)]
 struct Socket {
     transport_client: Arc<RwLock<TransportClient>>,
@@ -12,6 +14,7 @@ struct Socket {
 }
 
 impl Socket {
+    /// Creates an instance.
     pub fn new() -> Self {
         Socket {
             transport_client: Arc::new(RwLock::new(TransportClient::new())),
@@ -19,13 +22,10 @@ impl Socket {
         }
     }
 
-    pub async fn bind(&mut self, address: String) {
-        self.transport_client
-            .write()
-            .unwrap()
-            .open(address)
-            .await
-            .expect("Error while opening connection");
+    /// Binds the socket to a certain address. Attention! This doesn't allow to configure
+    /// callbacks afterwards.
+    pub async fn bind(&mut self, address: String) -> Result<(), Error> {
+        self.transport_client.write().unwrap().open(address).await?;
 
         let cl = Arc::clone(&self.transport_client);
         tokio::spawn(async move {
@@ -33,8 +33,11 @@ impl Socket {
             s.poll_cycle().await.unwrap();
         });
         self.serving.swap(true, Ordering::SeqCst);
+
+        Ok(())
     }
 
+    /// Sends a packet to the server.
     pub async fn emit(&mut self, packet: Packet) -> Result<(), Error> {
         if !self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
@@ -42,6 +45,7 @@ impl Socket {
         self.transport_client.read().unwrap().emit(packet).await
     }
 
+    /// Registers the on_open callback.
     pub fn on_open<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(()) + 'static + Sync,
@@ -53,6 +57,7 @@ impl Socket {
         Ok(())
     }
 
+    /// Registers the on_close callback.
     pub fn on_close<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(()) + 'static + Sync,
@@ -67,6 +72,7 @@ impl Socket {
         Ok(())
     }
 
+    /// Registers the on_packet callback.
     pub fn on_packet<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(Packet) + 'static + Sync,
@@ -81,6 +87,7 @@ impl Socket {
         Ok(())
     }
 
+    /// Registers the on_data callback.
     pub fn on_data<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(Vec<u8>) + 'static + Sync,
@@ -92,6 +99,7 @@ impl Socket {
         Ok(())
     }
 
+    /// Registers the on_error callback.
     pub fn on_error<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(String) + 'static + Sync,
@@ -144,7 +152,10 @@ mod test {
             })
             .unwrap();
 
-        socket.bind(String::from("http://localhost:4200")).await;
+        socket
+            .bind(String::from("http://localhost:4200"))
+            .await
+            .unwrap();
 
         socket
             .emit(Packet::new(
