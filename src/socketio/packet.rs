@@ -1,5 +1,6 @@
 use crate::engineio::packet::Error;
 use either::*;
+use regex::Regex;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum PacketId {
@@ -12,6 +13,7 @@ pub enum PacketId {
     BinaryAck = 6,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 struct Packet {
     packet_type: PacketId,
     nsp: String,
@@ -121,11 +123,282 @@ impl Packet {
 
         return buffer;
     }
+
+    fn decode_string(string: String) -> Result<Self, Error> {
+        let mut i = 0;
+        let packet_id = u8_to_packet_id(string.as_bytes()[i])?;
+
+        let attachements = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
+            let start = i + 1;
+
+            while string.chars().nth(i).unwrap() != '-' && i < string.len() {
+                i += 1;
+            }
+            Some(
+                string
+                    .chars()
+                    .skip(start)
+                    .take(i - start)
+                    .collect::<String>()
+                    .parse::<u8>()
+                    .unwrap(),
+            )
+        } else {
+            None
+        };
+
+        let nsp = if string.chars().nth(i + 1).unwrap() == '/' {
+            let start = i + 1;
+            while string.chars().nth(i).unwrap() != ',' && i < string.len() {
+                i += 1;
+            }
+            string
+                .chars()
+                .skip(start)
+                .take(i - start)
+                .collect::<String>()
+        } else {
+            String::from("/")
+        };
+
+        let next = string.chars().nth(i + 1).unwrap_or('_');
+        let id = if next.to_digit(10).is_some() && i < string.len() {
+            let start = i + 1;
+            i += 1;
+            while string.chars().nth(i).unwrap().to_digit(10).is_some() && i < string.len() {
+                i += 1;
+            }
+
+            Some(
+                string
+                    .chars()
+                    .skip(start)
+                    .take(i - start)
+                    .collect::<String>()
+                    .parse::<i32>()
+                    .unwrap(),
+            )
+        } else {
+            None
+        };
+
+        let data = if string.chars().nth(i + 1).is_some() {
+            let start = if id.is_some() { i } else { i + 1 };
+
+            let mut json_data = serde_json::Value::Null;
+
+            let mut end = string.len();
+            while let Err(_) = serde_json::from_str::<serde_json::Value>(
+                &string
+                    .chars()
+                    .skip(start)
+                    .take(end - start)
+                    .collect::<String>(),
+            ) {
+                end -= 1;
+            }
+
+            if end != start {
+                json_data = serde_json::from_str(
+                    &string
+                        .chars()
+                        .skip(start)
+                        .take(end - start)
+                        .collect::<String>(),
+                )
+                .unwrap();
+            }
+
+            match packet_id {
+                PacketId::BinaryAck | PacketId::BinaryEvent => {
+                    let buffer = string
+                        .chars()
+                        .skip(end)
+                        .take(string.len() - end)
+                        .collect::<String>()
+                        .as_bytes()
+                        .to_vec();
+
+                    let re_open = Regex::new(r"^\[").unwrap();
+                    let re_close = Regex::new(r",]$|]$").unwrap();
+                    let mut str = json_data
+                        .to_string()
+                        .replace("{\"_placeholder\":true,\"num\":0}", "");
+                    str = re_open.replace(&str, "").to_string();
+                    str = re_close.replace(&str, "").to_string();
+
+                    if str.len() == 0 {
+                        Some(vec![Right(buffer)])
+                    } else {
+                        Some(vec![Left(str), Right(buffer)])
+                    }
+                }
+                _ => Some(vec![Left(json_data.to_string())]),
+            }
+        } else {
+            None
+        };
+
+        Ok(Packet::new(packet_id, nsp, data, id, attachements))
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_decode() {
+        let packet = Packet::decode_string("0{\"token\":\"123\"}".to_string());
+        assert!(packet.is_ok());
+
+        assert_eq!(
+            Packet::new(
+                PacketId::Connect,
+                String::from("/"),
+                Some(vec![Left(String::from("{\"token\":\"123\"}"))]),
+                None,
+                None,
+            ),
+            packet.unwrap()
+        );
+
+        let packet = Packet::decode_string("0/admin,{\"token\":\"123\"}".to_string());
+        assert!(packet.is_ok());
+
+        assert_eq!(
+            Packet::new(
+                PacketId::Connect,
+                String::from("/admin"),
+                Some(vec![Left(String::from("{\"token\":\"123\"}"))]),
+                None,
+                None,
+            ),
+            packet.unwrap()
+        );
+
+        let packet = Packet::decode_string("1/admin,".to_string());
+        assert!(packet.is_ok());
+
+        assert_eq!(
+            Packet::new(
+                PacketId::Disconnect,
+                String::from("/admin"),
+                None,
+                None,
+                None,
+            ),
+            packet.unwrap()
+        );
+
+        let packet = Packet::decode_string("2[\"hello\",1]".to_string());
+        assert!(packet.is_ok());
+
+        assert_eq!(
+            Packet::new(
+                PacketId::Event,
+                String::from("/"),
+                Some(vec![Left(String::from("[\"hello\",1]"))]),
+                None,
+                None,
+            ),
+            packet.unwrap()
+        );
+
+        let packet = Packet::decode_string("2/admin,456[\"project:delete\",123]".to_string());
+        assert!(packet.is_ok());
+
+        assert_eq!(
+            Packet::new(
+                PacketId::Event,
+                String::from("/admin"),
+                Some(vec![Left(String::from("[\"project:delete\",123]"))]),
+                Some(456),
+                None,
+            ),
+            packet.unwrap()
+        );
+
+        let packet = Packet::decode_string("3/admin,456[]".to_string());
+        assert!(packet.is_ok());
+
+        assert_eq!(
+            Packet::new(
+                PacketId::Ack,
+                String::from("/admin"),
+                Some(vec![Left(String::from("[]"))]),
+                Some(456),
+                None,
+            ),
+            packet.unwrap()
+        );
+
+        let packet = Packet::decode_string("4/admin,{\"message\":\"Not authorized\"}".to_string());
+        assert!(packet.is_ok());
+
+        assert_eq!(
+            Packet::new(
+                PacketId::ConnectError,
+                String::from("/admin"),
+                Some(vec![Left(String::from("{\"message\":\"Not authorized\"}"))]),
+                None,
+                None,
+            ),
+            packet.unwrap()
+        );
+
+        let packet = Packet::decode_string(
+            "51-[\"hello\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03".to_string(),
+        );
+        assert!(packet.is_ok());
+
+        assert_eq!(
+            Packet::new(
+                PacketId::BinaryEvent,
+                String::from("/"),
+                Some(vec![Left(String::from("\"hello\"")), Right(vec![1, 2, 3])]),
+                None,
+                Some(1),
+            ),
+            packet.unwrap()
+        );
+
+        let packet = Packet::decode_string(
+            "51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03"
+                .to_string(),
+        );
+        assert!(packet.is_ok());
+
+        assert_eq!(
+            Packet::new(
+                PacketId::BinaryEvent,
+                String::from("/admin"),
+                Some(vec![
+                    Left(String::from("\"project:delete\"")),
+                    Right(vec![1, 2, 3]),
+                ]),
+                Some(456),
+                Some(1),
+            ),
+            packet.unwrap()
+        );
+
+        let packet = Packet::decode_string(
+            "61-/admin,456[{\"_placeholder\":true,\"num\":0}]\x03\x02\x01".to_string(),
+        );
+        assert!(packet.is_ok());
+
+        assert_eq!(
+            Packet::new(
+                PacketId::BinaryAck,
+                String::from("/admin"),
+                Some(vec![Right(vec![3, 2, 1])]),
+                Some(456),
+                Some(1),
+            ),
+            packet.unwrap()
+        );
+    }
 
     #[test]
     /// This test suites comes from the explanation section here: https://github.com/socketio/socket.io-protocol
