@@ -2,6 +2,7 @@ use crate::engineio::packet::Error;
 use either::*;
 use regex::Regex;
 
+/// An enumeration of the different Paccket types in the socket.io protocol.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum PacketId {
     Connect = 0,
@@ -13,6 +14,7 @@ pub enum PacketId {
     BinaryAck = 6,
 }
 
+/// A packet which get's send or received during in the socket-io protocol.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Packet {
     packet_type: PacketId,
@@ -22,6 +24,7 @@ pub struct Packet {
     attachements: Option<u8>,
 }
 
+/// Converts an u8 byte to an PacketId.
 pub fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
     match b as char {
         '0' => Ok(PacketId::Connect),
@@ -36,6 +39,7 @@ pub fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
 }
 
 impl Packet {
+    /// Creates an instance.
     pub fn new(
         packet_type: PacketId,
         nsp: String,
@@ -52,6 +56,7 @@ impl Packet {
         }
     }
 
+    /// Encodes the packet to an u8 byte stream.
     pub fn encode(&self) -> Vec<u8> {
         // first the packet type
         let mut string = (self.packet_type as u8).to_string();
@@ -124,6 +129,7 @@ impl Packet {
         return buffer;
     }
 
+    /// Decodes a packet given an utf-8 string.
     fn decode_string(string: String) -> Result<Self, Error> {
         let mut i = 0;
         let packet_id = u8_to_packet_id(string.as_bytes()[i])?;

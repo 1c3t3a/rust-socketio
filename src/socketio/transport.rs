@@ -6,12 +6,14 @@ use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId
 use either::*;
 use std::sync::{Arc, Mutex};
 
+/// A struct that handles communication in the socket.io protocol.
 struct TransportClient {
     engine_socket: Arc<Mutex<EngineSocket>>,
     host: Arc<String>,
 }
 
 impl TransportClient {
+    /// Creates an instance.
     pub fn new(address: String) -> Self {
         TransportClient {
             engine_socket: Arc::new(Mutex::new(EngineSocket::new(false))),
@@ -19,6 +21,8 @@ impl TransportClient {
         }
     }
 
+    /// Connects to the server. This includes a connection of the underlying engine.io client and
+    /// afterwards an opening socket.io request.
     pub async fn connect(&self) -> Result<(), Error> {
         self.engine_socket
             .as_ref()
@@ -27,20 +31,19 @@ impl TransportClient {
             .bind(self.host.as_ref().to_string())
             .await?;
 
-        let open_packet = SocketPacket::new(SocketPacketId::Connect, String::from("/"), None, None, None);
+        // construct the opening packet
+        let open_packet =
+            SocketPacket::new(SocketPacketId::Connect, String::from("/"), None, None, None);
 
-        dbg!(self.send(open_packet).await)?;
-        Ok(())
+        self.send(open_packet).await
     }
 
+    /// Sends a socket.io packet to the server using the engine.io client.
     pub async fn send(&self, packet: SocketPacket) -> Result<(), Error> {
-        let engine_packet = dbg!(EnginePacket::new(EnginePacketId::Message, packet.encode()));
+        // the packet       ü+++++++++++++++++                                                                                                                                                                                                                                                                                                          
+        let engine_packet = EnginePacket::new(EnginePacketId::Message, packet.encode());
 
-        self.engine_socket
-            .lock()
-            .unwrap()
-            .emit(engine_packet)
-            .await
+        self.engine_socket.lock().unwrap().emit(engine_packet).await
     }
 
     pub async fn emit(
@@ -80,7 +83,7 @@ mod test {
 
         socket.connect().await.unwrap();
 
-       socket
+        socket
             .emit(&"test", String::from("[\"test\", \"Du stinkst\"]"), None)
             .await
             .unwrap();

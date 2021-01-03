@@ -112,6 +112,7 @@ impl Packet {
     }
 
     // TODO: Maybe replace the Vec<u8> by a u8 array as this might be inefficient
+    /// Decodes a single packet from an u8 byte stream.
     fn decode_packet(bytes: Vec<u8>) -> Result<Self, Error> {
         if bytes.is_empty() {
             return Err(Error::EmptyPacket);
@@ -142,6 +143,7 @@ impl Packet {
         })
     }
 
+    /// Encodes a packet into an u8 byte stream.
     fn encode_packet(self) -> Vec<u8> {
         let mut result = Vec::new();
         result.extend_from_slice((self.packet_id as u8).to_string().as_bytes());
@@ -149,6 +151,8 @@ impl Packet {
         result
     }
 
+    /// Encodes a packet with the payload as base64. Observed some strange
+    /// behavior while doing this with socket.io packets, works with engine.io packets.
     fn encode_base64(self) -> Vec<u8> {
         assert_eq!(self.packet_id, PacketId::Message);
 
@@ -160,6 +164,8 @@ impl Packet {
     }
 }
 
+/// Decodes a payload. Payload in the engine.io context means a chain of normal packets seperated
+/// by a certain SEPERATOR, in this case the delimiter \x30.
 pub fn decode_payload(payload: Vec<u8>) -> Result<Vec<Packet>, Error> {
     let mut vec = Vec::new();
     for packet_bytes in payload.split(|byte| (*byte as char) == SEPERATOR) {
@@ -170,6 +176,8 @@ pub fn decode_payload(payload: Vec<u8>) -> Result<Vec<Packet>, Error> {
     Ok(vec)
 }
 
+/// Encodes a payload. Payload in the engine.io context means a chain of normal packets seperated
+/// by a certain SEPERATOR, in this case the delimiter \x30.
 pub fn encode_payload(packets: Vec<Packet>) -> Vec<u8> {
     let mut vec = Vec::new();
     for packet in packets {

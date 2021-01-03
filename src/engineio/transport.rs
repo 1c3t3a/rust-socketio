@@ -10,13 +10,18 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// The different types of transport. Used for actually 
+/// transmitting the payload.
 #[derive(Debug, Clone)]
 enum TransportType {
     Polling(Arc<Mutex<Client>>),
 }
 
+/// Type of a callback function. (Normal closures can be passed in here).
 type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync>>>>;
 
+/// A client that handles the plain transmission of packets in the engine.io protocol.
+/// Used by the wrapper EngineSocket. This struct also holds the callback functions.
 #[derive(Clone)]
 pub struct TransportClient {
     transport: TransportType,
@@ -33,6 +38,8 @@ pub struct TransportClient {
     engine_io_mode: Arc<AtomicBool>,
 }
 
+/// The data that get's exchanged in the handshake. It's content
+/// is usually defined by the server.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct HandshakeData {
     sid: String,
@@ -54,10 +61,13 @@ macro_rules! spawn_scoped {
     };
 }
 
+// TODO: make this safe.
 unsafe impl Send for TransportClient {}
 unsafe impl Sync for TransportClient {}
 
 impl TransportClient {
+
+    /// Creates an instance.
     pub fn new(engine_io_mode: bool) -> Self {
         TransportClient {
             transport: TransportType::Polling(Arc::new(Mutex::new(Client::new()))),
@@ -75,6 +85,7 @@ impl TransportClient {
         }
     }
 
+    /// Registers an on_open callback.
     pub fn set_on_open<F>(&mut self, function: F)
     where
         F: Fn(()) + 'static + Sync,
@@ -84,6 +95,7 @@ impl TransportClient {
         drop(on_open);
     }
 
+    /// Registers an on_error callback.
     pub fn set_on_error<F>(&mut self, function: F)
     where
         F: Fn(String) + 'static + Sync,
@@ -93,6 +105,7 @@ impl TransportClient {
         drop(on_error);
     }
 
+    /// Registers an on_packet callback.
     pub fn set_on_packet<F>(&mut self, function: F)
     where
         F: Fn(Packet) + 'static + Sync,
@@ -102,6 +115,7 @@ impl TransportClient {
         drop(on_packet);
     }
 
+    /// Registers an on_data callback.
     pub fn set_on_data<F>(&mut self, function: F)
     where
         F: Fn(Vec<u8>) + 'static + Sync,
@@ -111,6 +125,7 @@ impl TransportClient {
         drop(on_data);
     }
 
+    /// Registers an on_close callback.
     pub fn set_on_close<F>(&mut self, function: F)
     where
         F: Fn(()) + 'static + Sync,
@@ -120,7 +135,9 @@ impl TransportClient {
         drop(on_close);
     }
 
-    /// Opens the connection to a certain server
+    /// Opens the connection to a certain server. This includes an opening GET request to the server.
+    /// The server passes back the handshake data in the response. Afterwards a first Pong packet is sent
+    /// to the server to trigger the Ping-cycle.
     pub async fn open(&mut self, address: String) -> Result<(), Error> {
         // TODO: Check if Relaxed is appropiate -> change all occurences if not
         if self.connected.load(Ordering::Relaxed) {
