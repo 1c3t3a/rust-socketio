@@ -14,7 +14,7 @@ pub enum PacketId {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct Packet {
+pub struct Packet {
     packet_type: PacketId,
     nsp: String,
     data: Option<Vec<Either<String, Vec<u8>>>>,
@@ -36,7 +36,7 @@ pub fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
 }
 
 impl Packet {
-    fn new(
+    pub fn new(
         packet_type: PacketId,
         nsp: String,
         data: Option<Vec<Either<String, Vec<u8>>>>,
@@ -248,6 +248,7 @@ mod test {
     use super::*;
 
     #[test]
+    /// This test suites is taken from the explanation section here: https://github.com/socketio/socket.io-protocol
     fn test_decode() {
         let packet = Packet::decode_string("0{\"token\":\"123\"}".to_string());
         assert!(packet.is_ok());
@@ -401,7 +402,7 @@ mod test {
     }
 
     #[test]
-    /// This test suites comes from the explanation section here: https://github.com/socketio/socket.io-protocol
+    /// This test suites is taken from the explanation section here: https://github.com/socketio/socket.io-protocol
     fn test_encode() {
         let packet = Packet::new(
             PacketId::Connect,

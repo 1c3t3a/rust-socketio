@@ -8,23 +8,23 @@ use std::sync::{
 /// An engineio socket that manages the connection with the server
 /// and allows the common callbacks.
 #[derive(Clone)]
-struct Socket {
+pub struct EngineSocket {
     transport_client: Arc<RwLock<TransportClient>>,
     serving: Arc<AtomicBool>,
 }
 
-impl Socket {
+impl EngineSocket {
     /// Creates an instance.
-    pub fn new() -> Self {
-        Socket {
-            transport_client: Arc::new(RwLock::new(TransportClient::new())),
+    pub fn new(engine_io_mode: bool) -> Self {
+        EngineSocket {
+            transport_client: Arc::new(RwLock::new(TransportClient::new(engine_io_mode))),
             serving: Arc::new(AtomicBool::default()),
         }
     }
 
     /// Binds the socket to a certain address. Attention! This doesn't allow to configure
     /// callbacks afterwards.
-    pub async fn bind(&mut self, address: String) -> Result<(), Error> {
+    pub async fn bind(&self, address: String) -> Result<(), Error> {
         self.transport_client.write().unwrap().open(address).await?;
 
         let cl = Arc::clone(&self.transport_client);
@@ -126,7 +126,7 @@ mod test {
 
     #[actix_rt::test]
     async fn test_basic_connection() {
-        let mut socket = Socket::new();
+        let mut socket = EngineSocket::new(true);
 
         socket
             .on_open(|_| {

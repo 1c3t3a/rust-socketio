@@ -173,11 +173,8 @@ pub fn decode_payload(payload: Vec<u8>) -> Result<Vec<Packet>, Error> {
 pub fn encode_payload(packets: Vec<Packet>) -> Vec<u8> {
     let mut vec = Vec::new();
     for packet in packets {
-        // enforcing base64 encoding on the message packet
-        match packet.packet_id {
-            PacketId::Message => vec.extend(Packet::encode_base64(packet)),
-            _ => vec.extend(Packet::encode_packet(packet)),
-        }
+        // at the moment no base64 encoding is used
+        vec.extend(Packet::encode_packet(packet));
         vec.push(SEPERATOR as u8);
     }
 

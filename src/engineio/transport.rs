@@ -4,6 +4,7 @@ use crypto::{digest::Digest, sha1::Sha1};
 use rand::{thread_rng, Rng};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::Ordering;
 use std::{
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
     time::{Duration, Instant},
@@ -29,6 +30,7 @@ pub struct TransportClient {
     last_pong: Arc<Mutex<Instant>>,
     host_address: Arc<Mutex<Option<String>>>,
     connection_data: Arc<Option<HandshakeData>>,
+    engine_io_mode: Arc<AtomicBool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -56,7 +58,7 @@ unsafe impl Send for TransportClient {}
 unsafe impl Sync for TransportClient {}
 
 impl TransportClient {
-    pub fn new() -> Self {
+    pub fn new(engine_io_mode: bool) -> Self {
         TransportClient {
             transport: TransportType::Polling(Arc::new(Mutex::new(Client::new()))),
             on_error: Arc::new(RwLock::new(None)),
@@ -69,6 +71,7 @@ impl TransportClient {
             last_pong: Arc::new(Mutex::new(Instant::now())),
             host_address: Arc::new(Mutex::new(None)),
             connection_data: Arc::new(None),
+            engine_io_mode: Arc::new(AtomicBool::from(engine_io_mode)),
         }
     }
 
@@ -120,7 +123,7 @@ impl TransportClient {
     /// Opens the connection to a certain server
     pub async fn open(&mut self, address: String) -> Result<(), Error> {
         // TODO: Check if Relaxed is appropiate -> change all occurences if not
-        if self.connected.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.connected.load(Ordering::Relaxed) {
             return Ok(());
         }
 
@@ -128,8 +131,13 @@ impl TransportClient {
             TransportType::Polling(client) => {
                 // build the query path, random_t is used to prevent browser caching
                 let query_path = &format!(
-                    "/engine.io/?EIO=4&transport=polling&t={}",
-                    TransportClient::get_random_t()
+                    "/{}/?EIO=4&transport=polling&t={}",
+                    if self.engine_io_mode.load(Ordering::Relaxed) {
+                        "engine.io"
+                    } else {
+                        "socket.io"
+                    },
+                    TransportClient::get_random_t(),
                 )[..];
 
                 if let Ok(full_address) = Url::parse(&(address.clone() + query_path)[..]) {
@@ -179,7 +187,7 @@ impl TransportClient {
 
     /// Sends a packet to the server
     pub async fn emit(&self, packet: Packet) -> Result<(), Error> {
-        if !self.connected.load(std::sync::atomic::Ordering::Relaxed) {
+        if !self.connected.load(Ordering::Relaxed) {
             let error = Error::ActionBeforeOpen;
             self.call_error_callback(format!("{}", error));
             return Err(error);
@@ -188,7 +196,12 @@ impl TransportClient {
         match &self.transport {
             TransportType::Polling(client) => {
                 let query_path = &format!(
-                    "/engine.io/?EIO=4&transport=polling&t={}&sid={}",
+                    "/{}/?EIO=4&transport=polling&t={}&sid={}",
+                    if self.engine_io_mode.load(Ordering::Relaxed) {
+                        "engine.io"
+                    } else {
+                        "socket.io"
+                    },
                     TransportClient::get_random_t(),
                     Arc::as_ref(&self.connection_data).as_ref().unwrap().sid
                 );
@@ -225,7 +238,7 @@ impl TransportClient {
     /// Performs the server long polling procedure as long as the client is connected.
     /// This should run seperately at all time to ensure proper response handling from the server.
     pub async fn poll_cycle(&self) -> Result<(), Error> {
-        if !self.connected.load(std::sync::atomic::Ordering::Relaxed) {
+        if !self.connected.load(Ordering::Relaxed) {
             let error = Error::ActionBeforeOpen;
             self.call_error_callback(format!("{}", error));
             return Err(error);
@@ -246,13 +259,18 @@ impl TransportClient {
                     .ping_interval,
         );
 
-        while self.connected.load(std::sync::atomic::Ordering::Relaxed) {
+        while self.connected.load(Ordering::Relaxed) {
             match &self.transport {
                 // we wont't use the shared client as this blocks the ressource
                 // in the long polling requests
                 TransportType::Polling(_) => {
                     let query_path = &format!(
-                        "/engine.io/?EIO=4&transport=polling&t={}&sid={}",
+                        "/{}/?EIO=4&transport=polling&t={}&sid={}",
+                        if self.engine_io_mode.load(Ordering::Relaxed) {
+                            "engine.io"
+                        } else {
+                            "socket.io"
+                        },
                         TransportClient::get_random_t(),
                         Arc::as_ref(&self.connection_data).as_ref().unwrap().sid
                     );
@@ -354,7 +372,7 @@ mod test {
 
     #[actix_rt::test]
     async fn test_connection() {
-        let mut socket = TransportClient::new();
+        let mut socket = TransportClient::new(true);
         socket
             .open("http://localhost:4200".to_owned())
             .await
