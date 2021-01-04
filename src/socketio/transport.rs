@@ -1,7 +1,8 @@
 use crate::engineio::{
-    packet::{Error, Packet as EnginePacket, PacketId as EnginePacketId},
+    packet::{Packet as EnginePacket, PacketId as EnginePacketId},
     socket::EngineSocket,
 };
+use crate::util::Error;
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
 use crate::spawn_scoped;
 use crossbeam_utils::thread;

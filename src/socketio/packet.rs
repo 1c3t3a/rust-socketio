@@ -1,4 +1,4 @@
-use crate::engineio::packet::Error;
+use crate::util::Error;
 use either::*;
 use regex::Regex;
 

@@ -1,5 +1,6 @@
-use crate::engineio::packet::{decode_payload, encode_payload, Error, Packet, PacketId};
-use crossbeam_utils::thread;
+use crate::engineio::packet::{decode_payload, encode_payload, Packet, PacketId};
+use crate::util::Error;
+use crate::spawn_scoped;
 use crypto::{digest::Digest, sha1::Sha1};
 use rand::{thread_rng, Rng};
 use reqwest::{Client, Url};
@@ -48,18 +49,6 @@ struct HandshakeData {
     ping_interval: u64,
     #[serde(rename = "pingTimeout")]
     ping_timeout: u64,
-}
-
-/// A small macro that spawns a scoped thread.
-/// Used for calling the callback functions.
-#[macro_export]
-macro_rules! spawn_scoped {
-    ($e:expr) => {
-        thread::scope(|s| {
-            s.spawn(|_| $e);
-        })
-        .unwrap();
-    };
 }
 
 // TODO: make this safe.

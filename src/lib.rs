@@ -1,8 +1,9 @@
 #[macro_use]
 pub mod engineio;
 pub mod socketio;
+pub mod util;
 
-use crate::engineio::packet::Error;
+use crate::util::Error;
 use std::{
     sync::{Arc, RwLock},
     time::Duration,

@@ -1,4 +1,5 @@
-use super::packet::{Error, Packet};
+use super::packet::Packet;
+use crate::util::Error;
 use crate::engineio::transport::TransportClient;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -51,7 +52,7 @@ impl EngineSocket {
         F: Fn(()) + 'static + Sync + Send,
     {
         if self.serving.load(Ordering::Relaxed) {
-            return Err(Error::ActionBeforeOpen);
+            return Err(Error::IllegalActionAfterOpen);
         }
         self.transport_client.write().unwrap().set_on_open(function);
         Ok(())
@@ -63,7 +64,7 @@ impl EngineSocket {
         F: Fn(()) + 'static + Sync + Send,
     {
         if self.serving.load(Ordering::Relaxed) {
-            return Err(Error::ActionBeforeOpen);
+            return Err(Error::IllegalActionAfterOpen);
         }
         self.transport_client
             .write()
@@ -78,7 +79,7 @@ impl EngineSocket {
         F: Fn(Packet) + 'static + Sync + Send,
     {
         if self.serving.load(Ordering::Relaxed) {
-            return Err(Error::ActionBeforeOpen);
+            return Err(Error::IllegalActionAfterOpen);
         }
         self.transport_client
             .write()
@@ -93,7 +94,7 @@ impl EngineSocket {
         F: Fn(Vec<u8>) + 'static + Sync + Send,
     {
         if self.serving.load(Ordering::Relaxed) {
-            return Err(Error::ActionBeforeOpen);
+            return Err(Error::IllegalActionAfterOpen);
         }
         self.transport_client.write().unwrap().set_on_data(function);
         Ok(())
@@ -105,7 +106,7 @@ impl EngineSocket {
         F: Fn(String) + 'static + Sync + Send + Send,
     {
         if self.serving.load(Ordering::Relaxed) {
-            return Err(Error::ActionBeforeOpen);
+            return Err(Error::IllegalActionAfterOpen);
         }
         self.transport_client
             .write()
