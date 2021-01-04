@@ -1,5 +1,5 @@
 [package]
-name = "rust-socketio"
+name = "rust_socketio"
 version = "0.1.0"
 authors = ["Bastian Kersting <bastian@cmbt.de>"]
 edition = "2018"
@@ -17,3 +17,4 @@ serde_json = "1.0"
 either = "1.6.1"
 actix-rt = "1.1.1"
 regex = "1.4.2"
+if_chain = "1.0.1"

@@ -15,13 +15,13 @@ pub enum PacketId {
 }
 
 /// A packet which get's send or received during in the socket-io protocol.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Packet {
-    packet_type: PacketId,
-    nsp: String,
-    data: Option<Vec<Either<String, Vec<u8>>>>,
-    id: Option<i32>,
-    attachements: Option<u8>,
+    pub packet_type: PacketId,
+    pub nsp: String,
+    pub data: Option<Vec<Either<String, Vec<u8>>>>,
+    pub id: Option<i32>,
+    pub attachements: Option<u8>,
 }
 
 /// Converts an u8 byte to an PacketId.
@@ -130,7 +130,7 @@ impl Packet {
     }
 
     /// Decodes a packet given an utf-8 string.
-    fn decode_string(string: String) -> Result<Self, Error> {
+    pub fn decode_string(string: String) -> Result<Self, Error> {
         let mut i = 0;
         let packet_id = u8_to_packet_id(string.as_bytes()[i])?;
 

@@ -48,7 +48,7 @@ impl EngineSocket {
     /// Registers the on_open callback.
     pub fn on_open<F>(&mut self, function: F) -> Result<(), Error>
     where
-        F: Fn(()) + 'static + Sync,
+        F: Fn(()) + 'static + Sync + Send,
     {
         if self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
@@ -60,7 +60,7 @@ impl EngineSocket {
     /// Registers the on_close callback.
     pub fn on_close<F>(&mut self, function: F) -> Result<(), Error>
     where
-        F: Fn(()) + 'static + Sync,
+        F: Fn(()) + 'static + Sync + Send,
     {
         if self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
@@ -75,7 +75,7 @@ impl EngineSocket {
     /// Registers the on_packet callback.
     pub fn on_packet<F>(&mut self, function: F) -> Result<(), Error>
     where
-        F: Fn(Packet) + 'static + Sync,
+        F: Fn(Packet) + 'static + Sync + Send,
     {
         if self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
@@ -90,7 +90,7 @@ impl EngineSocket {
     /// Registers the on_data callback.
     pub fn on_data<F>(&mut self, function: F) -> Result<(), Error>
     where
-        F: Fn(Vec<u8>) + 'static + Sync,
+        F: Fn(Vec<u8>) + 'static + Sync + Send,
     {
         if self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
@@ -102,7 +102,7 @@ impl EngineSocket {
     /// Registers the on_error callback.
     pub fn on_error<F>(&mut self, function: F) -> Result<(), Error>
     where
-        F: Fn(String) + 'static + Sync,
+        F: Fn(String) + 'static + Sync + Send + Send,
     {
         if self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);

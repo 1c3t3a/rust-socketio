@@ -30,6 +30,9 @@ pub enum Error {
     HttpError(u16),
     HandshakeError(String),
     ActionBeforeOpen,
+    InvalidJson(String),
+    DidNotReceiveProperAck(i32),
+    IllegalActionAfterOpen,
 }
 
 /// A packet send in the engineio protocol.
@@ -40,7 +43,7 @@ pub struct Packet {
 }
 
 // see https://en.wikipedia.org/wiki/Delimiter#ASCII_delimited_text
-const SEPERATOR: char = '\x30';
+const SEPERATOR: char = '\x1e';
 
 impl From<DecodeError> for Error {
     fn from(error: DecodeError) -> Self {
@@ -87,6 +90,9 @@ impl Display for Error {
                 "Network request returned with status code: {}",
                 status_code
             ),
+            Error::InvalidJson(string) => write!(f, "string is not json serializable: {}", string),
+            Error::DidNotReceiveProperAck(id) => write!(f, "Did not receive an ack for id: {}", id),
+            Error::IllegalActionAfterOpen => write!(f, "An illegal action (such as setting a callback after being connected) was triggered")
         }
     }
 }
@@ -228,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_decode_payload() {
-        let data = "1Hello\x301HelloWorld".to_string().into_bytes();
+        let data = "1Hello\x1e1HelloWorld".to_string().into_bytes();
         let packets = decode_payload(data).unwrap();
 
         assert_eq!(packets[0].packet_id, PacketId::Close);
@@ -236,13 +242,13 @@ mod tests {
         assert_eq!(packets[1].packet_id, PacketId::Close);
         assert_eq!(packets[1].data, ("HelloWorld".to_string().into_bytes()));
 
-        let data = "1Hello\x301HelloWorld".to_string().into_bytes();
+        let data = "1Hello\x1e1HelloWorld".to_string().into_bytes();
         assert_eq!(encode_payload(packets), data);
     }
 
     #[test]
     fn test_binary_payload() {
-        let data = "bSGVsbG8=\x30bSGVsbG9Xb3JsZA==".to_string().into_bytes();
+        let data = "bSGVsbG8=\x1ebSGVsbG9Xb3JsZA==".to_string().into_bytes();
         let packets = decode_payload(data).unwrap();
 
         assert_eq!(packets[0].packet_id, PacketId::Message);
@@ -250,7 +256,7 @@ mod tests {
         assert_eq!(packets[1].packet_id, PacketId::Message);
         assert_eq!(packets[1].data, ("HelloWorld".to_string().into_bytes()));
 
-        let data = "bSGVsbG8=\x30bSGVsbG9Xb3JsZA==".to_string().into_bytes();
+        let data = "bSGVsbG8=\x1ebSGVsbG9Xb3JsZA==".to_string().into_bytes();
         assert_eq!(encode_payload(packets), data);
     }
 }

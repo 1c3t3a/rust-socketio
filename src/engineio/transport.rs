@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The different types of transport. Used for actually 
+/// The different types of transport. Used for actually
 /// transmitting the payload.
 #[derive(Debug, Clone)]
 enum TransportType {
@@ -18,7 +18,7 @@ enum TransportType {
 }
 
 /// Type of a callback function. (Normal closures can be passed in here).
-type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync>>>>;
+type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
 
 /// A client that handles the plain transmission of packets in the engine.io protocol.
 /// Used by the wrapper EngineSocket. This struct also holds the callback functions.
@@ -52,6 +52,7 @@ struct HandshakeData {
 
 /// A small macro that spawns a scoped thread.
 /// Used for calling the callback functions.
+#[macro_export]
 macro_rules! spawn_scoped {
     ($e:expr) => {
         thread::scope(|s| {
@@ -66,7 +67,6 @@ unsafe impl Send for TransportClient {}
 unsafe impl Sync for TransportClient {}
 
 impl TransportClient {
-
     /// Creates an instance.
     pub fn new(engine_io_mode: bool) -> Self {
         TransportClient {
@@ -88,7 +88,7 @@ impl TransportClient {
     /// Registers an on_open callback.
     pub fn set_on_open<F>(&mut self, function: F)
     where
-        F: Fn(()) + 'static + Sync,
+        F: Fn(()) + 'static + Sync + Send,
     {
         let mut on_open = self.on_open.write().unwrap();
         *on_open = Some(Box::new(function));
@@ -98,7 +98,7 @@ impl TransportClient {
     /// Registers an on_error callback.
     pub fn set_on_error<F>(&mut self, function: F)
     where
-        F: Fn(String) + 'static + Sync,
+        F: Fn(String) + 'static + Sync + Send,
     {
         let mut on_error = self.on_error.write().unwrap();
         *on_error = Some(Box::new(function));
@@ -108,7 +108,7 @@ impl TransportClient {
     /// Registers an on_packet callback.
     pub fn set_on_packet<F>(&mut self, function: F)
     where
-        F: Fn(Packet) + 'static + Sync,
+        F: Fn(Packet) + 'static + Sync + Send,
     {
         let mut on_packet = self.on_packet.write().unwrap();
         *on_packet = Some(Box::new(function));
@@ -118,7 +118,7 @@ impl TransportClient {
     /// Registers an on_data callback.
     pub fn set_on_data<F>(&mut self, function: F)
     where
-        F: Fn(Vec<u8>) + 'static + Sync,
+        F: Fn(Vec<u8>) + 'static + Sync + Send,
     {
         let mut on_data = self.on_data.write().unwrap();
         *on_data = Some(Box::new(function));
@@ -128,7 +128,7 @@ impl TransportClient {
     /// Registers an on_close callback.
     pub fn set_on_close<F>(&mut self, function: F)
     where
-        F: Fn(()) + 'static + Sync,
+        F: Fn(()) + 'static + Sync + Send,
     {
         let mut on_close = self.on_close.write().unwrap();
         *on_close = Some(Box::new(function));
