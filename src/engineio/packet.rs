@@ -1,8 +1,6 @@
 extern crate base64;
-use base64::{decode, encode, DecodeError};
+use base64::{decode, encode};
 use std::char;
-use std::fmt;
-use std::fmt::{Display, Formatter};
 use std::str;
 
 use crate::util::Error;
@@ -91,6 +89,7 @@ impl Packet {
 
     /// Encodes a packet with the payload as base64. Observed some strange
     /// behavior while doing this with socket.io packets, works with engine.io packets.
+    #[allow(dead_code)]
     fn encode_base64(self) -> Vec<u8> {
         assert_eq!(self.packet_id, PacketId::Message);
 

@@ -5,7 +5,6 @@ use crate::engineio::{
 use crate::util::Error;
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
 use crate::spawn_scoped;
-use crossbeam_utils::thread;
 use either::*;
 use if_chain::if_chain;
 use rand::{thread_rng, Rng};
