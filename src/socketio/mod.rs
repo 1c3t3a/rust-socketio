@@ -1,4 +1,4 @@
 pub mod ack;
 pub mod event;
-pub mod packet;
-pub mod transport;
+mod packet;
+pub(crate) mod transport;

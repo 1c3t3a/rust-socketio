@@ -2,9 +2,9 @@ use crate::engineio::{
     packet::{Packet as EnginePacket, PacketId as EnginePacketId},
     socket::EngineSocket,
 };
-use crate::util::Error;
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
 use crate::spawn_scoped;
+use crate::util::Error;
 use either::*;
 use if_chain::if_chain;
 use rand::{thread_rng, Rng};
@@ -16,6 +16,7 @@ use std::{
 
 use super::{ack::Ack, event::Event};
 
+/// The type of a callback function.
 type Callback<I> = RwLock<Box<dyn Fn(I) + 'static + Sync + Send>>;
 
 /// A struct that handles communication in the socket.io protocol.
@@ -44,6 +45,7 @@ impl TransportClient {
         }
     }
 
+    /// Registers a new event with a certain callback function F.
     pub fn on<F>(&mut self, event: Event, callback: F) -> Result<(), Error>
     where
         F: Fn(String) + 'static + Sync + Send,
@@ -88,6 +90,65 @@ impl TransportClient {
         self.engine_socket.lock().unwrap().emit(engine_packet).await
     }
 
+    /// Emits to certain event with given data. The data needs to be JSON, otherwise this returns
+    /// an `InvalidJson` error.
+    pub async fn emit(&self, event: Event, data: String) -> Result<(), Error> {
+        if let Err(_) = serde_json::from_str::<serde_json::Value>(&data) {
+            return Err(Error::InvalidJson(data));
+        }
+
+        let payload = format!("[\"{}\",{}]", String::from(event), data);
+
+        let socket_packet = SocketPacket::new(
+            SocketPacketId::Event,
+            self.nsp.as_ref().clone().unwrap_or(String::from("/")),
+            Some(vec![Left(payload)]),
+            None,
+            None,
+        );
+
+        self.send(socket_packet).await
+    }
+
+    /// Emits and requests an ack. The ack is returned a Arc<RwLock<Ack>> to acquire shared
+    /// mutability. This ack will be changed as soon as the server answered with an ack.
+    pub async fn emit_with_ack(
+        &mut self,
+        event: Event,
+        data: String,
+        timespan: Duration,
+    ) -> Result<Arc<RwLock<Ack>>, Error> {
+        if let Err(_) = serde_json::from_str::<serde_json::Value>(&data) {
+            return Err(Error::InvalidJson(data));
+        }
+
+        let payload = format!("[\"{}\",{}]", String::from(event), data);
+        let id = thread_rng().gen_range(0, 999);
+
+        let socket_packet = SocketPacket::new(
+            SocketPacketId::Event,
+            self.nsp.as_ref().clone().unwrap_or(String::from("/")),
+            Some(vec![Left(payload)]),
+            Some(id),
+            None,
+        );
+
+        let ack = Arc::new(RwLock::new(Ack {
+            id,
+            acked: false,
+            data: None,
+        }));
+        // add the ack to the tuple of outstanding acks
+        self.outstanding_acks
+            .write()
+            .unwrap()
+            .push((ack.clone(), Instant::now(), timespan));
+
+        self.send(socket_packet).await?;
+        Ok(ack)
+    }
+
+    /// Sets up the callback routes on the engineio socket, called before opening the connection.
     fn setup_callbacks(&mut self) -> Result<(), Error> {
         let clone_self = self.clone();
         let packet_callback = move |packet: EnginePacket| {
@@ -172,60 +233,7 @@ impl TransportClient {
             .on_packet(packet_callback)
     }
 
-    pub async fn emit(&self, event: Event, data: String) -> Result<(), Error> {
-        if let Err(_) = serde_json::from_str::<serde_json::Value>(&data) {
-            return Err(Error::InvalidJson(data));
-        }
-
-        let payload = format!("[\"{}\",{}]", String::from(event), data);
-
-        let socket_packet = SocketPacket::new(
-            SocketPacketId::Event,
-            self.nsp.as_ref().clone().unwrap_or(String::from("/")),
-            Some(vec![Left(payload)]),
-            None,
-            None,
-        );
-
-        self.send(socket_packet).await
-    }
-
-    pub async fn emit_with_ack(
-        &mut self,
-        event: Event,
-        data: String,
-        timespan: Duration,
-    ) -> Result<Arc<RwLock<Ack>>, Error> {
-        if let Err(_) = serde_json::from_str::<serde_json::Value>(&data) {
-            return Err(Error::InvalidJson(data));
-        }
-
-        let payload = format!("[\"{}\",{}]", String::from(event), data);
-        let id = thread_rng().gen_range(0, 999);
-
-        let socket_packet = SocketPacket::new(
-            SocketPacketId::Event,
-            self.nsp.as_ref().clone().unwrap_or(String::from("/")),
-            Some(vec![Left(payload)]),
-            Some(id),
-            None,
-        );
-
-        let ack = Arc::new(RwLock::new(Ack {
-            id,
-            acked: false,
-            data: None,
-        }));
-        // add the ack to the tuple of outstanding acks
-        self.outstanding_acks
-            .write()
-            .unwrap()
-            .push((ack.clone(), Instant::now(), timespan));
-
-        self.send(socket_packet).await?;
-        Ok(ack)
-    }
-
+    /// A method for handling the Event Socket Packets.
     fn handle_event(socket_packet: SocketPacket, clone_self: &TransportClient) {
         assert_eq!(socket_packet.packet_type, SocketPacketId::Event);
         if let Some(data) = socket_packet.data {

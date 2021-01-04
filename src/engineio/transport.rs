@@ -1,8 +1,8 @@
 use crate::engineio::packet::{decode_payload, encode_payload, Packet, PacketId};
 use crate::util::Error;
 use crate::spawn_scoped;
-use crypto::{digest::Digest, sha1::Sha1};
-use rand::{thread_rng, Rng};
+use adler32::adler32;
+use std::time::SystemTime;
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
@@ -351,13 +351,10 @@ impl TransportClient {
     }
 
     /// Produces a random String that is used to prevent browser caching.
-    // TODO: Check if there is a more efficient way
     fn get_random_t() -> String {
-        let mut hasher = Sha1::new();
-        let mut rng = thread_rng();
-        let arr: [u8; 32] = rng.gen();
-        hasher.input(&arr);
-        hasher.result_str()
+        let reader = format!("{:#?}", SystemTime::now());
+        let hash = adler32(reader.as_bytes()).unwrap();
+        hash.to_string()
     }
 
     /// Calls the error callback with a given message.

@@ -3,7 +3,7 @@ use std::str;
 use base64::DecodeError;
 
 
-/// An enumeration of all possible Errors in this context.
+/// An enumeration of all possible Errors in the socket.io context.
 #[derive(Debug)]
 pub enum Error {
     InvalidPacketId(u8),

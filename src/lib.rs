@@ -1,5 +1,5 @@
 #[macro_use]
-pub mod engineio;
+mod engineio;
 pub mod socketio;
 pub mod util;
 
