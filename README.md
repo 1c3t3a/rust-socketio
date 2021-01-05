@@ -1,3 +1,5 @@
+[![Latest Version](https://img.shields.io/crates/v/rust_socketio)](https://crates.io/crates/rust_socketio)
+
 # Rust-socketio
 
 An asynchronous implementation of the socket.io protocol written in the Rust programming language.
