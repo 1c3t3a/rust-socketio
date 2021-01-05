@@ -18,6 +18,9 @@ use super::{ack::Ack, event::Event};
 /// The type of a callback function.
 type Callback<I> = RwLock<Box<dyn Fn(I) + 'static + Sync + Send>>;
 
+/// A type that contains the Ack that was given to the caller as well as the time
+/// the initial request was send to the server and the duration the user specifier
+/// timeout.
 type AckInformation = (Arc<RwLock<Ack>>, Instant, Duration);
 
 /// A struct that handles communication in the socket.io protocol.
