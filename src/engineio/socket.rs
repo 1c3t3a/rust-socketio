@@ -1,6 +1,6 @@
 use super::packet::Packet;
-use crate::error::Error;
 use crate::engineio::transport::TransportClient;
+use crate::error::Error;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, RwLock,

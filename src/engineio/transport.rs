@@ -1,10 +1,10 @@
 use crate::engineio::packet::{decode_payload, encode_payload, Packet, PacketId};
 use crate::error::Error;
 use adler32::adler32;
-use std::time::SystemTime;
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
+use std::time::SystemTime;
 use std::{
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
     time::{Duration, Instant},
@@ -251,7 +251,7 @@ impl TransportClient {
         let client = Client::new();
 
         // as we don't have a mut self, the last_ping needs to be safed for later
-        let mut last_ping = self.last_ping.clone().lock().unwrap().clone();
+        let mut last_ping = *self.last_ping.clone().lock().unwrap();
         // the time after we assume the server to be timed out
         let server_timeout = Duration::from_millis(
             Arc::as_ref(&self.connection_data)
