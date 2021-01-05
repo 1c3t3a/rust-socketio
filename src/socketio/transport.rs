@@ -49,9 +49,10 @@ impl TransportClient {
     where
         F: Fn(String) + 'static + Sync + Send,
     {
-        Ok(Arc::get_mut(&mut self.on)
+        Arc::get_mut(&mut self.on)
             .unwrap()
-            .push((event, RwLock::new(Box::new(callback)))))
+            .push((event, RwLock::new(Box::new(callback))));
+        Ok(())
     }
 
     /// Connects to the server. This includes a connection of the underlying engine.io client and
@@ -68,7 +69,10 @@ impl TransportClient {
         // construct the opening packet
         let open_packet = SocketPacket::new(
             SocketPacketId::Connect,
-            self.nsp.as_ref().clone().unwrap_or(String::from("/")),
+            self.nsp
+                .as_ref()
+                .clone()
+                .unwrap_or_else(|| String::from("/")),
             None,
             None,
             None,
@@ -92,7 +96,7 @@ impl TransportClient {
     /// Emits to certain event with given data. The data needs to be JSON, otherwise this returns
     /// an `InvalidJson` error.
     pub async fn emit(&self, event: Event, data: String) -> Result<(), Error> {
-        if let Err(_) = serde_json::from_str::<serde_json::Value>(&data) {
+        if serde_json::from_str::<serde_json::Value>(&data).is_err() {
             return Err(Error::InvalidJson(data));
         }
 
@@ -100,7 +104,10 @@ impl TransportClient {
 
         let socket_packet = SocketPacket::new(
             SocketPacketId::Event,
-            self.nsp.as_ref().clone().unwrap_or(String::from("/")),
+            self.nsp
+                .as_ref()
+                .clone()
+                .unwrap_or_else(|| String::from("/")),
             Some(vec![Left(payload)]),
             None,
             None,
@@ -117,7 +124,7 @@ impl TransportClient {
         data: String,
         timespan: Duration,
     ) -> Result<Arc<RwLock<Ack>>, Error> {
-        if let Err(_) = serde_json::from_str::<serde_json::Value>(&data) {
+        if serde_json::from_str::<serde_json::Value>(&data).is_err() {
             return Err(Error::InvalidJson(data));
         }
 
@@ -126,7 +133,10 @@ impl TransportClient {
 
         let socket_packet = SocketPacket::new(
             SocketPacketId::Event,
-            self.nsp.as_ref().clone().unwrap_or(String::from("/")),
+            self.nsp
+                .as_ref()
+                .clone()
+                .unwrap_or_else(|| String::from("/")),
             Some(vec![Left(payload)]),
             Some(id),
             None,
@@ -157,7 +167,11 @@ impl TransportClient {
                         std::str::from_utf8(&packet.data).unwrap().to_owned(),
                     ) {
                         if socket_packet.nsp
-                            != clone_self.nsp.as_ref().clone().unwrap_or(String::from("/"))
+                            != clone_self
+                                .nsp
+                                .as_ref()
+                                .clone()
+                                .unwrap_or_else(|| String::from("/"))
                         {
                             return;
                         }
@@ -170,14 +184,14 @@ impl TransportClient {
                                 if let Some(function) = clone_self.get_event_callback(Event::Error)
                                 {
                                     let lock = function.1.read().unwrap();
-                                    lock(String::from(
+                                    lock(
                                         String::from("Received an ConnectError frame")
                                             + &clone_self
                                                 .get_string_payload(socket_packet.data)
                                                 .unwrap_or(String::from(
                                                     "\"No error message provided\"",
                                                 ))[..],
-                                    ));
+                                    );
                                     drop(lock)
                                 }
                             }
@@ -296,12 +310,10 @@ impl TransportClient {
                                     drop(lock)
                                 }
                             }
-                        } else {
-                            if let Some(function) = clone_self.get_event_callback(Event::Message) {
-                                let lock = function.1.read().unwrap();
-                                spawn_scoped!(lock(data[0].to_string()));
-                                drop(lock)
-                            }
+                        } else if let Some(function) = clone_self.get_event_callback(Event::Message) {
+                            let lock = function.1.read().unwrap();
+                            spawn_scoped!(lock(data[0].to_string()));
+                            drop(lock);
                         }
                     }
                 }
@@ -323,11 +335,11 @@ impl TransportClient {
             }
         }
 
-        return if result.len() == 0 {
+        if result.is_empty() {
             None
         } else {
             Some(result.into_iter().collect::<String>())
-        };
+        }
     }
 }
 

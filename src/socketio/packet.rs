@@ -86,10 +86,10 @@ impl Packet {
         if let Some(data) = self.data.as_ref() {
             let mut binary_packets = Vec::new();
 
-            let contains_binary = data.iter().find(|payload| payload.is_right()).is_some();
+            let contains_binary = data.iter().any(|payload| payload.is_right());
 
             if contains_binary {
-                string.push_str("[");
+                string.push('[');
             }
 
             for payload in data {
@@ -117,7 +117,7 @@ impl Packet {
                 ));
             }
             if contains_binary {
-                string.push_str("]");
+                string.push(']');
             }
 
             buffer.extend(string.into_bytes());
@@ -126,7 +126,7 @@ impl Packet {
             buffer.extend(string.into_bytes());
         }
 
-        return buffer;
+        buffer
     }
 
     /// Decodes a packet given an utf-8 string.
@@ -168,10 +168,10 @@ impl Packet {
         };
 
         let next = string.chars().nth(i + 1).unwrap_or('_');
-        let id = if next.to_digit(10).is_some() && i < string.len() {
+        let id = if next.is_digit(10) && i < string.len() {
             let start = i + 1;
             i += 1;
-            while string.chars().nth(i).unwrap().to_digit(10).is_some() && i < string.len() {
+            while string.chars().nth(i).unwrap().is_digit(10) && i < string.len() {
                 i += 1;
             }
 
@@ -194,13 +194,15 @@ impl Packet {
             let mut json_data = serde_json::Value::Null;
 
             let mut end = string.len();
-            while let Err(_) = serde_json::from_str::<serde_json::Value>(
+            while serde_json::from_str::<serde_json::Value>(
                 &string
                     .chars()
                     .skip(start)
                     .take(end - start)
                     .collect::<String>(),
-            ) {
+            )
+            .is_err()
+            {
                 end -= 1;
             }
 
@@ -233,7 +235,7 @@ impl Packet {
                     str = re_open.replace(&str, "").to_string();
                     str = re_close.replace(&str, "").to_string();
 
-                    if str.len() == 0 {
+                    if str.is_empty() {
                         Some(vec![Right(buffer)])
                     } else {
                         Some(vec![Left(str), Right(buffer)])

@@ -1,7 +1,6 @@
+use base64::DecodeError;
 use std::fmt::{self, Display, Formatter};
 use std::str;
-use base64::DecodeError;
-
 
 /// An enumeration of all possible Errors in the socket.io context.
 #[derive(Debug)]
@@ -20,7 +19,6 @@ pub enum Error {
     DidNotReceiveProperAck(i32),
     IllegalActionAfterOpen,
 }
-
 
 impl From<DecodeError> for Error {
     fn from(error: DecodeError) -> Self {
