@@ -1,6 +1,7 @@
 name: Rust
 
 on: [push, pull_request]
+  # push:
   #  branches: [ master ]
   #pull_request:
   #  branches: [ master ]
@@ -18,7 +19,7 @@ jobs:
     - name: Build
       run: cargo build --verbose
     - name: Run tests
-      run: cargo test --package rust_socketio --lib -- socketio::packet::test --verbose
+      run: cargo test --verbose --package rust_socketio --lib -- socketio::packet::test socketio::engineio::packet
     - name: Linting
       run: cargo clippy --verbose
     - name: Check formatting
