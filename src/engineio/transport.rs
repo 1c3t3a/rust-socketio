@@ -50,10 +50,6 @@ struct HandshakeData {
     ping_timeout: u64,
 }
 
-// TODO: make this safe.
-unsafe impl Send for TransportClient {}
-unsafe impl Sync for TransportClient {}
-
 impl TransportClient {
     /// Creates an instance.
     pub fn new(engine_io_mode: bool) -> Self {
