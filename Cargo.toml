@@ -6,7 +6,7 @@ edition = "2018"
 description = "An implementation of a socketio client written in the async rust."
 readme = "README.md"
 repository = "https://github.com/1c3t3a/rust-socketio"
-keywords = ["socketio", "socket.io", "engineio", "engine.io", "network"]
+keywords = ["socketio", "engineio", "network"]
 categories = ["asynchronous", "network-programming", "web-programming", "web-programming::websocket"]
 license = "MIT"
 
