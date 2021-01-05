@@ -18,6 +18,8 @@ use super::{ack::Ack, event::Event};
 /// The type of a callback function.
 type Callback<I> = RwLock<Box<dyn Fn(I) + 'static + Sync + Send>>;
 
+type AckInformation = (Arc<RwLock<Ack>>, Instant, Duration);
+
 /// A struct that handles communication in the socket.io protocol.
 #[derive(Clone)]
 pub struct TransportClient {
@@ -26,7 +28,7 @@ pub struct TransportClient {
     connected: Arc<AtomicBool>,
     engineio_connected: Arc<AtomicBool>,
     on: Arc<Vec<(Event, Callback<String>)>>,
-    outstanding_acks: Arc<RwLock<Vec<(Arc<RwLock<Ack>>, Instant, Duration)>>>,
+    outstanding_acks: Arc<RwLock<Vec<AckInformation>>>,
     nsp: Arc<Option<String>>,
 }
 
@@ -160,88 +162,81 @@ impl TransportClient {
     /// Sets up the callback routes on the engineio socket, called before opening the connection.
     fn setup_callbacks(&mut self) -> Result<(), Error> {
         let clone_self = self.clone();
-        let packet_callback = move |packet: EnginePacket| {
-            match packet.packet_id {
-                EnginePacketId::Message => {
-                    if let Ok(socket_packet) = SocketPacket::decode_string(
-                        std::str::from_utf8(&packet.data).unwrap().to_owned(),
-                    ) {
-                        if socket_packet.nsp
-                            != clone_self
-                                .nsp
-                                .as_ref()
-                                .clone()
-                                .unwrap_or_else(|| String::from("/"))
-                        {
-                            return;
+        let on_data_callback = move |socket_bytes: Vec<u8>| {
+            if let Ok(socket_packet) =
+                SocketPacket::decode_string(std::str::from_utf8(&socket_bytes).unwrap().to_owned())
+            {
+                if socket_packet.nsp
+                    != clone_self
+                        .nsp
+                        .as_ref()
+                        .clone()
+                        .unwrap_or_else(|| String::from("/"))
+                {
+                    return;
+                }
+                match socket_packet.packet_type {
+                    SocketPacketId::Connect => {
+                        clone_self.connected.swap(true, Ordering::Relaxed);
+                    }
+                    SocketPacketId::ConnectError => {
+                        clone_self.connected.swap(false, Ordering::Relaxed);
+                        if let Some(function) = clone_self.get_event_callback(Event::Error) {
+                            let lock = function.1.read().unwrap();
+                            lock(
+                                String::from("Received an ConnectError frame")
+                                    + &clone_self
+                                        .get_string_payload(socket_packet.data)
+                                        .unwrap_or_else(|| {
+                                            String::from("\"No error message provided\"")
+                                        })[..],
+                            );
+                            drop(lock)
                         }
-                        match socket_packet.packet_type {
-                            SocketPacketId::Connect => {
-                                clone_self.connected.swap(true, Ordering::Relaxed);
-                            }
-                            SocketPacketId::ConnectError => {
-                                clone_self.connected.swap(false, Ordering::Relaxed);
-                                if let Some(function) = clone_self.get_event_callback(Event::Error)
-                                {
-                                    let lock = function.1.read().unwrap();
-                                    lock(
-                                        String::from("Received an ConnectError frame")
-                                            + &clone_self
-                                                .get_string_payload(socket_packet.data)
-                                                .unwrap_or(String::from(
-                                                    "\"No error message provided\"",
-                                                ))[..],
-                                    );
-                                    drop(lock)
-                                }
-                            }
-                            SocketPacketId::Disconnect => {
-                                clone_self.connected.swap(false, Ordering::Relaxed);
-                            }
-                            SocketPacketId::Event => {
-                                TransportClient::handle_event(socket_packet, &clone_self);
-                            }
-                            SocketPacketId::Ack => {
-                                let mut to_be_removed = Vec::new();
-                                if let Some(id) = socket_packet.id {
-                                    for (index, ack) in clone_self
-                                        .clone()
-                                        .outstanding_acks
-                                        .read()
-                                        .unwrap()
-                                        .iter()
-                                        .enumerate()
-                                    {
-                                        if ack.0.read().unwrap().id == id {
-                                            to_be_removed.push(index);
-                                            ack.0.write().unwrap().acked = ack.1.elapsed() < ack.2;
-                                            if ack.0.read().unwrap().acked {
-                                                if let Some(payload) = socket_packet.clone().data {
-                                                    for data in payload {
-                                                        if let Left(string) = data {
-                                                            ack.0.write().unwrap().data =
-                                                                Some(string);
-                                                        }
-                                                    }
+                    }
+                    SocketPacketId::Disconnect => {
+                        clone_self.connected.swap(false, Ordering::Relaxed);
+                    }
+                    SocketPacketId::Event => {
+                        TransportClient::handle_event(socket_packet, &clone_self);
+                    }
+                    SocketPacketId::Ack => {
+                        let mut to_be_removed = Vec::new();
+                        if let Some(id) = socket_packet.id {
+                            for (index, ack) in clone_self
+                                .clone()
+                                .outstanding_acks
+                                .read()
+                                .unwrap()
+                                .iter()
+                                .enumerate()
+                            {
+                                if ack.0.read().unwrap().id == id {
+                                    to_be_removed.push(index);
+                                    ack.0.write().unwrap().acked = ack.1.elapsed() < ack.2;
+                                    if ack.0.read().unwrap().acked {
+                                        if let Some(payload) = socket_packet.clone().data {
+                                            for data in payload {
+                                                if let Left(string) = data {
+                                                    ack.0.write().unwrap().data = Some(string);
                                                 }
                                             }
                                         }
                                     }
-                                    for index in to_be_removed {
-                                        clone_self.outstanding_acks.write().unwrap().remove(index);
-                                    }
                                 }
                             }
-                            SocketPacketId::BinaryEvent => {
-                                // call the callback
-                            }
-                            SocketPacketId::BinaryAck => {
-                                // call the callback
+                            for index in to_be_removed {
+                                clone_self.outstanding_acks.write().unwrap().remove(index);
                             }
                         }
                     }
+                    SocketPacketId::BinaryEvent => {
+                        // call the callback
+                    }
+                    SocketPacketId::BinaryAck => {
+                        // call the callback
+                    }
                 }
-                _ => (),
             }
         };
 
@@ -286,10 +281,7 @@ impl TransportClient {
             .unwrap()
             .on_close(close_callback)?;
 
-        self.engine_socket
-            .lock()
-            .unwrap()
-            .on_packet(packet_callback)
+        self.engine_socket.lock().unwrap().on_data(on_data_callback)
     }
 
     /// A method for handling the Event Socket Packets.
