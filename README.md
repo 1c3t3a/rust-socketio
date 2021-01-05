@@ -36,6 +36,11 @@ async fn main() {
  }
 ```
 
+## Documentation
+
+Documentation of this crate can be found up on [docs.rs](https://docs.rs/rust_socketio/0.1.0/rust_socketio/).
+
+
 ## Current features
 
 This is the first released version of the client, so it still lacks some features that the normal client would provide. First of all the underlying engine.io protocol still uses long-polling instead of websockets. This will be resolved as soon as both the reqwest libary as well as tungsenite-websockets will bump their tokio version to 1.0.0. At the moment only reqwest is used for async long polling. In general the full engine-io protocol is implemented and most of the features concerning the 'normal' socket.io protocol work as well.
