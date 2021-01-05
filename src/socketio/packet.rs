@@ -1,4 +1,4 @@
-use crate::util::Error;
+use crate::error::Error;
 use either::*;
 use regex::Regex;
 

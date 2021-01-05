@@ -1,5 +1,5 @@
 use super::packet::Packet;
-use crate::util::Error;
+use crate::error::Error;
 use crate::engineio::transport::TransportClient;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -31,7 +31,15 @@ impl EngineSocket {
         let cl = Arc::clone(&self.transport_client);
         tokio::spawn(async move {
             let s = cl.read().unwrap().clone();
-            s.poll_cycle().await.unwrap();
+            // this tries to restart a poll cycle whenever a 'normal' error occures, it just panics on network errors
+            // in case the poll cycle returened Ok, the server received a close frame anyway, so it's safe to terminate
+            loop {
+                match s.poll_cycle().await {
+                    Ok(_) => break,
+                    e @ Err(Error::HttpError(_)) | e @ Err(Error::ReqwestError(_)) => panic!(e),
+                    _ => (),
+                }
+            }
         });
         self.serving.swap(true, Ordering::SeqCst);
 

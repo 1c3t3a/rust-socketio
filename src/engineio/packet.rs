@@ -3,7 +3,7 @@ use base64::{decode, encode};
 use std::char;
 use std::str;
 
-use crate::util::Error;
+use crate::error::Error;
 
 /// Enumeration of the engineio Packet types.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]

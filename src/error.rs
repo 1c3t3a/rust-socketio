@@ -21,17 +21,6 @@ pub enum Error {
     IllegalActionAfterOpen,
 }
 
-/// A small macro that spawns a scoped thread.
-/// Used for calling the callback functions.
-#[macro_export]
-macro_rules! spawn_scoped {
-    ($e:expr) => {
-        crossbeam_utils::thread::scope(|s| {
-            s.spawn(|_| $e);
-        })
-        .unwrap();
-    };
-}
 
 impl From<DecodeError> for Error {
     fn from(error: DecodeError) -> Self {

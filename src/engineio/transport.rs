@@ -1,6 +1,5 @@
 use crate::engineio::packet::{decode_payload, encode_payload, Packet, PacketId};
-use crate::util::Error;
-use crate::spawn_scoped;
+use crate::error::Error;
 use adler32::adler32;
 use std::time::SystemTime;
 use reqwest::{Client, Url};
@@ -160,7 +159,7 @@ impl TransportClient {
 
                     // the response contains the handshake data
                     if let Ok(conn_data) = serde_json::from_str(&response[1..]) {
-                        self.connection_data = dbg!(Arc::new(conn_data));
+                        self.connection_data = Arc::new(conn_data);
 
                         // call the on_open callback
                         let function = self.on_open.read().unwrap();
@@ -309,7 +308,6 @@ impl TransportClient {
                             }
 
                             PacketId::Close => {
-                                dbg!("Received close!");
                                 let on_close = self.on_close.read().unwrap();
                                 if let Some(function) = on_close.as_ref() {
                                     spawn_scoped!(function(()));
@@ -323,11 +321,9 @@ impl TransportClient {
                                 unreachable!();
                             }
                             PacketId::Upgrade => {
-                                dbg!("Received upgrade!");
                                 todo!("Upgrade the connection, but only if possible");
                             }
                             PacketId::Ping => {
-                                dbg!("Received ping!");
                                 last_ping = Instant::now();
                                 self.emit(Packet::new(PacketId::Pong, Vec::new())).await?;
                             }

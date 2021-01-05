@@ -2,9 +2,8 @@ use crate::engineio::{
     packet::{Packet as EnginePacket, PacketId as EnginePacketId},
     socket::EngineSocket,
 };
+use crate::error::Error;
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
-use crate::spawn_scoped;
-use crate::util::Error;
 use either::*;
 use if_chain::if_chain;
 use rand::{thread_rng, Rng};
@@ -168,6 +167,19 @@ impl TransportClient {
                             }
                             SocketPacketId::ConnectError => {
                                 clone_self.connected.swap(false, Ordering::Relaxed);
+                                if let Some(function) = clone_self.get_event_callback(Event::Error)
+                                {
+                                    let lock = function.1.read().unwrap();
+                                    lock(String::from(
+                                        String::from("Received an ConnectError frame")
+                                            + &clone_self
+                                                .get_string_payload(socket_packet.data)
+                                                .unwrap_or(String::from(
+                                                    "\"No error message provided\"",
+                                                ))[..],
+                                    ));
+                                    drop(lock)
+                                }
                             }
                             SocketPacketId::Disconnect => {
                                 clone_self.connected.swap(false, Ordering::Relaxed);
@@ -176,12 +188,18 @@ impl TransportClient {
                                 TransportClient::handle_event(socket_packet, &clone_self);
                             }
                             SocketPacketId::Ack => {
-                                println!("Got ack: {:?}", socket_packet);
+                                let mut to_be_removed = Vec::new();
                                 if let Some(id) = socket_packet.id {
-                                    for ack in
-                                        clone_self.clone().outstanding_acks.read().unwrap().iter()
+                                    for (index, ack) in clone_self
+                                        .clone()
+                                        .outstanding_acks
+                                        .read()
+                                        .unwrap()
+                                        .iter()
+                                        .enumerate()
                                     {
                                         if ack.0.read().unwrap().id == id {
+                                            to_be_removed.push(index);
                                             ack.0.write().unwrap().acked = ack.1.elapsed() < ack.2;
                                             if ack.0.read().unwrap().acked {
                                                 if let Some(payload) = socket_packet.clone().data {
@@ -194,6 +212,9 @@ impl TransportClient {
                                                 }
                                             }
                                         }
+                                    }
+                                    for index in to_be_removed {
+                                        clone_self.outstanding_acks.write().unwrap().remove(index);
                                     }
                                 }
                             }
@@ -211,16 +232,40 @@ impl TransportClient {
         };
 
         let clone_self = self.clone();
+        let error_callback = move |msg| {
+            if let Some(function) = clone_self.get_event_callback(Event::Error) {
+                let lock = function.1.read().unwrap();
+                lock(msg);
+                drop(lock)
+            }
+        };
+
+        let clone_self = self.clone();
         let open_callback = move |_| {
             clone_self.engineio_connected.swap(true, Ordering::Relaxed);
+            if let Some(function) = clone_self.get_event_callback(Event::Connect) {
+                let lock = function.1.read().unwrap();
+                lock(String::from("Connection is opened"));
+                drop(lock)
+            }
         };
 
         let clone_self = self.clone();
         let close_callback = move |_| {
             clone_self.engineio_connected.swap(false, Ordering::Relaxed);
+            if let Some(function) = clone_self.get_event_callback(Event::Close) {
+                let lock = function.1.read().unwrap();
+                lock(String::from("Connection is closed"));
+                drop(lock)
+            }
         };
 
         self.engine_socket.lock().unwrap().on_open(open_callback)?;
+
+        self.engine_socket
+            .lock()
+            .unwrap()
+            .on_error(error_callback)?;
 
         self.engine_socket
             .lock()
@@ -245,31 +290,44 @@ impl TransportClient {
                     then {
                         if data.len() > 1 {
                             if let serde_json::Value::String(event) = data[0].clone() {
-                                if let Some(callback) = clone_self.on.iter().find(|cb_event| {
-                                    match cb_event {
-                                        (Event::Custom(e_type), _) if e_type == &event => true,
-                                        _ => false,
-                                    }
-                                }) {
-                                    let lock = callback.1.read().unwrap();
+                                if let Some(function) = clone_self.get_event_callback(Event::Custom(event)) {
+                                    let lock = function.1.read().unwrap();
                                     spawn_scoped!(lock(data[1].to_string()));
+                                    drop(lock)
                                 }
                             }
                         } else {
-                            if let Some(callback) = clone_self.on.iter().find(|cb_event| {
-                                match cb_event {
-                                    (Event::Message, _) => true,
-                                    _ => false,
-                                }
-                            }) {
-                                let lock = callback.1.read().unwrap();
+                            if let Some(function) = clone_self.get_event_callback(Event::Message) {
+                                let lock = function.1.read().unwrap();
                                 spawn_scoped!(lock(data[0].to_string()));
+                                drop(lock)
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    fn get_event_callback(&self, event: Event) -> Option<&(Event, Callback<String>)> {
+        self.on.iter().find(|item| item.0 == event)
+    }
+
+    fn get_string_payload(&self, data: Option<Vec<Either<String, Vec<u8>>>>) -> Option<String> {
+        let mut result = Vec::new();
+        if let Some(vec) = data {
+            for chunk in vec {
+                if let Left(string) = chunk {
+                    result.push(string);
+                }
+            }
+        }
+
+        return if result.len() == 0 {
+            None
+        } else {
+            Some(result.into_iter().collect::<String>())
+        };
     }
 }
 
