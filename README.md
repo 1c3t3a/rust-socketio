@@ -1,4 +1,5 @@
 [![Latest Version](https://img.shields.io/crates/v/rust_socketio)](https://crates.io/crates/rust_socketio)
+![tests](https://github.com/1c3t3a/rust-socketio/workflows/Rust/badge.svg)
 
 # Rust-socketio
 
