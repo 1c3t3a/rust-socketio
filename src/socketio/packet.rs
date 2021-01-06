@@ -1,5 +1,4 @@
 use crate::error::Error;
-use either::*;
 use regex::Regex;
 
 /// An enumeration of the different Paccket types in the socket.io protocol.
@@ -19,7 +18,8 @@ pub enum PacketId {
 pub struct Packet {
     pub packet_type: PacketId,
     pub nsp: String,
-    pub data: Option<Vec<Either<String, Vec<u8>>>>,
+    pub data: Option<String>,
+    pub binary_data: Option<Vec<u8>>,
     pub id: Option<i32>,
     pub attachements: Option<u8>,
 }
@@ -43,7 +43,8 @@ impl Packet {
     pub fn new(
         packet_type: PacketId,
         nsp: String,
-        data: Option<Vec<Either<String, Vec<u8>>>>,
+        data: Option<String>,
+        binary_data: Option<Vec<u8>>,
         id: Option<i32>,
         attachements: Option<u8>,
     ) -> Self {
@@ -51,6 +52,7 @@ impl Packet {
             packet_type,
             nsp,
             data,
+            binary_data,
             id,
             attachements,
         }
@@ -81,49 +83,27 @@ impl Packet {
             string.push_str(&id.to_string());
         }
 
-        let mut buffer = Vec::new();
-        // ... as well as the stringified json data or the bytes
-        if let Some(data) = self.data.as_ref() {
-            let mut binary_packets = Vec::new();
+        let mut buffer = string.into_bytes();
+        if let Some(bin_data) = self.binary_data.as_ref() {
+            // check if an event type is present
+            let placeholder = if let Some(event_type) = self.data.as_ref() {
+                format!(
+                    "[{},{{\"_placeholder\":true,\"num\":{}}}]",
+                    event_type,
+                    self.attachements.unwrap() - 1,
+                )
+            } else {
+                format!(
+                    "[{{\"_placeholder\":true,\"num\":{}}}]",
+                    self.attachements.unwrap() - 1,
+                )
+            };
 
-            let contains_binary = data.iter().any(|payload| payload.is_right());
-
-            if contains_binary {
-                string.push('[');
-            }
-
-            for payload in data {
-                match payload {
-                    Left(str) => {
-                        string.push_str(str);
-
-                        if contains_binary {
-                            string.push(',');
-                        }
-                    }
-                    Right(bin_data) => {
-                        binary_packets.push(bin_data.to_owned());
-                    }
-                }
-            }
-
-            let number_of_bins: i8 =
-                (data.iter().filter(|payload| payload.is_right()).count() as i8) - 1;
-
-            if number_of_bins >= 0 {
-                string.push_str(&format!(
-                    "{{\"_placeholder\":true,\"num\":{}}}",
-                    number_of_bins
-                ));
-            }
-            if contains_binary {
-                string.push(']');
-            }
-
-            buffer.extend(string.into_bytes());
-            buffer.extend(binary_packets.into_iter().flatten().collect::<Vec<u8>>());
-        } else {
-            buffer.extend(string.into_bytes());
+            // build the buffers
+            buffer.extend(placeholder.into_bytes());
+            buffer.extend(bin_data);
+        } else if let Some(data) = self.data.as_ref() {
+            buffer.extend(data.to_string().into_bytes());
         }
 
         buffer
@@ -188,6 +168,7 @@ impl Packet {
             None
         };
 
+        let mut binary_data = None;
         let data = if string.chars().nth(i + 1).is_some() {
             let start = if id.is_some() { i } else { i + 1 };
 
@@ -219,13 +200,15 @@ impl Packet {
 
             match packet_id {
                 PacketId::BinaryAck | PacketId::BinaryEvent => {
-                    let buffer = string
-                        .chars()
-                        .skip(end)
-                        .take(string.len() - end)
-                        .collect::<String>()
-                        .as_bytes()
-                        .to_vec();
+                    binary_data = Some(
+                        string
+                            .chars()
+                            .skip(end)
+                            .take(string.len() - end)
+                            .collect::<String>()
+                            .as_bytes()
+                            .to_vec(),
+                    );
 
                     let re_open = Regex::new(r"^\[").unwrap();
                     let re_close = Regex::new(r",]$|]$").unwrap();
@@ -236,18 +219,25 @@ impl Packet {
                     str = re_close.replace(&str, "").to_string();
 
                     if str.is_empty() {
-                        Some(vec![Right(buffer)])
+                        None
                     } else {
-                        Some(vec![Left(str), Right(buffer)])
+                        Some(str)
                     }
                 }
-                _ => Some(vec![Left(json_data.to_string())]),
+                _ => Some(json_data.to_string()),
             }
         } else {
             None
         };
 
-        Ok(Packet::new(packet_id, nsp, data, id, attachements))
+        Ok(Packet::new(
+            packet_id,
+            nsp,
+            data,
+            binary_data,
+            id,
+            attachements,
+        ))
     }
 }
 
@@ -265,7 +255,8 @@ mod test {
             Packet::new(
                 PacketId::Connect,
                 String::from("/"),
-                Some(vec![Left(String::from("{\"token\":\"123\"}"))]),
+                Some(String::from("{\"token\":\"123\"}")),
+                None,
                 None,
                 None,
             ),
@@ -279,7 +270,8 @@ mod test {
             Packet::new(
                 PacketId::Connect,
                 String::from("/admin"),
-                Some(vec![Left(String::from("{\"token\":\"123\"}"))]),
+                Some(String::from("{\"token\":\"123\"}")),
+                None,
                 None,
                 None,
             ),
@@ -296,6 +288,7 @@ mod test {
                 None,
                 None,
                 None,
+                None,
             ),
             packet.unwrap()
         );
@@ -307,7 +300,8 @@ mod test {
             Packet::new(
                 PacketId::Event,
                 String::from("/"),
-                Some(vec![Left(String::from("[\"hello\",1]"))]),
+                Some(String::from("[\"hello\",1]")),
+                None,
                 None,
                 None,
             ),
@@ -321,7 +315,8 @@ mod test {
             Packet::new(
                 PacketId::Event,
                 String::from("/admin"),
-                Some(vec![Left(String::from("[\"project:delete\",123]"))]),
+                Some(String::from("[\"project:delete\",123]")),
+                None,
                 Some(456),
                 None,
             ),
@@ -335,7 +330,8 @@ mod test {
             Packet::new(
                 PacketId::Ack,
                 String::from("/admin"),
-                Some(vec![Left(String::from("[]"))]),
+                Some(String::from("[]")),
+                None,
                 Some(456),
                 None,
             ),
@@ -349,7 +345,8 @@ mod test {
             Packet::new(
                 PacketId::ConnectError,
                 String::from("/admin"),
-                Some(vec![Left(String::from("{\"message\":\"Not authorized\"}"))]),
+                Some(String::from("{\"message\":\"Not authorized\"}")),
+                None,
                 None,
                 None,
             ),
@@ -365,7 +362,8 @@ mod test {
             Packet::new(
                 PacketId::BinaryEvent,
                 String::from("/"),
-                Some(vec![Left(String::from("\"hello\"")), Right(vec![1, 2, 3])]),
+                Some(String::from("\"hello\"")),
+                Some(vec![1, 2, 3]),
                 None,
                 Some(1),
             ),
@@ -382,10 +380,8 @@ mod test {
             Packet::new(
                 PacketId::BinaryEvent,
                 String::from("/admin"),
-                Some(vec![
-                    Left(String::from("\"project:delete\"")),
-                    Right(vec![1, 2, 3]),
-                ]),
+                Some(String::from("\"project:delete\"")),
+                Some(vec![1, 2, 3]),
                 Some(456),
                 Some(1),
             ),
@@ -401,7 +397,8 @@ mod test {
             Packet::new(
                 PacketId::BinaryAck,
                 String::from("/admin"),
-                Some(vec![Right(vec![3, 2, 1])]),
+                None,
+                Some(vec![3, 2, 1]),
                 Some(456),
                 Some(1),
             ),
@@ -415,7 +412,8 @@ mod test {
         let packet = Packet::new(
             PacketId::Connect,
             String::from("/"),
-            Some(vec![Left(String::from("{\"token\":\"123\"}"))]),
+            Some(String::from("{\"token\":\"123\"}")),
+            None,
             None,
             None,
         );
@@ -428,7 +426,8 @@ mod test {
         let packet = Packet::new(
             PacketId::Connect,
             String::from("/admin"),
-            Some(vec![Left(String::from("{\"token\":\"123\"}"))]),
+            Some(String::from("{\"token\":\"123\"}")),
+            None,
             None,
             None,
         );
@@ -444,6 +443,7 @@ mod test {
             None,
             None,
             None,
+            None,
         );
 
         assert_eq!(packet.encode(), "1/admin,".to_string().into_bytes());
@@ -451,7 +451,8 @@ mod test {
         let packet = Packet::new(
             PacketId::Event,
             String::from("/"),
-            Some(vec![Left(String::from("[\"hello\",1]"))]),
+            Some(String::from("[\"hello\",1]")),
+            None,
             None,
             None,
         );
@@ -461,7 +462,8 @@ mod test {
         let packet = Packet::new(
             PacketId::Event,
             String::from("/admin"),
-            Some(vec![Left(String::from("[\"project:delete\",123]"))]),
+            Some(String::from("[\"project:delete\",123]")),
+            None,
             Some(456),
             None,
         );
@@ -476,7 +478,8 @@ mod test {
         let packet = Packet::new(
             PacketId::Ack,
             String::from("/admin"),
-            Some(vec![Left(String::from("[]"))]),
+            Some(String::from("[]")),
+            None,
             Some(456),
             None,
         );
@@ -486,7 +489,8 @@ mod test {
         let packet = Packet::new(
             PacketId::ConnectError,
             String::from("/admin"),
-            Some(vec![Left(String::from("{\"message\":\"Not authorized\"}"))]),
+            Some(String::from("{\"message\":\"Not authorized\"}")),
+            None,
             None,
             None,
         );
@@ -501,7 +505,8 @@ mod test {
         let packet = Packet::new(
             PacketId::BinaryEvent,
             String::from("/"),
-            Some(vec![Left(String::from("\"hello\"")), Right(vec![1, 2, 3])]),
+            Some(String::from("\"hello\"")),
+            Some(vec![1, 2, 3]),
             None,
             Some(1),
         );
@@ -515,10 +520,8 @@ mod test {
         let packet = Packet::new(
             PacketId::BinaryEvent,
             String::from("/admin"),
-            Some(vec![
-                Left(String::from("\"project:delete\"")),
-                Right(vec![1, 2, 3]),
-            ]),
+            Some(String::from("\"project:delete\"")),
+            Some(vec![1, 2, 3]),
             Some(456),
             Some(1),
         );
@@ -532,7 +535,8 @@ mod test {
         let packet = Packet::new(
             PacketId::BinaryAck,
             String::from("/admin"),
-            Some(vec![Right(vec![3, 2, 1])]),
+            None,
+            Some(vec![3, 2, 1]),
             Some(456),
             Some(1),
         );

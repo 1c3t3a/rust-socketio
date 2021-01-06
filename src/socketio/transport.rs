@@ -4,7 +4,6 @@ use crate::engineio::{
 };
 use crate::error::Error;
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
-use either::*;
 use if_chain::if_chain;
 use rand::{thread_rng, Rng};
 use std::sync::{atomic::Ordering, RwLock};
@@ -81,6 +80,7 @@ impl TransportClient {
             None,
             None,
             None,
+            None,
         );
 
         self.send(open_packet).await
@@ -113,7 +113,8 @@ impl TransportClient {
                 .as_ref()
                 .clone()
                 .unwrap_or_else(|| String::from("/")),
-            Some(vec![Left(payload)]),
+            Some(payload),
+            None,
             None,
             None,
         );
@@ -142,7 +143,8 @@ impl TransportClient {
                 .as_ref()
                 .clone()
                 .unwrap_or_else(|| String::from("/")),
-            Some(vec![Left(payload)]),
+            Some(payload),
+            None,
             Some(id),
             None,
         );
@@ -188,11 +190,9 @@ impl TransportClient {
                             let lock = function.1.read().unwrap();
                             lock(
                                 String::from("Received an ConnectError frame")
-                                    + &clone_self
-                                        .get_string_payload(socket_packet.data)
-                                        .unwrap_or_else(|| {
-                                            String::from("\"No error message provided\"")
-                                        })[..],
+                                    + &socket_packet.data.unwrap_or_else(|| {
+                                        String::from("\"No error message provided\"")
+                                    })[..],
                             );
                             drop(lock)
                         }
@@ -219,11 +219,7 @@ impl TransportClient {
                                     ack.0.write().unwrap().acked = ack.1.elapsed() < ack.2;
                                     if ack.0.read().unwrap().acked {
                                         if let Some(payload) = socket_packet.clone().data {
-                                            for data in payload {
-                                                if let Left(string) = data {
-                                                    ack.0.write().unwrap().data = Some(string);
-                                                }
-                                            }
+                                            ack.0.write().unwrap().data = Some(payload);
                                         }
                                     }
                                 }
@@ -289,52 +285,40 @@ impl TransportClient {
 
     /// A method for handling the Event Socket Packets.
     fn handle_event(socket_packet: SocketPacket, clone_self: &TransportClient) {
+        // this could only be called with an event
         assert_eq!(socket_packet.packet_type, SocketPacketId::Event);
+
+        // unwrap the potential data
         if let Some(data) = socket_packet.data {
-            for chunk in data {
-                if_chain! {
-                    if let Left(json) = chunk;
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json);
-                    if let serde_json::Value::Array(data) = value;
+            if_chain! {
+                    // the string must be a valid json array with the event at index 0 and the
+                    // payload at index 1. if no event is specified, the message callback is used
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&data);
+                    if let serde_json::Value::Array(contents) = value;
                     then {
+                        // check which callback to use and call it with the data if it's present
                         if data.len() > 1 {
-                            if let serde_json::Value::String(event) = data[0].clone() {
+                            if let serde_json::Value::String(event) = contents[0].clone() {
                                 if let Some(function) = clone_self.get_event_callback(Event::Custom(event)) {
                                     let lock = function.1.read().unwrap();
-                                    spawn_scoped!(lock(data[1].to_string()));
+                                    spawn_scoped!(lock(contents[1].to_string()));
                                     drop(lock)
                                 }
                             }
                         } else if let Some(function) = clone_self.get_event_callback(Event::Message) {
                             let lock = function.1.read().unwrap();
-                            spawn_scoped!(lock(data[0].to_string()));
+                            spawn_scoped!(lock(contents[0].to_string()));
                             drop(lock);
                         }
                     }
-                }
+
             }
         }
     }
 
+    /// A convenient method for finding a callback for a certain event.
     fn get_event_callback(&self, event: Event) -> Option<&(Event, Callback<String>)> {
         self.on.iter().find(|item| item.0 == event)
-    }
-
-    fn get_string_payload(&self, data: Option<Vec<Either<String, Vec<u8>>>>) -> Option<String> {
-        let mut result = Vec::new();
-        if let Some(vec) = data {
-            for chunk in vec {
-                if let Left(string) = chunk {
-                    result.push(string);
-                }
-            }
-        }
-
-        if result.is_empty() {
-            None
-        } else {
-            Some(result.into_iter().collect::<String>())
-        }
     }
 }
 

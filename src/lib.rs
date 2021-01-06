@@ -243,9 +243,9 @@ mod test {
 
         tokio::time::delay_for(Duration::from_secs(2)).await;
 
-        println!("{}", ack.clone().read().unwrap().acked);
+        println!("Ack got acked: {}", ack.clone().read().unwrap().acked);
         if let Some(data) = ack.clone().read().unwrap().data.as_ref() {
-            println!("{}", data);
+            println!("Received data: {}", data);
         }
     }
 }
