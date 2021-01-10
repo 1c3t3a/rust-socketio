@@ -128,6 +128,7 @@ impl EngineSocket {
 mod test {
 
     use std::time::Duration;
+    use tokio::time::sleep;
 
     use crate::engineio::packet::PacketId;
 
@@ -192,7 +193,7 @@ mod test {
             .await
             .unwrap();
 
-        tokio::time::delay_for(Duration::from_secs(26)).await;
+        sleep(Duration::from_secs(26)).await;
 
         socket
             .emit(Packet::new(

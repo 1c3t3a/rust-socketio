@@ -219,6 +219,7 @@ mod test {
 
     use super::*;
     use serde_json::json;
+    use tokio::time::sleep;
 
     #[actix_rt::test]
     async fn it_works() {
@@ -241,7 +242,7 @@ mod test {
         assert!(ack.is_ok());
         let ack = ack.unwrap();
 
-        tokio::time::delay_for(Duration::from_secs(2)).await;
+        sleep(Duration::from_secs(2)).await;
 
         println!("Ack got acked: {}", ack.clone().read().unwrap().acked);
         if let Some(data) = ack.clone().read().unwrap().data.as_ref() {

@@ -325,7 +325,8 @@ impl TransportClient {
 #[cfg(test)]
 mod test {
     use std::time::Duration;
-
+    use tokio::time::sleep;
+    
     use super::*;
 
     #[actix_rt::test]
@@ -345,7 +346,7 @@ mod test {
             .await
             .unwrap();
 
-        tokio::time::delay_for(Duration::from_secs(26)).await;
+        sleep(Duration::from_secs(2)).await;
 
         println!("Ack acked? {}", id.read().unwrap().acked);
         println!("Ack data: {}", id.read().unwrap().data.as_ref().unwrap());
