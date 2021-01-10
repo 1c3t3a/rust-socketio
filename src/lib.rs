@@ -3,7 +3,8 @@
 //!
 //! ``` rust
 //! use rust_socketio::Socket;
-//! use serde_json::{Value, json};
+//! use serde_json::json;
+//! use tokio::time::sleep;
 //!
 //! #[tokio::main]
 //! async fn main() {
@@ -22,7 +23,7 @@
 //!     // emit with an ack
 //!     let ack = socket.emit_with_ack("foo", payload.to_string(), Duration::from_secs(2)).await.unwrap();
 //!
-//!     tokio::time::delay_for(Duration::from_secs(2)).await;
+//!     sleep(Duration::from_secs(2)).await;
 //!
 //!     // check if ack is present and read the data
 //!     if ack.read().expect("Server panicked anyway").acked {
@@ -182,8 +183,9 @@ impl Socket {
     /// # Example
     /// ```
     /// use rust_socketio::Socket;
-    /// use serde_json::{Value, json};
+    /// use serde_json::json;
     /// use std::time::Duration;
+    /// use tokio::time::sleep;
     ///
     /// #[tokio::main]
     /// async fn main() {
@@ -195,7 +197,7 @@ impl Socket {
     ///     let payload = json!({"token": 123});
     ///     let ack = socket.emit_with_ack("foo", payload.to_string(), Duration::from_secs(2)).await.unwrap();
     ///
-    ///     tokio::time::delay_for(Duration::from_secs(2)).await;
+    ///     sleep(Duration::from_secs(2)).await;
     ///
     ///     if ack.read().expect("Server panicked anyway").acked {
     ///         println!("{}", ack.read().expect("Server panicked anyway").data.as_ref().unwrap());

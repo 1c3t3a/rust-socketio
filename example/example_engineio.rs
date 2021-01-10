@@ -1,3 +1,4 @@
+use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() {
@@ -38,7 +39,7 @@ async fn main() {
 
     socket.emit(Packet::new(PacketId::Ping, Vec::new())).await.unwrap();
 
-    tokio::time::delay_for(Duration::from_secs(26)).await;
+    sleep(Duration::from_secs(26)).await;
 
     socket.emit(Packet::new(
         PacketId::Message,

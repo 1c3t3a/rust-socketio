@@ -9,7 +9,8 @@ An asynchronous implementation of the socket.io protocol written in the Rust pro
 
 ``` rust
 use rust_socketio::Socket;
-use serde_json::{Value, json};
+use serde_json::json;
+use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() {
@@ -28,7 +29,7 @@ async fn main() {
     // emit with an ack
     let ack = socket.emit_with_ack("foo", payload.to_string(), Duration::from_secs(2)).await.unwrap();
 
-    tokio::time::delay_for(Duration::from_secs(2)).await;
+    sleep(Duration::from_secs(2)).await;
 
     // check if ack is present and read the data
     if ack.read().expect("Server panicked anyway").acked {
