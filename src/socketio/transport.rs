@@ -326,7 +326,7 @@ impl TransportClient {
 mod test {
     use std::time::Duration;
     use tokio::time::sleep;
-    
+
     use super::*;
 
     #[actix_rt::test]
