@@ -1,17 +1,14 @@
 [package]
 name = "rust_socketio"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Bastian Kersting <bastian@cmbt.de>"]
 edition = "2018"
-description = "An implementation of a socketio client written in the async rust."
+description = "An implementation of a socketio client written in async rust."
 readme = "README.md"
 repository = "https://github.com/1c3t3a/rust-socketio"
 keywords = ["socketio", "engineio", "network"]
 categories = ["asynchronous", "network-programming", "web-programming", "web-programming::websocket"]
 license = "MIT"
-
-[badges]
-maintenance = { status = "Ongoing development" }
 
 [dependencies]
 base64 = "0.13.0"
