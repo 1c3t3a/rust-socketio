@@ -25,6 +25,7 @@ pub struct Packet {
 }
 
 /// Converts an u8 byte to an PacketId.
+#[inline]
 pub fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
     match b as char {
         '0' => Ok(PacketId::Connect),

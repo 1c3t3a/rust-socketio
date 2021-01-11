@@ -317,6 +317,7 @@ impl TransportClient {
     }
 
     /// A convenient method for finding a callback for a certain event.
+    #[inline]
     fn get_event_callback(&self, event: Event) -> Option<&(Event, Callback<String>)> {
         self.on.iter().find(|item| item.0 == event)
     }

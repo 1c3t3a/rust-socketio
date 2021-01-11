@@ -343,6 +343,7 @@ impl TransportClient {
     }
 
     /// Produces a random String that is used to prevent browser caching.
+    #[inline]
     fn get_random_t() -> String {
         let reader = format!("{:#?}", SystemTime::now());
         let hash = adler32(reader.as_bytes()).unwrap();
@@ -350,6 +351,7 @@ impl TransportClient {
     }
 
     /// Calls the error callback with a given message.
+    #[inline]
     fn call_error_callback(&self, text: String) {
         let function = self.on_error.read().unwrap();
         if let Some(function) = function.as_ref() {

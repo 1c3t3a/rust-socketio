@@ -28,6 +28,7 @@ pub struct Packet {
 const SEPERATOR: char = '\x1e';
 
 /// Converts a byte into the corresponding packet id.
+#[inline]
 fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
     match b as char {
         '0' => Ok(PacketId::Open),
@@ -80,6 +81,7 @@ impl Packet {
     }
 
     /// Encodes a packet into an u8 byte stream.
+    #[inline]
     fn encode_packet(self) -> Vec<u8> {
         let mut result = Vec::new();
         result.extend_from_slice((self.packet_id as u8).to_string().as_bytes());
@@ -90,6 +92,7 @@ impl Packet {
     /// Encodes a packet with the payload as base64. Observed some strange
     /// behavior while doing this with socket.io packets, works with engine.io packets.
     #[allow(dead_code)]
+    #[inline]
     fn encode_base64(self) -> Vec<u8> {
         assert_eq!(self.packet_id, PacketId::Message);
 
