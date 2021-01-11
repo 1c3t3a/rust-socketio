@@ -135,7 +135,7 @@ impl TransportClient {
         }
 
         let payload = format!("[\"{}\",{}]", String::from(event), data);
-        let id = thread_rng().gen_range(0, 999);
+        let id = thread_rng().gen_range(0..999);
 
         let socket_packet = SocketPacket::new(
             SocketPacketId::Event,
