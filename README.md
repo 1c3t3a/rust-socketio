@@ -3,7 +3,7 @@
 
 # Rust-socketio-client
 
-An asynchronous implementation of a socket.io client written in the Rust programming language.
+An asynchronous implementation of a socket.io client written in the Rust programming language. This implementation currently supports revision 5 of the socket.io protocol and therefore revision 4 of the engine.io protocol.
 
 ## Example usage
 
