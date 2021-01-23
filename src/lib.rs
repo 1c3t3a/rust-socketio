@@ -74,12 +74,9 @@ pub mod socketio;
 pub mod error;
 
 use crate::error::Error;
-use std::{
-    sync::{Arc, RwLock},
-    time::Duration,
-};
+use std::time::Duration;
 
-use crate::socketio::{ack::Ack, transport::TransportClient};
+use crate::socketio::transport::TransportClient;
 
 /// A socket that handles communication with the server.
 /// It's initialized with a specific address as well as an
@@ -204,14 +201,18 @@ impl Socket {
     ///     }
     /// }
     /// ```
-    pub async fn emit_with_ack(
+    pub async fn emit_with_ack<F>(
         &mut self,
         event: &str,
         data: String,
         timeout: Duration,
-    ) -> Result<Arc<RwLock<Ack>>, Error> {
+        callback: F,
+    ) -> Result<(), Error>
+    where
+        F: Fn(String) + 'static + Send + Sync,
+    {
         self.transport
-            .emit_with_ack(event.into(), data, timeout)
+            .emit_with_ack(event.into(), data, timeout, callback)
             .await
     }
 }
@@ -221,7 +222,6 @@ mod test {
 
     use super::*;
     use serde_json::json;
-    use tokio::time::sleep;
 
     #[actix_rt::test]
     async fn it_works() {
@@ -238,17 +238,21 @@ mod test {
 
         assert!(result.is_ok());
 
+        let ack_callback = |message: String| {
+            println!("Yehaa! My ack got acked?");
+            println!("Ack data: {}", message);
+        };
+
         let ack = socket
-            .emit_with_ack("test", payload.to_string(), Duration::from_secs(2))
+            .emit_with_ack(
+                "test",
+                payload.to_string(),
+                Duration::from_secs(2),
+                ack_callback,
+            )
             .await;
         assert!(ack.is_ok());
-        let ack = ack.unwrap();
 
-        sleep(Duration::from_secs(2)).await;
-
-        println!("Ack got acked: {}", ack.clone().read().unwrap().acked);
-        if let Some(data) = ack.clone().read().unwrap().data.as_ref() {
-            println!("Received data: {}", data);
-        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
     }
 }

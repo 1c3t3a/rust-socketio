@@ -12,15 +12,21 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::{ack::Ack, event::Event};
+use super::event::Event;
 
 /// The type of a callback function.
-type Callback<I> = RwLock<Box<dyn Fn(I) + 'static + Sync + Send>>;
+pub(crate) type Callback<I> = RwLock<Box<dyn Fn(I) + 'static + Sync + Send>>;
 
-/// A type that contains the Ack that was given to the caller as well as the time
-/// the initial request was send to the server and the duration the user specifier
-/// timeout.
-type AckInformation = (Arc<RwLock<Ack>>, Instant, Duration);
+/// Represents an Ack which is given back to the caller.
+/// This holds the internal id as well as the current acked state.
+/// It also holds data which will be accesible as soon as the acked state is set
+/// to true. An Ack that didn't get acked won't contain data.
+pub(crate) struct Ack {
+    pub id: i32,
+    timeout: Duration,
+    time_started: Instant,
+    callback: Callback<String>,
+}
 
 /// A struct that handles communication in the socket.io protocol.
 #[derive(Clone)]
@@ -30,7 +36,7 @@ pub struct TransportClient {
     connected: Arc<AtomicBool>,
     engineio_connected: Arc<AtomicBool>,
     on: Arc<Vec<(Event, Callback<String>)>>,
-    outstanding_acks: Arc<RwLock<Vec<AckInformation>>>,
+    outstanding_acks: Arc<RwLock<Vec<Ack>>>,
     nsp: Arc<Option<String>>,
 }
 
@@ -124,12 +130,16 @@ impl TransportClient {
 
     /// Emits and requests an ack. The ack is returned a Arc<RwLock<Ack>> to acquire shared
     /// mutability. This ack will be changed as soon as the server answered with an ack.
-    pub async fn emit_with_ack(
+    pub async fn emit_with_ack<F>(
         &mut self,
         event: Event,
         data: String,
-        timespan: Duration,
-    ) -> Result<Arc<RwLock<Ack>>, Error> {
+        timeout: Duration,
+        callback: F,
+    ) -> Result<(), Error>
+    where
+        F: Fn(String) + 'static + Send + Sync,
+    {
         if serde_json::from_str::<serde_json::Value>(&data).is_err() {
             return Err(Error::InvalidJson(data));
         }
@@ -149,19 +159,18 @@ impl TransportClient {
             None,
         );
 
-        let ack = Arc::new(RwLock::new(Ack {
+        let ack = Ack {
             id,
-            acked: false,
-            data: None,
-        }));
+            time_started: Instant::now(),
+            timeout,
+            callback: RwLock::new(Box::new(callback)),
+        };
+
         // add the ack to the tuple of outstanding acks
-        self.outstanding_acks
-            .write()
-            .unwrap()
-            .push((ack.clone(), Instant::now(), timespan));
+        self.outstanding_acks.write().unwrap().push(ack);
 
         self.send(socket_packet).await?;
-        Ok(ack)
+        Ok(())
     }
 
     /// Sets up the callback routes on the engineio socket, called before opening the connection.
@@ -214,12 +223,14 @@ impl TransportClient {
                                 .iter()
                                 .enumerate()
                             {
-                                if ack.0.read().unwrap().id == id {
+                                if ack.id == id {
                                     to_be_removed.push(index);
-                                    ack.0.write().unwrap().acked = ack.1.elapsed() < ack.2;
-                                    if ack.0.read().unwrap().acked {
+
+                                    if ack.time_started.elapsed() < ack.timeout {
                                         if let Some(payload) = socket_packet.clone().data {
-                                            ack.0.write().unwrap().data = Some(payload);
+                                            let function = ack.callback.read().unwrap();
+                                            spawn_scoped!(function(payload));
+                                            drop(function);
                                         }
                                     }
                                 }
@@ -326,7 +337,6 @@ impl TransportClient {
 #[cfg(test)]
 mod test {
     use std::time::Duration;
-    use tokio::time::sleep;
 
     use super::*;
 
@@ -342,18 +352,18 @@ mod test {
 
         socket.connect().await.unwrap();
 
-        let id = socket
-            .emit_with_ack("test".into(), "123".to_owned(), Duration::from_secs(10))
-            .await
-            .unwrap();
-
-        sleep(Duration::from_secs(2)).await;
-
-        println!("Ack acked? {}", id.read().unwrap().acked);
-        println!("Ack data: {}", id.read().unwrap().data.as_ref().unwrap());
+        let ack_callback = |message: String| {
+            println!("Yehaa! My ack got acked?");
+            println!("Ack data: {}", message);
+        };
 
         socket
-            .emit("test".into(), String::from("\"Hallo\""))
+            .emit_with_ack(
+                "test".into(),
+                "123".to_owned(),
+                Duration::from_secs(10),
+                ack_callback,
+            )
             .await
             .unwrap();
     }
