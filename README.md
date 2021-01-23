@@ -26,15 +26,17 @@ async fn main() {
     let payload = json!({"token": 123});
     socket.emit("foo", payload.to_string()).await.expect("Server unreachable");
 
+    // define a callback, that's executed when the ack got acked
+    let ack_callback = |message: String| {
+            println!("Yehaa! My ack got acked?");
+            println!("Ack data: {}", message);
+    };
+
     // emit with an ack
-    let ack = socket.emit_with_ack("foo", payload.to_string(), Duration::from_secs(2)).await.unwrap();
-
-    sleep(Duration::from_secs(2)).await;
-
-    // check if ack is present and read the data
-    if ack.read().expect("Server panicked anyway").acked {
-        println!("{}", ack.read().expect("Server panicked anyway").data.as_ref().unwrap());
-    }
+    let ack = socket
+            .emit_with_ack("test", payload.to_string(), Duration::from_secs(2), ack_callback)
+            .await
+            .expect("Server unreachable");
  }
 ```
 
