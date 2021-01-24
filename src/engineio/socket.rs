@@ -8,7 +8,7 @@ use std::sync::{
 
 /// An engineio socket that manages the connection with the server
 /// and allows to register the common callbacks.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EngineSocket {
     transport_client: Arc<RwLock<TransportClient>>,
     serving: Arc<AtomicBool>,

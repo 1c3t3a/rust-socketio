@@ -2,7 +2,7 @@ use crate::error::Error;
 use regex::Regex;
 
 /// An enumeration of the different Paccket types in the socket.io protocol.
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum PacketId {
     Connect = 0,
     Disconnect = 1,

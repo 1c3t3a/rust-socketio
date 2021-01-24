@@ -6,7 +6,10 @@ use crate::error::Error;
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
 use if_chain::if_chain;
 use rand::{thread_rng, Rng};
-use std::sync::{atomic::Ordering, RwLock};
+use std::{
+    fmt::Debug,
+    sync::{atomic::Ordering, RwLock},
+};
 use std::{
     sync::{atomic::AtomicBool, Arc, Mutex},
     time::{Duration, Instant},
@@ -21,7 +24,7 @@ pub(crate) type Callback<I> = RwLock<Box<dyn Fn(I) + 'static + Sync + Send>>;
 /// This holds the internal id as well as the current acked state.
 /// It also holds data which will be accesible as soon as the acked state is set
 /// to true. An Ack that didn't get acked won't contain data.
-pub(crate) struct Ack {
+pub struct Ack {
     pub id: i32,
     timeout: Duration,
     time_started: Instant,
@@ -331,6 +334,28 @@ impl TransportClient {
     #[inline]
     fn get_event_callback(&self, event: Event) -> Option<&(Event, Callback<String>)> {
         self.on.iter().find(|item| item.0 == event)
+    }
+}
+
+impl Debug for Ack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "Ack(id: {:?}), timeout: {:?}, time_started: {:?}, callback: {}",
+            self.id, self.timeout, self.time_started, "Fn(String)",
+        ))
+    }
+}
+
+impl Debug for TransportClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("TransportClient(engine_socket: {:?}, host: {:?}, connected: {:?}, engineio_connected: {:?}, on: <defined callbacks>, outstanding_acks: {:?}, nsp: {:?})",
+            self.engine_socket,
+            self.host,
+            self.connected,
+            self.engineio_connected,
+            self.outstanding_acks,
+            self.nsp,
+        ))
     }
 }
 

@@ -3,8 +3,8 @@ use crate::error::Error;
 use adler32::adler32;
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::Ordering;
 use std::time::SystemTime;
+use std::{fmt::Debug, sync::atomic::Ordering};
 use std::{
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
     time::{Duration, Instant},
@@ -128,20 +128,12 @@ impl TransportClient {
             return Ok(());
         }
 
+        // build the query path, random_t is used to prevent browser caching
+        let query_path = self.get_query_path();
+
         match &mut self.transport {
             TransportType::Polling(client) => {
-                // build the query path, random_t is used to prevent browser caching
-                let query_path = &format!(
-                    "/{}/?EIO=4&transport=polling&t={}",
-                    if self.engine_io_mode.load(Ordering::Relaxed) {
-                        "engine.io"
-                    } else {
-                        "socket.io"
-                    },
-                    TransportClient::get_random_t(),
-                )[..];
-
-                if let Ok(full_address) = Url::parse(&(address.clone() + query_path)[..]) {
+                if let Ok(full_address) = Url::parse(&(address.clone() + &query_path)[..]) {
                     self.host_address = Arc::new(Mutex::new(Some(address)));
 
                     let response = client
@@ -196,21 +188,12 @@ impl TransportClient {
 
         match &self.transport {
             TransportType::Polling(client) => {
-                let query_path = &format!(
-                    "/{}/?EIO=4&transport=polling&t={}&sid={}",
-                    if self.engine_io_mode.load(Ordering::Relaxed) {
-                        "engine.io"
-                    } else {
-                        "socket.io"
-                    },
-                    TransportClient::get_random_t(),
-                    Arc::as_ref(&self.connection_data).as_ref().unwrap().sid
-                );
+                let query_path = self.get_query_path();
 
                 // build the target address
                 let host = self.host_address.lock().unwrap().clone();
                 let address =
-                    Url::parse(&(host.as_ref().unwrap().to_owned() + query_path)[..]).unwrap();
+                    Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
                 drop(host);
 
                 // send a post request with the encoded payload as body
@@ -265,20 +248,11 @@ impl TransportClient {
                 // we wont't use the shared client as this blocks the ressource
                 // in the long polling requests
                 TransportType::Polling(_) => {
-                    let query_path = &format!(
-                        "/{}/?EIO=4&transport=polling&t={}&sid={}",
-                        if self.engine_io_mode.load(Ordering::Relaxed) {
-                            "engine.io"
-                        } else {
-                            "socket.io"
-                        },
-                        TransportClient::get_random_t(),
-                        Arc::as_ref(&self.connection_data).as_ref().unwrap().sid
-                    );
+                    let query_path = self.get_query_path();
 
                     let host = self.host_address.lock().unwrap().clone();
                     let address =
-                        Url::parse(&(host.as_ref().unwrap().to_owned() + query_path)[..]).unwrap();
+                        Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
                     drop(host);
 
                     // TODO: check if to_vec is inefficient here
@@ -358,6 +332,74 @@ impl TransportClient {
             spawn_scoped!(function(text));
         }
         drop(function);
+    }
+
+    // Constructs the path for a request, depending on the
+    // different situations.
+    #[inline]
+    fn get_query_path(&self) -> String {
+        // build the base path
+        let mut path = format!(
+            "/{}/?EIO=4&transport={}&t={}",
+            if self.engine_io_mode.load(Ordering::Relaxed) {
+                "engine.io"
+            } else {
+                "socket.io"
+            },
+            match self.transport {
+                TransportType::Polling(_) => "polling",
+            },
+            TransportClient::get_random_t(),
+        );
+        // append a session id if the socket is connected
+        if self.connected.load(Ordering::Relaxed) {
+            path.push_str(&format!(
+                "&sid={}",
+                Arc::as_ref(&self.connection_data).as_ref().unwrap().sid
+            ));
+        }
+
+        path
+    }
+}
+
+impl Debug for TransportClient {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!(
+            "TransportClient(transport: {:?}, on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, host_address: {:?}, connection_data: {:?}, engine_io_mode: {:?})",
+            self.transport,
+            if self.on_error.read().unwrap().is_some() {
+                "Fn(String)"
+            } else {
+                "None"
+            },
+            if self.on_open.read().unwrap().is_some() {
+                "Fn(())"
+            } else {
+                "None"
+            },
+            if self.on_close.read().unwrap().is_some() {
+                "Fn(())"
+            } else {
+                "None"
+            },
+            if self.on_packet.read().unwrap().is_some() {
+                "Fn(Packet)"
+            } else {
+                "None"
+            },
+            if self.on_data.read().unwrap().is_some() {
+                "Fn(Vec<u8>)"
+            } else {
+                "None"
+            },
+            self.connected,
+            self.last_ping,
+            self.last_pong,
+            self.host_address,
+            self.connection_data,
+            self.engine_io_mode,
+        ))
     }
 }
 
