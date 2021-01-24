@@ -95,12 +95,12 @@ impl Socket {
     /// use rust_socketio::Socket;
     ///
     /// // this connects the socket to the given url as well as the default namespace "/""
-    /// let socket = Socket::new(String::from("http://localhost:80"), None);
+    /// let socket = Socket::new("http://localhost:80", None);
     ///
     /// // this connects the socket to the given url as well as the namespace "/admin"
-    /// let socket = Socket::new(String::from("http://localhost:80"), Some("/admin"));
+    /// let socket = Socket::new("http://localhost:80", Some("/admin"));
     /// ```
-    pub fn new(address: String, namespace: Option<&str>) -> Self {
+    pub fn new<T: Into<String>>(address: T, namespace: Option<&str>) -> Self {
         Socket {
             transport: TransportClient::new(address, namespace.map(String::from)),
         }
@@ -112,7 +112,7 @@ impl Socket {
     /// ```rust
     /// use rust_socketio::Socket;
     ///
-    /// let mut socket = Socket::new(String::from("http://localhost:80"), None);
+    /// let mut socket = Socket::new("http://localhost:80", None);
     /// let result = socket.on("foo", |message| println!("{}", message));
     ///
     /// assert!(result.is_ok());
@@ -132,7 +132,7 @@ impl Socket {
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let mut socket = Socket::new(String::from("http://localhost:80"), None);
+    ///     let mut socket = Socket::new("http://localhost:80", None);
     ///
     ///     socket.on("foo", |message| println!("{}", message)).unwrap();
     ///     let result = socket.connect().await;
@@ -155,18 +155,18 @@ impl Socket {
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let mut socket = Socket::new(String::from("http://localhost:80"), None);
+    ///     let mut socket = Socket::new("http://localhost:80", None);
     ///
     ///     socket.on("foo", |message| println!("{}", message)).unwrap();
     ///     socket.connect().await.expect("Connection failed");
     ///
     ///     let payload = json!({"token": 123});
-    ///     let result = socket.emit("foo", payload.to_string()).await;
+    ///     let result = socket.emit("foo", &payload.to_string()).await;
     ///
     ///     assert!(result.is_ok());
     /// }
     /// ```
-    pub async fn emit(&mut self, event: &str, data: String) -> Result<(), Error> {
+    pub async fn emit(&mut self, event: &str, data: &str) -> Result<(), Error> {
         self.transport.emit(event.into(), data).await
     }
 
@@ -187,13 +187,13 @@ impl Socket {
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let mut socket = Socket::new(String::from("http://localhost:80"), None);
+    ///     let mut socket = Socket::new("http://localhost:80", None);
     ///
     ///     socket.on("foo", |message| println!("{}", message)).unwrap();
     ///     socket.connect().await.expect("Connection failed");
     ///
     ///     let payload = json!({"token": 123});
-    ///     let ack = socket.emit_with_ack("foo", payload.to_string(), Duration::from_secs(2)).await.unwrap();
+    ///     let ack = socket.emit_with_ack("foo", &payload.to_string(), Duration::from_secs(2)).await.unwrap();
     ///
     ///     sleep(Duration::from_secs(2)).await;
     ///
@@ -205,7 +205,7 @@ impl Socket {
     pub async fn emit_with_ack<F>(
         &mut self,
         event: &str,
-        data: String,
+        data: &str,
         timeout: Duration,
         callback: F,
     ) -> Result<(), Error>
@@ -226,7 +226,7 @@ mod test {
 
     #[actix_rt::test]
     async fn it_works() {
-        let mut socket = Socket::new(String::from("http://localhost:4200"), None);
+        let mut socket = Socket::new("http://localhost:4200", None);
 
         let result = socket.on("test", |msg| println!("{}", msg));
         assert!(result.is_ok());
@@ -235,7 +235,7 @@ mod test {
         assert!(result.is_ok());
 
         let payload = json!({"token": 123});
-        let result = socket.emit("test", payload.to_string()).await;
+        let result = socket.emit("test", &payload.to_string()).await;
 
         assert!(result.is_ok());
 
@@ -247,7 +247,7 @@ mod test {
         let ack = socket
             .emit_with_ack(
                 "test",
-                payload.to_string(),
+                &payload.to_string(),
                 Duration::from_secs(2),
                 ack_callback,
             )

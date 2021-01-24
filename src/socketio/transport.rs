@@ -45,10 +45,10 @@ pub struct TransportClient {
 
 impl TransportClient {
     /// Creates an instance.
-    pub fn new(address: String, nsp: Option<String>) -> Self {
+    pub fn new<T: Into<String>>(address: T, nsp: Option<String>) -> Self {
         TransportClient {
             engine_socket: Arc::new(Mutex::new(EngineSocket::new(false))),
-            host: Arc::new(address),
+            host: Arc::new(address.into()),
             connected: Arc::new(AtomicBool::default()),
             engineio_connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
@@ -109,9 +109,9 @@ impl TransportClient {
 
     /// Emits to certain event with given data. The data needs to be JSON, otherwise this returns
     /// an `InvalidJson` error.
-    pub async fn emit(&self, event: Event, data: String) -> Result<(), Error> {
+    pub async fn emit(&self, event: Event, data: &str) -> Result<(), Error> {
         if serde_json::from_str::<serde_json::Value>(&data).is_err() {
-            return Err(Error::InvalidJson(data));
+            return Err(Error::InvalidJson(data.to_owned()));
         }
 
         let payload = format!("[\"{}\",{}]", String::from(event), data);
@@ -136,7 +136,7 @@ impl TransportClient {
     pub async fn emit_with_ack<F>(
         &mut self,
         event: Event,
-        data: String,
+        data: &str,
         timeout: Duration,
         callback: F,
     ) -> Result<(), Error>
@@ -144,7 +144,7 @@ impl TransportClient {
         F: Fn(String) + 'static + Send + Sync,
     {
         if serde_json::from_str::<serde_json::Value>(&data).is_err() {
-            return Err(Error::InvalidJson(data));
+            return Err(Error::InvalidJson(data.into()));
         }
 
         let payload = format!("[\"{}\",{}]", String::from(event), data);
@@ -385,7 +385,7 @@ mod test {
         socket
             .emit_with_ack(
                 "test".into(),
-                "123".to_owned(),
+                "123",
                 Duration::from_secs(10),
                 ack_callback,
             )
