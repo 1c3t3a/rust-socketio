@@ -14,7 +14,7 @@ use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() {
-    let mut socket = Socket::new(String::from("http://localhost:80"), Some("/admin"));
+    let mut socket = Socket::new("http://localhost:80", Some("/admin"));
 
     // callback for the "foo" event
     socket.on("foo", |message| println!("{}", message)).unwrap();
@@ -24,7 +24,7 @@ async fn main() {
 
     // emit to the "foo" event
     let payload = json!({"token": 123});
-    socket.emit("foo", payload.to_string()).await.expect("Server unreachable");
+    socket.emit("foo", &payload.to_string()).await.expect("Server unreachable");
 
     // define a callback, that's executed when the ack got acked
     let ack_callback = |message: String| {
@@ -34,7 +34,7 @@ async fn main() {
 
     // emit with an ack
     let ack = socket
-            .emit_with_ack("test", payload.to_string(), Duration::from_secs(2), ack_callback)
+            .emit_with_ack("test", &payload.to_string(), Duration::from_secs(2), ack_callback)
             .await
             .expect("Server unreachable");
  }
