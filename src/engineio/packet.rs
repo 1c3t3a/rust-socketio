@@ -48,7 +48,9 @@ impl Packet {
         Packet { packet_id, data }
     }
 
-    // TODO: Maybe replace the Vec<u8> by a u8 array as this might be inefficient
+    // TODO: Maybe replace the Vec<u8> by a u8 array as this might be
+    // inefficient
+
     /// Decodes a single packet from an u8 byte stream.
     fn decode_packet(bytes: Vec<u8>) -> Result<Self, Error> {
         if bytes.is_empty() {
@@ -90,7 +92,8 @@ impl Packet {
     }
 
     /// Encodes a packet with the payload as base64. Observed some strange
-    /// behavior while doing this with socket.io packets, works with engine.io packets.
+    /// behavior while doing this with socket.io packets, works with engine.io
+    /// packets.
     #[allow(dead_code)]
     #[inline]
     fn encode_base64(self) -> Vec<u8> {
@@ -104,20 +107,21 @@ impl Packet {
     }
 }
 
-/// Decodes a payload. Payload in the engine.io context means a chain of normal packets seperated
-/// by a certain SEPERATOR, in this case the delimiter \x30.
+/// Decodes a payload. Payload in the engine.io context means a chain of normal
+/// packets separated by a certain SEPERATOR, in this case the delimiter \x30.
 pub fn decode_payload(payload: Vec<u8>) -> Result<Vec<Packet>, Error> {
     let mut vec = Vec::new();
     for packet_bytes in payload.split(|byte| (*byte as char) == SEPERATOR) {
-        // this conversion might be inefficent, as the 'to_vec' method copies the elements
+        // this conversion might be inefficent, as the 'to_vec' method copies
+        // the elements
         vec.push(Packet::decode_packet((*packet_bytes).to_vec())?);
     }
 
     Ok(vec)
 }
 
-/// Encodes a payload. Payload in the engine.io context means a chain of normal packets seperated
-/// by a certain SEPERATOR, in this case the delimiter \x30.
+/// Encodes a payload. Payload in the engine.io context means a chain of normal
+/// packets separated by a certain SEPERATOR, in this case the delimiter \x30.
 pub fn encode_payload(packets: Vec<Packet>) -> Vec<u8> {
     let mut vec = Vec::new();
     for packet in packets {

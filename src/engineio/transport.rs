@@ -10,8 +10,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The different types of transport. Used for actually
-/// transmitting the payload.
+/// The different types of transport. Used for actually transmitting the
+/// payload.
 #[derive(Debug, Clone)]
 enum TransportType {
     Polling(Arc<Mutex<Client>>),
@@ -20,8 +20,9 @@ enum TransportType {
 /// Type of a callback function. (Normal closures can be passed in here).
 type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
 
-/// A client that handles the plain transmission of packets in the engine.io protocol.
-/// Used by the wrapper EngineSocket. This struct also holds the callback functions.
+/// A client that handles the plain transmission of packets in the engine.io
+/// protocol. Used by the wrapper EngineSocket. This struct also holds the
+/// callback functions.
 #[derive(Clone)]
 pub struct TransportClient {
     transport: TransportType,
@@ -38,8 +39,8 @@ pub struct TransportClient {
     engine_io_mode: Arc<AtomicBool>,
 }
 
-/// The data that get's exchanged in the handshake. It's content
-/// is usually defined by the server.
+/// The data that gets exchanged in the handshake. Its content is usually
+/// defined by the server.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct HandshakeData {
     sid: String,
@@ -119,9 +120,10 @@ impl TransportClient {
         drop(on_close);
     }
 
-    /// Opens the connection to a certain server. This includes an opening GET request to the server.
-    /// The server passes back the handshake data in the response. Afterwards a first Pong packet is sent
-    /// to the server to trigger the Ping-cycle.
+    /// Opens the connection to a certain server. This includes an opening GET
+    /// request to the server. The server passes back the handshake data in the
+    /// response. Afterwards a first Pong packet is sent to the server to
+    /// trigger the Ping-cycle.
     pub async fn open(&mut self, address: String) -> Result<(), Error> {
         // TODO: Check if Relaxed is appropiate -> change all occurences if not
         if self.connected.load(Ordering::Relaxed) {
@@ -219,8 +221,9 @@ impl TransportClient {
         }
     }
 
-    /// Performs the server long polling procedure as long as the client is connected.
-    /// This should run seperately at all time to ensure proper response handling from the server.
+    /// Performs the server long polling procedure as long as the client is
+    /// connected. This should run separately at all time to ensure proper
+    /// response handling from the server.
     pub async fn poll_cycle(&self) -> Result<(), Error> {
         if !self.connected.load(Ordering::Relaxed) {
             let error = Error::ActionBeforeOpen;
@@ -286,8 +289,9 @@ impl TransportClient {
                                 break;
                             }
                             PacketId::Open => {
-                                // this will never happen as the client connects to the server and the open packet
-                                // is already received in the 'open' method
+                                // this will never happen as the client connects
+                                // to the server and the open packet is already
+                                // received in the 'open' method
                                 unreachable!();
                             }
                             PacketId::Upgrade => {
@@ -298,7 +302,8 @@ impl TransportClient {
                                 self.emit(Packet::new(PacketId::Pong, Vec::new())).await?;
                             }
                             PacketId::Pong => {
-                                // this will never happen as the pong packet is only sent by the client
+                                // this will never happen as the pong packet is
+                                // only sent by the client
                                 unreachable!();
                             }
                             PacketId::Noop => (),
@@ -334,8 +339,7 @@ impl TransportClient {
         drop(function);
     }
 
-    // Constructs the path for a request, depending on the
-    // different situations.
+    // Constructs the path for a request, depending on the different situations.
     #[inline]
     fn get_query_path(&self) -> String {
         // build the base path

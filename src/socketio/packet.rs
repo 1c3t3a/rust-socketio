@@ -13,7 +13,7 @@ pub enum PacketId {
     BinaryAck = 6,
 }
 
-/// A packet which get's send or received during in the socket-io protocol.
+/// A packet which gets send or received during in the socket-io protocol.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Packet {
     pub packet_type: PacketId,
@@ -24,7 +24,7 @@ pub struct Packet {
     pub attachements: Option<u8>,
 }
 
-/// Converts an u8 byte to an PacketId.
+/// Converts an u8 byte to a PacketId.
 #[inline]
 pub fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
     match b as char {
@@ -59,7 +59,7 @@ impl Packet {
         }
     }
 
-    /// Encodes the packet to an u8 byte stream.
+    /// Encodes the packet to a u8 byte stream.
     pub fn encode(&self) -> Vec<u8> {
         // first the packet type
         let mut string = (self.packet_type as u8).to_string();
@@ -73,7 +73,8 @@ impl Packet {
             _ => (),
         }
 
-        // if the namespace is different from the default one append it as well, followed by ','
+        // if the namespace is different from the default one append it as well,
+        // followed by ','
         if self.nsp != "/" {
             string.push_str(self.nsp.as_ref());
             string.push(',');
@@ -247,7 +248,8 @@ mod test {
     use super::*;
 
     #[test]
-    /// This test suites is taken from the explanation section here: https://github.com/socketio/socket.io-protocol
+    /// This test suite is taken from the explanation section here:
+    /// https://github.com/socketio/socket.io-protocol
     fn test_decode() {
         let packet = Packet::decode_string("0{\"token\":\"123\"}".to_string());
         assert!(packet.is_ok());
@@ -408,7 +410,8 @@ mod test {
     }
 
     #[test]
-    /// This test suites is taken from the explanation section here: https://github.com/socketio/socket.io-protocol
+    /// This test suites is taken from the explanation section here:
+    /// https://github.com/socketio/socket.io-protocol
     fn test_encode() {
         let packet = Packet::new(
             PacketId::Connect,

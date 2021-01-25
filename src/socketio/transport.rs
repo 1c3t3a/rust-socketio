@@ -20,10 +20,10 @@ use super::event::Event;
 /// The type of a callback function.
 pub(crate) type Callback<I> = RwLock<Box<dyn Fn(I) + 'static + Sync + Send>>;
 
-/// Represents an Ack which is given back to the caller.
-/// This holds the internal id as well as the current acked state.
-/// It also holds data which will be accesible as soon as the acked state is set
-/// to true. An Ack that didn't get acked won't contain data.
+/// Represents an Ack which is given back to the caller. This holds the internal
+/// id as well as the current acked state. It also holds data which will be
+/// accessible as soon as the acked state is set to true. An Ack that didn't get
+/// acked won't contain data.
 pub struct Ack {
     pub id: i32,
     timeout: Duration,
@@ -68,8 +68,8 @@ impl TransportClient {
         Ok(())
     }
 
-    /// Connects to the server. This includes a connection of the underlying engine.io client and
-    /// afterwards an opening socket.io request.
+    /// Connects to the server. This includes a connection of the underlying
+    /// engine.io client and afterwards an opening socket.io request.
     pub async fn connect(&mut self) -> Result<(), Error> {
         self.setup_callbacks()?;
 
@@ -107,8 +107,8 @@ impl TransportClient {
         self.engine_socket.lock().unwrap().emit(engine_packet).await
     }
 
-    /// Emits to certain event with given data. The data needs to be JSON, otherwise this returns
-    /// an `InvalidJson` error.
+    /// Emits to certain event with given data. The data needs to be JSON,
+    /// otherwise this returns an `InvalidJson` error.
     pub async fn emit(&self, event: Event, data: &str) -> Result<(), Error> {
         if serde_json::from_str::<serde_json::Value>(&data).is_err() {
             return Err(Error::InvalidJson(data.to_owned()));
@@ -131,8 +131,9 @@ impl TransportClient {
         self.send(socket_packet).await
     }
 
-    /// Emits and requests an ack. The ack is returned a Arc<RwLock<Ack>> to acquire shared
-    /// mutability. This ack will be changed as soon as the server answered with an ack.
+    /// Emits and requests an ack. The ack is returned a Arc<RwLock<Ack>> to
+    /// acquire shared mutability. This ack will be changed as soon as the
+    /// server answered with an ack.
     pub async fn emit_with_ack<F>(
         &mut self,
         event: Event,
@@ -176,7 +177,8 @@ impl TransportClient {
         Ok(())
     }
 
-    /// Sets up the callback routes on the engineio socket, called before opening the connection.
+    /// Sets up the callback routes on the engine.io socket, called before
+    /// opening the connection.
     fn setup_callbacks(&mut self) -> Result<(), Error> {
         let clone_self = self.clone();
         let on_data_callback = move |socket_bytes: Vec<u8>| {
@@ -383,7 +385,12 @@ mod test {
         };
 
         socket
-            .emit_with_ack("test".into(), "123", Duration::from_secs(10), ack_callback)
+            .emit_with_ack(
+                "test".into(),
+                "123",
+                Duration::from_secs(10),
+                ack_callback,
+            )
             .await
             .unwrap();
     }
