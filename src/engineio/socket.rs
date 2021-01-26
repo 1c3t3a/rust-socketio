@@ -1,3 +1,4 @@
+#![allow(unused)]
 use super::packet::Packet;
 use crate::engineio::transport::TransportClient;
 use crate::error::Error;
@@ -6,8 +7,8 @@ use std::sync::{
     Arc, RwLock,
 };
 
-/// An engineio socket that manages the connection with the server
-/// and allows to register the common callbacks.
+/// An engine.io socket that manages the connection with the server and allows it
+/// to register the common callbacks.
 #[derive(Clone, Debug)]
 pub struct EngineSocket {
     transport_client: Arc<RwLock<TransportClient>>,
@@ -23,16 +24,18 @@ impl EngineSocket {
         }
     }
 
-    /// Binds the socket to a certain address. Attention! This doesn't allow to configure
-    /// callbacks afterwards.
+    /// Binds the socket to a certain address. Attention! This doesn't allow to
+    /// configure callbacks afterwards.
     pub async fn bind(&self, address: String) -> Result<(), Error> {
         self.transport_client.write().unwrap().open(address).await?;
 
         let cl = Arc::clone(&self.transport_client);
         tokio::spawn(async move {
             let s = cl.read().unwrap().clone();
-            // this tries to restart a poll cycle whenever a 'normal' error occures, it just panics on network errors
-            // in case the poll cycle returened Ok, the server received a close frame anyway, so it's safe to terminate
+            // this tries to restart a poll cycle whenever a 'normal' error
+            // occurs, it just panics on network errors in case the poll cycle
+            // returened Ok, the server received a close frame anyway, so it's
+            // safe to terminate
             loop {
                 match s.poll_cycle().await {
                     Ok(_) => break,
