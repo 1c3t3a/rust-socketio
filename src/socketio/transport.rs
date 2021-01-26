@@ -385,12 +385,7 @@ mod test {
         };
 
         socket
-            .emit_with_ack(
-                "test".into(),
-                "123",
-                Duration::from_secs(10),
-                ack_callback,
-            )
+            .emit_with_ack("test".into(), "123", Duration::from_secs(10), ack_callback)
             .await
             .unwrap();
     }
