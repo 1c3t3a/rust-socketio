@@ -1,0 +1,34 @@
+name: npm Build and Test
+
+on: 
+ push:
+   branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PORT: 4200
+    steps:
+      - uses: actions/checkout@v1
+      - name: build docker-compose stack
+        run: docker-compose -f docker-compose.yml -f docker-compose.ci.yml up -d
+  test:
+   needs: build
+   name: Cargo Test Node Server
+   runs-on: ubuntu-latest
+   steps:
+     - uses: actions/checkout@v2
+     - uses: actions-rs/toolchain@v1
+       with:
+         profile: minimal
+         toolchain: stable
+         override: true
+     - uses: actions-rs/cargo@v1
+       with:
+         command: test
