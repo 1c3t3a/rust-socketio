@@ -1,0 +1,29 @@
+name: Build and Test
+
+on: 
+  push:
+    branches: [main]
+  pull_request:
+     branches: [main]
+
+env:
+   CARGO_TERM_COLOR: always
+
+jobs:
+   build:
+     runs-on: ubuntu-latest
+     env:
+       PORT: 4200
+     steps:
+       - name: checkout
+         uses: actions/checkout@v2
+       - uses: actions-rs/toolchain@v1
+         with:
+            profile: minimal
+            toolchain: stable
+            override: true
+       - name: build docker-compose stack
+         run: docker-compose -f docker-compose.yml up -d
+       - uses: actions-rs/cargo@v1
+         with:
+          command: test

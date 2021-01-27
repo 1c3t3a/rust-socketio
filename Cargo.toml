@@ -11,6 +11,7 @@ categories = ["network-programming", "web-programming", "web-programming::websoc
 license = "MIT"
 
 [dependencies]
+actix-rt = "2.0.0-beta.2"
 base64 = "0.13.0"
 rand = "0.8.1"
 crossbeam-utils = "0.8.1"
