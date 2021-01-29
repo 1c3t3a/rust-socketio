@@ -22,7 +22,7 @@ jobs:
          with:
            install: true
        - name: build docker-compose stack
-         run: docker-compose -f docker-compose.yml
+         run: docker-compose -f docker-compose.yml up
    test:
     needs: build
     name: Cargo Test Node Server
