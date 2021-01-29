@@ -1,41 +1,41 @@
 name: Build and Test
 
 on: 
- push:
-   branches: [main]
-  pull_request:
+  push:
     branches: [main]
+  pull_request:
+     branches: [main]
 
 env:
-  CARGO_TERM_COLOR: always
+   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+   build:
+     runs-on: ubuntu-latest
+     env:
+       PORT: 4200
+     steps:
+       - name: checkout
+         uses: actions/checkout@v1
+       - uses: docker/setup-buildx-action@v1
+         id: buildx
+         with:
+           install: true
+       - name: build docker-compose stack
+         run: docker-compose -f docker-compose.yml
+   test:
+    needs: build
+    name: Cargo Test Node Server
     runs-on: ubuntu-latest
     env:
       PORT: 4200
     steps:
-      - name: checkout
-        uses: actions/checkout@v1
-      - uses: docker/setup-buildx-action@v1
-        id: buildx
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
         with:
-          install: true
-      - name: build docker-compose stack
-        run: docker-compose -f docker-compose.yml
-  test:
-   needs: build
-   name: Cargo Test Node Server
-   runs-on: ubuntu-latest
-   env:
-     PORT: 4200
-   steps:
-     - uses: actions/checkout@v2
-     - uses: actions-rs/toolchain@v1
-       with:
-         profile: minimal
-         toolchain: stable
-         override: true
-     - uses: actions-rs/cargo@v1
-       with:
-         command: test
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
