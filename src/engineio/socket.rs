@@ -9,8 +9,8 @@ use std::sync::{
     Arc, RwLock,
 };
 
-/// An engine.io socket that manages the connection with the server and allows it
-/// to register the common callbacks.
+/// An `engine.io` socket which manages a connection with the server and allows
+/// it to register common callbacks.
 #[derive(Clone, Debug)]
 pub struct EngineSocket {
     transport_client: Arc<RwLock<TransportClient>>,
@@ -18,7 +18,7 @@ pub struct EngineSocket {
 }
 
 impl EngineSocket {
-    /// Creates an instance.
+    /// Creates an instance of `EngineSocket`.
     pub fn new(engine_io_mode: bool) -> Self {
         EngineSocket {
             transport_client: Arc::new(RwLock::new(TransportClient::new(engine_io_mode))),
@@ -26,18 +26,18 @@ impl EngineSocket {
         }
     }
 
-    /// Binds the socket to a certain address. Attention! This doesn't allow to
-    /// configure callbacks afterwards.
+    /// Binds the socket to a certain `address`. Attention! This doesn't allow
+    /// to configure callbacks afterwards.
     pub fn bind<T: Into<String>>(&self, address: T) -> Result<(), Error> {
         self.transport_client.write()?.open(address.into())?;
 
         let cl = Arc::clone(&self.transport_client);
         thread::spawn(move || {
             let s = cl.read().unwrap().clone();
-            // this tries to restart a poll cycle whenever a 'normal' error
-            // occurs, it just panics on network errors. in case the poll cycle
-            // returened Result::Ok, the server received a close frame anyway,
-            // so it's safe to terminate.
+            // tries to restart a poll cycle whenever a 'normal' error occurs,
+            // it just panics on network errors, in case the poll cycle returned
+            // `Result::Ok`, the server receives a close frame so it's safe to
+            // terminate
             loop {
                 match s.poll_cycle() {
                     Ok(_) => break,
@@ -59,7 +59,7 @@ impl EngineSocket {
         self.transport_client.read()?.emit(packet)
     }
 
-    /// Registers the on_open callback.
+    /// Registers the `on_open` callback.
     pub fn on_open<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(()) + 'static + Sync + Send,
@@ -71,7 +71,7 @@ impl EngineSocket {
         Ok(())
     }
 
-    /// Registers the on_close callback.
+    /// Registers the `on_close` callback.
     pub fn on_close<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(()) + 'static + Sync + Send,
@@ -83,7 +83,7 @@ impl EngineSocket {
         Ok(())
     }
 
-    /// Registers the on_packet callback.
+    /// Registers the `on_packet` callback.
     pub fn on_packet<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(Packet) + 'static + Sync + Send,
@@ -95,7 +95,7 @@ impl EngineSocket {
         Ok(())
     }
 
-    /// Registers the on_data callback.
+    /// Registers the `on_data` callback.
     pub fn on_data<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(Vec<u8>) + 'static + Sync + Send,
@@ -107,7 +107,7 @@ impl EngineSocket {
         Ok(())
     }
 
-    /// Registers the on_error callback.
+    /// Registers the `on_error` callback.
     pub fn on_error<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(String) + 'static + Sync + Send + Send,

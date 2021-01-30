@@ -1,5 +1,4 @@
-/// An Event in the socket.io. Could either be one of the common (`Message`,
-/// `Error`) or a custom one.
+/// An `Event` in `socket.io` could either (`Message`, `Error`) or custom.
 #[derive(Debug, PartialEq, PartialOrd)]
 pub enum Event {
     Message,

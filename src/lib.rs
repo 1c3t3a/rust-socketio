@@ -35,14 +35,13 @@
 //!
 //! ## Current features
 //!
-//! This is the first released version of the client, so it still lacks some
-//! features that the normal client would provide. First of all the underlying
-//! engine.io protocol still uses long-polling instead of websockets. This will
-//! be resolved as soon as both the reqwest libary as well as
-//! tungsenite-websockets will bump their tokio version to 1.0.0. At the moment
-//! only reqwest is used for long polling. In general the full engine-io
-//! protocol is implemented and most of the features concerning the 'normal'
-//! socket.io protocol work as well.
+//! This version of the client lacks some features that the reference client
+//! would provide. The underlying `engine.io` protocol still uses long-polling
+//! instead of websockets. This will be resolved as soon as both the reqwest
+//! libary as well as `tungsenite-websockets` will bump their `tokio` version to
+//! 1.0.0. At the moment only `reqwest` is used for long-polling. The full
+//! `engine-io` protocol is implemented and most of the features concerning the
+//! 'normal' `socket.io` protocol are working.
 //!
 //! Here's an overview of possible use-cases:
 //!
@@ -53,11 +52,13 @@
 //!     - error
 //!     - message
 //!     - custom events like "foo", "on_payment", etc.
-//! - send json-data to the server (recommended to use `serde_json` as it provides
-//! safe handling of json data).
-//! - send json-data to the server and receive an ack with a possible message.
-//! What's currently missing is the emitting of binary data - I aim to implement
-//! this as soon as possible.
+//! - send JSON data to the server (via `serde_json` which provides safe
+//! handling).
+//! - send JSON data to the server and receive an `ack`.
+//!
+//! The whole crate is written in asynchronous Rust and it's necessary to use
+//! [tokio](https://docs.rs/tokio/1.0.1/tokio/), or other executors with this
+//! library to resolve the futures.
 //!
 #![allow(clippy::rc_buffer)]
 /// A small macro that spawns a scoped thread. Used for calling the callback
@@ -71,14 +72,13 @@ macro_rules! spawn_scoped {
     };
 }
 
-/// Contains the types and the code concerning the engine.io protocol.
+/// Contains the types and the code concerning the `engine.io` protocol.
 mod engineio;
-
-/// Contains the types and the code concerning the socket.io protocol.
+/// Contains the types and the code concerning the `socket.io` protocol.
 pub mod socketio;
 
-/// Contains the error type that will be returned with every result in this
-/// crate. Handles all kind of errors.
+/// Contains the error type which will be returned with every result in this
+/// crate. Handles all kinds of errors.
 pub mod error;
 
 use crate::error::Error;
@@ -86,10 +86,10 @@ use std::time::Duration;
 
 use crate::socketio::transport::TransportClient;
 
-/// A socket that handles communication with the server. It's initialized with a
-/// specific address as well as an optional namespace to connect to. If None is
-/// given the server will connect to the default namespace `"/"`.
-#[derive(Debug, Clone)]
+/// A socket which handles communication with the server. It's initialized with
+/// a specific address as well as an optional namespace to connect to. If `None`
+/// is given the server will connect to the default namespace `"/"`.
+#[derive(Debug)]
 pub struct Socket {
     /// The inner transport client to delegate the methods to.
     transport: TransportClient,
@@ -97,8 +97,9 @@ pub struct Socket {
 
 impl Socket {
     /// Creates a socket with a certain adress to connect to as well as a
-    /// namespace. If None is passed in as namespace, the default namespace "/"
-    /// is taken.
+    /// namespace. If `None` is passed in as namespace, the default namespace
+    /// `"/"` is taken.
+    ///
     /// # Example
     /// ```rust
     /// use rust_socketio::Socket;
@@ -136,9 +137,10 @@ impl Socket {
         self.transport.on(event.into(), callback)
     }
 
-    /// Connects the client to a server. Afterwards the emit_* methods could be
-    /// called to interact with the server. Attention: it is not allowed to add
-    /// a callback after a call to this method.
+    /// Connects the client to a server. Afterwards the `emit_*` methods can be
+    /// called to interact with the server. Attention: it's not allowed to add a
+    /// callback after a call to this method.
+    ///
     /// # Example
     /// ```rust
     /// use rust_socketio::Socket;
@@ -154,11 +156,12 @@ impl Socket {
         self.transport.connect()
     }
 
-    /// Sends a message to the server using the underlying engine.io protocol.
+    /// Sends a message to the server using the underlying `engine.io` protocol.
     /// This message takes an event, which could either be one of the common
     /// events like "message" or "error" or a custom event like "foo". But be
-    /// careful, the data string needs to be valid json. It's even recommended
-    /// to use a libary like `serde_json` to serialize the data properly.
+    /// careful, the data string needs to be valid JSON. It's recommended to use
+    /// a library like `serde_json` to serialize the data properly.
+    ///
     /// # Example
     /// ```
     /// use rust_socketio::Socket;
@@ -179,18 +182,19 @@ impl Socket {
         self.transport.emit(event.into(), data)
     }
 
-    /// Sends a message to the server but allocs an ack to check whether the
+    /// Sends a message to the server but `alloc`s an `ack` to check whether the
     /// server responded in a given timespan. This message takes an event, which
     /// could either be one of the common events like "message" or "error" or a
     /// custom event like "foo", as well as a data parameter. But be careful,
-    /// the string needs to be valid json. It's even recommended to use a
-    /// library like `serde_json` to serialize the data properly. It also requires
+    /// the string needs to be valid JSON. It's even recommended to use a
+    /// library like serde_json to serialize the data properly. It also requires
     /// a timeout `Duration` in which the client needs to answer. This method
     /// returns an `Arc<RwLock<Ack>>`. The `Ack` type holds information about
-    /// the Ack, such whether the ack got acked fast enough and potential data.
-    /// It is safe to unwrap the data after the ack got acked from the server.
-    /// This uses an `RwLock` to reach shared mutability, which is needed as the
-    /// server sets the data on the ack later.
+    /// the `ack` system call, such whether the `ack` got acked fast enough and
+    /// potential data. It is safe to unwrap the data after the `ack` got acked
+    /// from the server. This uses an `RwLock` to reach shared mutability, which
+    /// is needed as the server sets the data on the ack later.
+    ///
     /// # Example
     /// ```
     /// use rust_socketio::Socket;
