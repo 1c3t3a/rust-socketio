@@ -194,7 +194,7 @@ mod tests {
         assert_eq!(packets[1].packet_id, PacketId::Message);
         assert_eq!(packets[1].data, ("HelloWorld".to_string().into_bytes()));
 
-        let data = "bSGVsbG8=\x1ebSGVsbG9Xb3JsZA==".to_string().into_bytes();
+        let data = "4Hello\x1e4HelloWorld".to_string().into_bytes();
         assert_eq!(encode_payload(packets), data);
     }
 }

@@ -212,12 +212,14 @@ impl Packet {
                             .to_vec(),
                     );
 
-                    let re_open = Regex::new(r"^\[").unwrap();
                     let re_close = Regex::new(r",]$|]$").unwrap();
                     let mut str = json_data
                         .to_string()
                         .replace("{\"_placeholder\":true,\"num\":0}", "");
-                    str = re_open.replace(&str, "").to_string();
+
+                    if str.starts_with("[") {
+                        str.remove(0);
+                    }
                     str = re_close.replace(&str, "").to_string();
 
                     if str.is_empty() {

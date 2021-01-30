@@ -1,4 +1,6 @@
 #![allow(unused)]
+use std::thread;
+
 use super::packet::Packet;
 use crate::engineio::transport::TransportClient;
 use crate::error::Error;
@@ -26,18 +28,18 @@ impl EngineSocket {
 
     /// Binds the socket to a certain address. Attention! This doesn't allow to
     /// configure callbacks afterwards.
-    pub async fn bind(&self, address: String) -> Result<(), Error> {
-        self.transport_client.write().unwrap().open(address).await?;
+    pub fn bind(&self, address: String) -> Result<(), Error> {
+        self.transport_client.write()?.open(address)?;
 
         let cl = Arc::clone(&self.transport_client);
-        tokio::spawn(async move {
+        thread::spawn(move || {
             let s = cl.read().unwrap().clone();
             // this tries to restart a poll cycle whenever a 'normal' error
             // occurs, it just panics on network errors in case the poll cycle
             // returened Ok, the server received a close frame anyway, so it's
             // safe to terminate
             loop {
-                match s.poll_cycle().await {
+                match s.poll_cycle() {
                     Ok(_) => break,
                     e @ Err(Error::HttpError(_)) | e @ Err(Error::ReqwestError(_)) => panic!(e),
                     _ => (),
@@ -50,11 +52,11 @@ impl EngineSocket {
     }
 
     /// Sends a packet to the server.
-    pub async fn emit(&mut self, packet: Packet) -> Result<(), Error> {
+    pub fn emit(&mut self, packet: Packet) -> Result<(), Error> {
         if !self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
         }
-        self.transport_client.read().unwrap().emit(packet).await
+        self.transport_client.read()?.emit(packet)
     }
 
     /// Registers the on_open callback.
@@ -65,7 +67,7 @@ impl EngineSocket {
         if self.serving.load(Ordering::Relaxed) {
             return Err(Error::IllegalActionAfterOpen);
         }
-        self.transport_client.write().unwrap().set_on_open(function);
+        self.transport_client.write()?.set_on_open(function);
         Ok(())
     }
 
@@ -107,7 +109,7 @@ impl EngineSocket {
         if self.serving.load(Ordering::Relaxed) {
             return Err(Error::IllegalActionAfterOpen);
         }
-        self.transport_client.write().unwrap().set_on_data(function);
+        self.transport_client.write()?.set_on_data(function);
         Ok(())
     }
 
@@ -130,15 +132,14 @@ impl EngineSocket {
 #[cfg(test)]
 mod test {
 
-    use std::time::Duration;
-    use tokio::time::sleep;
+    use std::{thread::sleep, time::Duration};
 
     use crate::engineio::packet::PacketId;
 
     use super::*;
 
-    #[actix_rt::test]
-    async fn test_basic_connection() {
+    #[test]
+    fn test_basic_connection() {
         let mut socket = EngineSocket::new(true);
 
         socket
@@ -165,17 +166,13 @@ mod test {
             })
             .unwrap();
 
-        socket
-            .bind(String::from("http://localhost:4200"))
-            .await
-            .unwrap();
+        socket.bind(String::from("http://localhost:4200")).unwrap();
 
         socket
             .emit(Packet::new(
                 PacketId::Message,
                 "Hello World".to_string().into_bytes(),
             ))
-            .await
             .unwrap();
 
         socket
@@ -183,27 +180,23 @@ mod test {
                 PacketId::Message,
                 "Hello World2".to_string().into_bytes(),
             ))
-            .await
             .unwrap();
 
         socket
             .emit(Packet::new(PacketId::Pong, Vec::new()))
-            .await
             .unwrap();
 
         socket
             .emit(Packet::new(PacketId::Ping, Vec::new()))
-            .await
             .unwrap();
 
-        sleep(Duration::from_secs(26)).await;
+        sleep(Duration::from_secs(26));
 
         socket
             .emit(Packet::new(
                 PacketId::Message,
                 "Hello World3".to_string().into_bytes(),
             ))
-            .await
             .unwrap();
     }
 }

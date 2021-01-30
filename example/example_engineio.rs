@@ -1,7 +1,4 @@
-use tokio::time::sleep;
-
-#[tokio::main]
-async fn main() {
+fn main() {
     let mut socket = EngineSocket::new(true);
 
     socket.on_open(|_| {
@@ -22,27 +19,26 @@ async fn main() {
 
     socket
         .bind(String::from("http://localhost:4200"))
-        .await
         .unwrap();
 
     socket.emit(Packet::new(
             PacketId::Message,
             "Hello World".to_string().into_bytes(),
-    )).await.unwrap();
+    )).unwrap();
 
     socket.emit(Packet::new(
             PacketId::Message,
             "Hello World2".to_string().into_bytes(),
-    )).await.unwrap();
+    )).unwrap();
 
-    socket.emit(Packet::new(PacketId::Pong, Vec::new())).await.unwrap();
+    socket.emit(Packet::new(PacketId::Pong, Vec::new())).unwrap();
 
-    socket.emit(Packet::new(PacketId::Ping, Vec::new())).await.unwrap();
+    socket.emit(Packet::new(PacketId::Ping, Vec::new())).unwrap();
 
-    sleep(Duration::from_secs(26)).await;
+    sleep(Duration::from_secs(26));
 
     socket.emit(Packet::new(
         PacketId::Message,
         "Hello World3".to_string().into_bytes(),
-    )).await.unwrap();
+    )).unwrap();
 }
