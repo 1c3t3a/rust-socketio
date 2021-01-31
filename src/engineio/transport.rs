@@ -21,7 +21,7 @@ enum TransportType {
 type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
 
 /// A client that handles the plain transmission of packets in the engine.io
-/// protocol. Used by the wrapper EngineSocket. This struct also holds the
+/// protocol. Used by the wrapper `EngineSocket`. This struct also holds the
 /// callback functions.
 #[derive(Clone)]
 pub struct TransportClient {
@@ -70,7 +70,7 @@ impl TransportClient {
         }
     }
 
-    /// Registers an on_open callback.
+    /// Registers an `on_open` callback.
     pub fn set_on_open<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(()) + 'static + Sync + Send,
@@ -81,7 +81,7 @@ impl TransportClient {
         Ok(())
     }
 
-    /// Registers an on_error callback.
+    /// Registers an `on_error` callback.
     pub fn set_on_error<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(String) + 'static + Sync + Send,
@@ -92,7 +92,7 @@ impl TransportClient {
         Ok(())
     }
 
-    /// Registers an on_packet callback.
+    /// Registers an `on_packet` callback.
     pub fn set_on_packet<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(Packet) + 'static + Sync + Send,
@@ -103,7 +103,7 @@ impl TransportClient {
         Ok(())
     }
 
-    /// Registers an on_data callback.
+    /// Registers an `on_data` callback.
     pub fn set_on_data<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(Vec<u8>) + 'static + Sync + Send,
@@ -114,7 +114,7 @@ impl TransportClient {
         Ok(())
     }
 
-    /// Registers an on_close callback.
+    /// Registers an `on_close` callback.
     pub fn set_on_close<F>(&mut self, function: F) -> Result<(), Error>
     where
         F: Fn(()) + 'static + Sync + Send,
@@ -278,7 +278,9 @@ impl TransportClient {
                                     spawn_scoped!(function(()));
                                 }
                                 drop(on_close);
-                                break;
+                                // set current state to not connected and stop polling
+                                self.connected
+                                    .compare_and_swap(true, false, Ordering::Acquire);
                             }
                             PacketId::Open => {
                                 // this will never happen as the client connects
@@ -304,8 +306,9 @@ impl TransportClient {
 
                     if server_timeout < last_ping.elapsed() {
                         // the server is unreachable
-                        // TODO: Inform the others about the stop (maybe through a channel)
-                        break;
+                        // set current state to not connected and stop polling
+                        self.connected
+                            .compare_and_swap(true, false, Ordering::Acquire);
                     }
                 }
             }
@@ -406,23 +409,35 @@ mod test {
     use crate::engineio::packet::{Packet, PacketId};
 
     use super::*;
+    const SERVER_URL: &str = "http://localhost:4201";
 
     #[test]
     fn test_connection() {
         let mut socket = TransportClient::new(true);
-        socket.open("http://localhost:4200").unwrap();
+        assert!(socket.open(SERVER_URL).is_ok());
 
-        socket
+        assert!(socket
             .emit(Packet::new(
                 PacketId::Message,
                 "HelloWorld".to_string().into_bytes(),
             ))
-            .unwrap();
+            .is_ok());
 
         socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
-            println!("Received: {:?}", std::str::from_utf8(&data).unwrap());
+            println!(
+                "Received: {:?}",
+                std::str::from_utf8(&data).expect("Error while decoding utf-8")
+            );
         }))));
 
+        assert!(socket
+            .emit(Packet::new(
+                PacketId::Message,
+                "PlsEnd".to_string().into_bytes(),
+            ))
+            .is_ok());
+
+        // assert!(socket.poll_cycle().is_ok());
         socket.poll_cycle().unwrap();
     }
 }

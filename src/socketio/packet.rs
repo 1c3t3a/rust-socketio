@@ -24,9 +24,9 @@ pub struct Packet {
     pub attachements: Option<u8>,
 }
 
-/// Converts an u8 byte to a PacketId.
+/// Converts an u8 byte to a `PacketId`.
 #[inline]
-pub fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
+pub const fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
     match b as char {
         '0' => Ok(PacketId::Connect),
         '1' => Ok(PacketId::Disconnect),
@@ -41,7 +41,7 @@ pub fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
 
 impl Packet {
     /// Creates an instance.
-    pub fn new(
+    pub const fn new(
         packet_type: PacketId,
         nsp: String,
         data: Option<String>,
@@ -217,7 +217,7 @@ impl Packet {
                         .to_string()
                         .replace("{\"_placeholder\":true,\"num\":0}", "");
 
-                    if str.starts_with("[") {
+                    if str.starts_with('[') {
                         str.remove(0);
                     }
                     str = re_close.replace(&str, "").to_string();

@@ -4,35 +4,33 @@
 //! ``` rust
 //! use rust_socketio::Socket;
 //! use serde_json::json;
-//! use tokio::time::sleep;
+//! use std::thread::sleep;
+//! use std::time::Duration;
 //!
-//! fn main() {
-//!     let mut socket = Socket::new(String::from("http://localhost:80"), Some("/admin"));
+//! let mut socket = Socket::new(String::from("http://localhost:4200"), Some("/admin"));
 //!
-//!     // callback for the "foo" event
-//!     socket.on("foo", |message| println!("{}", message)).unwrap();
+//! // callback for the "foo" event
+//! socket.on("foo", |message| println!("{}", message)).unwrap();
 //!
-//!     // connect to the server
-//!     socket.connect().expect("Connection failed");
+//! // connect to the server
+//! socket.connect().expect("Connection failed");
 //!
-//!     // emit to the "foo" event
-//!     let payload = json!({"token": 123});
-//!     socket.emit("foo", payload.to_string()).expect("Server
-//!     unreachable");
+//! // emit to the "foo" event
+//! let payload = json!({"token": 123});
+//! socket.emit("foo", &payload.to_string()).expect("Server unreachable");
 //!
-//!     // define a callback, that's executed when the ack got acked
-//!     let ack_callback = |message: String| {
-//!        println!("Yehaa! My ack got acked?");
-//!        println!("Ack data: {}", message);
-//!     };
+//! // define a callback, that's executed when the ack got acked
+//! let ack_callback = |message: String| {
+//!     println!("Yehaa! My ack got acked?");
+//!     println!("Ack data: {}", message);
+//! };
 //!
-//!     sleep(Duration::from_secs(2));
+//! sleep(Duration::from_secs(2));
 //!
-//!     // emit with an ack
-//!     let ack = socket
+//! // emit with an ack
+//! let ack = socket
 //!     .emit_with_ack("test", &payload.to_string(), Duration::from_secs(2), ack_callback)
 //!     .expect("Server unreachable");
-//!     }
 //! ```
 //!
 //! ## Current features
@@ -55,13 +53,13 @@
 //!     - error
 //!     - message
 //!     - custom events like "foo", "on_payment", etc.
-//! - send json-data to the server (recommended to use serde_json as it provides
+//! - send json-data to the server (recommended to use `serde_json` as it provides
 //! safe handling of json data).
 //! - send json-data to the server and receive an ack with a possible message.
 //! What's currently missing is the emitting of binary data - I aim to implement
 //! this as soon as possible.
 //!
-
+#![allow(clippy::rc_buffer)]
 /// A small macro that spawns a scoped thread. Used for calling the callback
 /// functions.
 macro_rules! spawn_scoped {
@@ -73,7 +71,9 @@ macro_rules! spawn_scoped {
     };
 }
 
+/// Contains the types and the code concerning the engine.io protocol.
 mod engineio;
+
 /// Contains the types and the code concerning the socket.io protocol.
 pub mod socketio;
 
@@ -89,7 +89,7 @@ use crate::socketio::transport::TransportClient;
 /// A socket that handles communication with the server. It's initialized with a
 /// specific address as well as an optional namespace to connect to. If None is
 /// given the server will connect to the default namespace `"/"`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Socket {
     /// The inner transport client to delegate the methods to.
     transport: TransportClient,
@@ -104,11 +104,11 @@ impl Socket {
     /// use rust_socketio::Socket;
     ///
     /// // this connects the socket to the given url as well as the default
-    /// namespace "/""
+    /// // namespace "/"
     /// let socket = Socket::new("http://localhost:80", None);
     ///
     /// // this connects the socket to the given url as well as the namespace
-    /// "/admin"
+    /// // "/admin"
     /// let socket = Socket::new("http://localhost:80", Some("/admin"));
     /// ```
     pub fn new<T: Into<String>>(address: T, namespace: Option<&str>) -> Self {
@@ -124,14 +124,14 @@ impl Socket {
     /// ```rust
     /// use rust_socketio::Socket;
     ///
-    /// let mut socket = Socket::new("http://localhost:80", None);
+    /// let mut socket = Socket::new("http://localhost:4200", None);
     /// let result = socket.on("foo", |message| println!("{}", message));
     ///
     /// assert!(result.is_ok());
     /// ```
     pub fn on<F>(&mut self, event: &str, callback: F) -> Result<(), Error>
     where
-        F: Fn(String) + 'static + Sync + Send,
+        F: FnMut(String) + 'static + Sync + Send,
     {
         self.transport.on(event.into(), callback)
     }
@@ -143,14 +143,12 @@ impl Socket {
     /// ```rust
     /// use rust_socketio::Socket;
     ///
-    /// fn main() {
-    ///     let mut socket = Socket::new("http://localhost:80", None);
+    /// let mut socket = Socket::new("http://localhost:4200", None);
     ///
-    ///     socket.on("foo", |message| println!("{}", message)).unwrap();
-    ///     let result = socket.connect();
+    /// socket.on("foo", |message| println!("{}", message)).unwrap();
+    /// let result = socket.connect();
     ///
-    ///     assert!(result.is_ok());
-    /// }
+    /// assert!(result.is_ok());
     /// ```
     pub fn connect(&mut self) -> Result<(), Error> {
         self.transport.connect()
@@ -164,19 +162,17 @@ impl Socket {
     /// # Example
     /// ```
     /// use rust_socketio::Socket;
-    /// use serde_json::{Value, json};
+    /// use serde_json::json;
     ///
-    /// fn main() {
-    ///     let mut socket = Socket::new("http://localhost:80", None);
+    /// let mut socket = Socket::new("http://localhost:4200", None);
     ///
-    ///     socket.on("foo", |message| println!("{}", message)).unwrap();
-    ///     socket.connect().expect("Connection failed");
+    /// socket.on("foo", |message| println!("{}", message)).unwrap();
+    /// socket.connect().expect("Connection failed");
     ///
-    ///     let payload = json!({"token": 123});
-    ///     let result = socket.emit("foo", &payload.to_string());
+    /// let payload = json!({"token": 123});
+    /// let result = socket.emit("foo", &payload.to_string());
     ///
-    ///     assert!(result.is_ok());
-    /// }
+    /// assert!(result.is_ok());
     /// ```
     #[inline]
     pub fn emit(&mut self, event: &str, data: &str) -> Result<(), Error> {
@@ -200,25 +196,20 @@ impl Socket {
     /// use rust_socketio::Socket;
     /// use serde_json::json;
     /// use std::time::Duration;
-    /// use tokio::time::sleep;
+    /// use std::thread::sleep;
     ///
-    /// fn main() {
-    ///     let mut socket = Socket::new("http://localhost:80", None);
+    /// let mut socket = Socket::new("http://localhost:4200", None);
     ///
-    ///     socket.on("foo", |message| println!("{}", message)).unwrap();
-    ///     socket.connect().expect("Connection failed");
+    /// socket.on("foo", |message| println!("{}", message)).unwrap();
+    /// socket.connect().expect("Connection failed");
     ///
-    ///     let payload = json!({"token": 123});
-    ///     let ack = socket.emit_with_ack("foo", &payload.to_string(),
-    ///     Duration::from_secs(2)).unwrap();
+    /// let payload = json!({"token": 123});
+    /// let ack_callback = |message| { println!("{}", message) };
     ///
-    ///     sleep(Duration::from_secs(2));
+    /// socket.emit_with_ack("foo", &payload.to_string(),
+    /// Duration::from_secs(2), ack_callback).unwrap();
     ///
-    ///     if ack.read().expect("Server panicked anyway").acked {
-    ///         println!("{}", ack.read().expect("Server panicked
-    ///         anyway").data.as_ref().unwrap());
-    ///     }
-    /// }
+    /// sleep(Duration::from_secs(2));
     /// ```
     #[inline]
     pub fn emit_with_ack<F>(
@@ -229,7 +220,7 @@ impl Socket {
         callback: F,
     ) -> Result<(), Error>
     where
-        F: Fn(String) + 'static + Send + Sync,
+        F: FnMut(String) + 'static + Send + Sync,
     {
         self.transport
             .emit_with_ack(event.into(), data, timeout, callback)
@@ -243,10 +234,11 @@ mod test {
 
     use super::*;
     use serde_json::json;
+    const SERVER_URL: &str = "http://localhost:4200";
 
     #[test]
     fn it_works() {
-        let mut socket = Socket::new("http://localhost:4200", None);
+        let mut socket = Socket::new(SERVER_URL, None);
 
         let result = socket.on("test", |msg| println!("{}", msg));
         assert!(result.is_ok());
@@ -259,7 +251,11 @@ mod test {
 
         assert!(result.is_ok());
 
-        let ack_callback = |message: String| {
+        let mut socket_clone = socket.clone();
+        let ack_callback = move |message: String| {
+            let result = socket_clone.emit("test", &json!({"got ack": true}).to_string());
+            assert!(result.is_ok());
+
             println!("Yehaa! My ack got acked?");
             println!("Ack data: {}", message);
         };

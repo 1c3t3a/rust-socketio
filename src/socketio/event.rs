@@ -30,10 +30,10 @@ impl From<&str> for Event {
 impl From<Event> for String {
     fn from(event: Event) -> Self {
         match event {
-            Event::Message => String::from("message"),
-            Event::Connect => String::from("open"),
-            Event::Close => String::from("close"),
-            Event::Error => String::from("error"),
+            Event::Message => Self::from("message"),
+            Event::Connect => Self::from("open"),
+            Event::Close => Self::from("close"),
+            Event::Error => Self::from("error"),
             Event::Custom(string) => string,
         }
     }

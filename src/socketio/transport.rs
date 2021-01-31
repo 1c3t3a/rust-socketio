@@ -18,7 +18,7 @@ use std::{
 use super::event::Event;
 
 /// The type of a callback function.
-pub(crate) type Callback<I> = RwLock<Box<dyn Fn(I) + 'static + Sync + Send>>;
+pub(crate) type Callback<I> = RwLock<Box<dyn FnMut(I) + 'static + Sync + Send>>;
 
 /// Represents an Ack which is given back to the caller. This holds the internal
 /// id as well as well as information about the ack's timeout duration and the
@@ -59,10 +59,10 @@ impl TransportClient {
     /// Registers a new event with a certain callback function F.
     pub fn on<F>(&mut self, event: Event, callback: F) -> Result<(), Error>
     where
-        F: Fn(String) + 'static + Sync + Send,
+        F: FnMut(String) + 'static + Sync + Send,
     {
         Arc::get_mut(&mut self.on)
-            .unwrap()
+            .ok_or(Error::PoisonedLockError)?
             .push((event, RwLock::new(Box::new(callback))));
         Ok(())
     }
@@ -139,7 +139,7 @@ impl TransportClient {
         callback: F,
     ) -> Result<(), Error>
     where
-        F: Fn(String) + 'static + Send + Sync,
+        F: FnMut(String) + 'static + Send + Sync,
     {
         if serde_json::from_str::<serde_json::Value>(data).is_err() {
             return Err(Error::InvalidJson(data.into()));
@@ -175,7 +175,7 @@ impl TransportClient {
     }
 
     /// Handles the incoming messages and classifies what callbacks to call and how.
-    /// This method is later registered as the callback for the on_data event of the
+    /// This method is later registered as the callback for the `on_data` event of the
     /// engineio client.
     fn handle_new_message(socket_bytes: Vec<u8>, clone_self: &TransportClient) {
         if let Ok(socket_packet) =
@@ -197,7 +197,7 @@ impl TransportClient {
                 SocketPacketId::ConnectError => {
                     clone_self.connected.swap(false, Ordering::Relaxed);
                     if let Some(function) = clone_self.get_event_callback(&Event::Error) {
-                        let lock = function.1.read().unwrap();
+                        let mut lock = function.1.write().unwrap();
                         lock(
                             String::from("Received an ConnectError frame")
                                 + &socket_packet.data.unwrap_or_else(|| {
@@ -229,9 +229,11 @@ impl TransportClient {
 
                                 if ack.time_started.elapsed() < ack.timeout {
                                     if let Some(payload) = socket_packet.clone().data {
-                                        let function = ack.callback.read().unwrap();
-                                        spawn_scoped!(function(payload));
-                                        drop(function);
+                                        spawn_scoped!({
+                                            let mut function = ack.callback.write().unwrap();
+                                            function(payload);
+                                            drop(function);
+                                        });
                                     }
                                 }
                             }
@@ -257,7 +259,7 @@ impl TransportClient {
         let clone_self = self.clone();
         let error_callback = move |msg| {
             if let Some(function) = clone_self.get_event_callback(&Event::Error) {
-                let lock = function.1.read().unwrap();
+                let mut lock = function.1.write().unwrap();
                 lock(msg);
                 drop(lock)
             }
@@ -267,7 +269,7 @@ impl TransportClient {
         let open_callback = move |_| {
             clone_self.engineio_connected.swap(true, Ordering::Relaxed);
             if let Some(function) = clone_self.get_event_callback(&Event::Connect) {
-                let lock = function.1.read().unwrap();
+                let mut lock = function.1.write().unwrap();
                 lock(String::from("Connection is opened"));
                 drop(lock)
             }
@@ -277,7 +279,7 @@ impl TransportClient {
         let close_callback = move |_| {
             clone_self.engineio_connected.swap(false, Ordering::Relaxed);
             if let Some(function) = clone_self.get_event_callback(&Event::Close) {
-                let lock = function.1.read().unwrap();
+                let mut lock = function.1.write().unwrap();
                 lock(String::from("Connection is closed"));
                 drop(lock)
             }
@@ -313,15 +315,19 @@ impl TransportClient {
                         if data.len() > 1 {
                             if let serde_json::Value::String(event) = contents[0].clone() {
                                 if let Some(function) = clone_self.get_event_callback(&Event::Custom(event)) {
-                                    let lock = function.1.read()?;
-                                    spawn_scoped!(lock(contents[1].to_string()));
-                                    drop(lock)
+                                    spawn_scoped!({
+                                        let mut lock = function.1.write().unwrap();
+                                        lock(contents[1].to_string());
+                                        drop(lock);
+                                    });
                                 }
                             }
                         } else if let Some(function) = clone_self.get_event_callback(&Event::Message) {
-                            let lock = function.1.read()?;
-                            spawn_scoped!(lock(contents[0].to_string()));
-                            drop(lock);
+                            spawn_scoped!({
+                                let mut lock = function.1.write().unwrap();
+                                lock(contents[0].to_string());
+                                drop(lock);
+                            });
                         }
                     }
 
@@ -364,26 +370,27 @@ mod test {
     use std::time::Duration;
 
     use super::*;
+    const SERVER_URL: &str = "http://localhost:4200";
 
     #[test]
     fn it_works() {
-        let mut socket = TransportClient::new(String::from("http://localhost:4200"), None);
+        let mut socket = TransportClient::new(SERVER_URL, None);
 
-        socket
+        assert!(socket
             .on("test".into(), |s| {
                 println!("{}", s);
             })
-            .unwrap();
+            .is_ok());
 
-        socket.connect().unwrap();
+        assert!(socket.connect().is_ok());
 
         let ack_callback = |message: String| {
             println!("Yehaa! My ack got acked?");
             println!("Ack data: {}", message);
         };
 
-        socket
+        assert!(socket
             .emit_with_ack("test".into(), "123", Duration::from_secs(10), ack_callback)
-            .unwrap();
+            .is_ok());
     }
 }

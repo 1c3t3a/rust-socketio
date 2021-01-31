@@ -30,14 +30,14 @@ const SEPERATOR: char = '\x1e';
 /// Converts a byte into the corresponding packet id.
 #[inline]
 fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
-    match b as char {
-        '0' => Ok(PacketId::Open),
-        '1' => Ok(PacketId::Close),
-        '2' => Ok(PacketId::Ping),
-        '3' => Ok(PacketId::Pong),
-        '4' => Ok(PacketId::Message),
-        '5' => Ok(PacketId::Upgrade),
-        '6' => Ok(PacketId::Noop),
+    match b {
+        48_u8 => Ok(PacketId::Open),
+        49_u8 => Ok(PacketId::Close),
+        50_u8 => Ok(PacketId::Ping),
+        51_u8 => Ok(PacketId::Pong),
+        52_u8 => Ok(PacketId::Message),
+        53_u8 => Ok(PacketId::Upgrade),
+        54_u8 => Ok(PacketId::Noop),
         _ => Err(Error::InvalidPacketId(b)),
     }
 }
