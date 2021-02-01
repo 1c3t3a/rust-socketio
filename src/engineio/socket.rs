@@ -35,9 +35,9 @@ impl EngineSocket {
         thread::spawn(move || {
             let s = cl.read().unwrap().clone();
             // this tries to restart a poll cycle whenever a 'normal' error
-            // occurs, it just panics on network errors in case the poll cycle
-            // returened Ok, the server received a close frame anyway, so it's
-            // safe to terminate
+            // occurs, it just panics on network errors. in case the poll cycle
+            // returened Result::Ok, the server received a close frame anyway,
+            // so it's safe to terminate.
             loop {
                 match s.poll_cycle() {
                     Ok(_) => break,

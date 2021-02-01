@@ -62,7 +62,7 @@ impl TransportClient {
         F: FnMut(String) + 'static + Sync + Send,
     {
         Arc::get_mut(&mut self.on)
-            .ok_or(Error::PoisonedLockError)?
+            .unwrap()
             .push((event, RwLock::new(Box::new(callback))));
         Ok(())
     }

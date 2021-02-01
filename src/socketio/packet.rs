@@ -119,7 +119,7 @@ impl Packet {
         let attachements = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
             let start = i + 1;
 
-            while string.chars().nth(i).unwrap() != '-' && i < string.len() {
+            while string.chars().nth(i).ok_or(Error::IncompletePacket)? != '-' && i < string.len() {
                 i += 1;
             }
             Some(
@@ -128,16 +128,15 @@ impl Packet {
                     .skip(start)
                     .take(i - start)
                     .collect::<String>()
-                    .parse::<u8>()
-                    .unwrap(),
+                    .parse::<u8>()?,
             )
         } else {
             None
         };
 
-        let nsp = if string.chars().nth(i + 1).unwrap() == '/' {
+        let nsp = if string.chars().nth(i + 1).ok_or(Error::IncompletePacket)? == '/' {
             let start = i + 1;
-            while string.chars().nth(i).unwrap() != ',' && i < string.len() {
+            while string.chars().nth(i).ok_or(Error::IncompletePacket)? != ',' && i < string.len() {
                 i += 1;
             }
             string
@@ -153,7 +152,13 @@ impl Packet {
         let id = if next.is_digit(10) && i < string.len() {
             let start = i + 1;
             i += 1;
-            while string.chars().nth(i).unwrap().is_digit(10) && i < string.len() {
+            while string
+                .chars()
+                .nth(i)
+                .ok_or(Error::IncompletePacket)?
+                .is_digit(10)
+                && i < string.len()
+            {
                 i += 1;
             }
 
@@ -163,8 +168,7 @@ impl Packet {
                     .skip(start)
                     .take(i - start)
                     .collect::<String>()
-                    .parse::<i32>()
-                    .unwrap(),
+                    .parse::<i32>()?,
             )
         } else {
             None
@@ -190,6 +194,8 @@ impl Packet {
             }
 
             if end != start {
+                // unwrapping here is infact safe as we checked for errors in the
+                // condition of the loop
                 json_data = serde_json::from_str(
                     &string
                         .chars()

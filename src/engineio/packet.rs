@@ -29,15 +29,15 @@ const SEPERATOR: char = '\x1e';
 
 /// Converts a byte into the corresponding packet id.
 #[inline]
-fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
-    match b {
-        48_u8 => Ok(PacketId::Open),
-        49_u8 => Ok(PacketId::Close),
-        50_u8 => Ok(PacketId::Ping),
-        51_u8 => Ok(PacketId::Pong),
-        52_u8 => Ok(PacketId::Message),
-        53_u8 => Ok(PacketId::Upgrade),
-        54_u8 => Ok(PacketId::Noop),
+const fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
+    match b as char {
+        '0' => Ok(PacketId::Open),
+        '1' => Ok(PacketId::Close),
+        '2' => Ok(PacketId::Ping),
+        '3' => Ok(PacketId::Pong),
+        '4' => Ok(PacketId::Message),
+        '5' => Ok(PacketId::Upgrade),
+        '6' => Ok(PacketId::Noop),
         _ => Err(Error::InvalidPacketId(b)),
     }
 }
@@ -57,13 +57,13 @@ impl Packet {
             return Err(Error::EmptyPacket);
         }
 
-        let is_base64 = bytes[0] == b'b';
+        let is_base64 = *bytes.get(0).ok_or(Error::IncompletePacket)? == b'b';
 
         // only 'messages' packets could be encoded
         let packet_id = if is_base64 {
             PacketId::Message
         } else {
-            u8_to_packet_id(bytes[0])?
+            u8_to_packet_id(*bytes.get(0).ok_or(Error::IncompletePacket)?)?
         };
 
         if bytes.len() == 1 && packet_id == PacketId::Message {

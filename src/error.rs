@@ -1,6 +1,9 @@
 use base64::DecodeError;
-use std::fmt::{self, Display, Formatter};
 use std::str;
+use std::{
+    fmt::{self, Display, Formatter},
+    num::ParseIntError,
+};
 
 /// An enumeration of all possible Errors in the socket.io context.
 #[derive(Debug)]
@@ -8,6 +11,7 @@ pub enum Error {
     InvalidPacketId(u8),
     EmptyPacket,
     IncompletePacket,
+    InvalidPacket,
     Utf8Error(str::Utf8Error),
     Base64Error(DecodeError),
     InvalidUrl(String),
@@ -45,6 +49,13 @@ impl From<reqwest::Error> for Error {
     }
 }
 
+impl From<ParseIntError> for Error {
+    fn from(_: ParseIntError) -> Self {
+        // this is used for parsing integers from the a packet string
+        Self::InvalidPacket
+    }
+}
+
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match &self {
@@ -76,7 +87,8 @@ impl Display for Error {
             Self::InvalidJson(string) => write!(f, "string is not json serializable: {}", string),
             Self::DidNotReceiveProperAck(id) => write!(f, "Did not receive an ack for id: {}", id),
             Self::IllegalActionAfterOpen => write!(f, "An illegal action (such as setting a callback after being connected) was triggered"),
-            Self::PoisonedLockError => write!(f, "A lock was poisoned")
+            Self::PoisonedLockError => write!(f, "A lock was poisoned"),
+            Self::InvalidPacket => write!(f, "Got an invalid packet which did not follow the protocol format"),
         }
     }
 }
