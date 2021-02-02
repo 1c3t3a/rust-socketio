@@ -21,21 +21,13 @@ jobs:
          id: buildx
          with:
            install: true
+       - uses: actions-rs/toolchain@v1
+         with:
+            profile: minimal
+            toolchain: stable
+            override: true
        - name: build docker-compose stack
          run: docker-compose -f docker-compose.yml up -d
-   test:
-    needs: build
-    name: Cargo Test Node Server
-    runs-on: ubuntu-latest
-    env:
-      PORT: 4200
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
+       - uses: actions-rs/cargo@v1
+         with:
           command: test
