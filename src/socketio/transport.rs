@@ -39,6 +39,7 @@ pub struct TransportClient {
     engineio_connected: Arc<AtomicBool>,
     on: Arc<Vec<(Event, Callback<String>)>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
+    // Namespace, for multiplexing messages
     nsp: Arc<Option<String>>,
 }
 
@@ -214,34 +215,7 @@ impl TransportClient {
                     TransportClient::handle_event(socket_packet, clone_self).unwrap();
                 }
                 SocketPacketId::Ack => {
-                    let mut to_be_removed = Vec::new();
-                    if let Some(id) = socket_packet.id {
-                        for (index, ack) in clone_self
-                            .clone()
-                            .outstanding_acks
-                            .read()
-                            .unwrap()
-                            .iter()
-                            .enumerate()
-                        {
-                            if ack.id == id {
-                                to_be_removed.push(index);
-
-                                if ack.time_started.elapsed() < ack.timeout {
-                                    if let Some(payload) = socket_packet.clone().data {
-                                        spawn_scoped!({
-                                            let mut function = ack.callback.write().unwrap();
-                                            function(payload);
-                                            drop(function);
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                        for index in to_be_removed {
-                            clone_self.outstanding_acks.write().unwrap().remove(index);
-                        }
-                    }
+                    Self::handle_ack(socket_packet, clone_self);
                 }
                 SocketPacketId::BinaryEvent => {
                     // call the callback
@@ -249,6 +223,37 @@ impl TransportClient {
                 SocketPacketId::BinaryAck => {
                     // call the callback
                 }
+            }
+        }
+    }
+
+    fn handle_ack(socket_packet: SocketPacket, clone_self: &TransportClient) {
+        let mut to_be_removed = Vec::new();
+        if let Some(id) = socket_packet.id {
+            for (index, ack) in clone_self
+                .clone()
+                .outstanding_acks
+                .read()
+                .unwrap()
+                .iter()
+                .enumerate()
+            {
+                if ack.id == id {
+                    to_be_removed.push(index);
+
+                    if ack.time_started.elapsed() < ack.timeout {
+                        if let Some(payload) = socket_packet.clone().data {
+                            spawn_scoped!({
+                                let mut function = ack.callback.write().unwrap();
+                                function(payload);
+                                drop(function);
+                            });
+                        }
+                    }
+                }
+            }
+            for index in to_be_removed {
+                clone_self.outstanding_acks.write().unwrap().remove(index);
             }
         }
     }
