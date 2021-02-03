@@ -1,9 +1,9 @@
 /**
  * This is an example server, used to test the current code.
- * It might be a good idea to use this in an automated test.
  */
 const engine = require('engine.io');
-const server = engine.listen(4200);
+// the engine.io client runs on port 4201
+const server = engine.listen(4201);
 
 console.log("Started")
 server.on('connection', socket => {
@@ -11,6 +11,9 @@ server.on('connection', socket => {
 
     socket.on('message', message => {
         console.log(message.toString());
+        if (message == "CLOSE") {
+            socket.close();
+        }
     });
 
     socket.on('ping', () => {

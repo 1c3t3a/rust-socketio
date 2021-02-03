@@ -29,7 +29,7 @@ const SEPERATOR: char = '\x1e';
 
 /// Converts a byte into the corresponding packet id.
 #[inline]
-fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
+const fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
     match b as char {
         '0' => Ok(PacketId::Open),
         '1' => Ok(PacketId::Close),
@@ -57,13 +57,13 @@ impl Packet {
             return Err(Error::EmptyPacket);
         }
 
-        let is_base64 = bytes[0] == b'b';
+        let is_base64 = *bytes.get(0).ok_or(Error::IncompletePacket)? == b'b';
 
         // only 'messages' packets could be encoded
         let packet_id = if is_base64 {
             PacketId::Message
         } else {
-            u8_to_packet_id(bytes[0])?
+            u8_to_packet_id(*bytes.get(0).ok_or(Error::IncompletePacket)?)?
         };
 
         if bytes.len() == 1 && packet_id == PacketId::Message {
@@ -147,40 +147,40 @@ mod tests {
 
     #[test]
     fn test_is_reflexive() {
-        let data = "1Hello World".to_string().into_bytes();
+        let data = "1Hello World".to_owned().into_bytes();
         let packet = Packet::decode_packet(data).unwrap();
 
         assert_eq!(packet.packet_id, PacketId::Close);
-        assert_eq!(packet.data, "Hello World".to_string().into_bytes());
+        assert_eq!(packet.data, "Hello World".to_owned().into_bytes());
 
-        let data: Vec<u8> = "1Hello World".to_string().into_bytes();
+        let data: Vec<u8> = "1Hello World".to_owned().into_bytes();
         assert_eq!(Packet::encode_packet(packet), data);
     }
 
     #[test]
     fn test_binary_packet() {
         // SGVsbG8= is the encoded string for 'Hello'
-        let data = "bSGVsbG8=".to_string().into_bytes();
+        let data = "bSGVsbG8=".to_owned().into_bytes();
         let packet = Packet::decode_packet(data).unwrap();
 
         assert_eq!(packet.packet_id, PacketId::Message);
-        assert_eq!(packet.data, "Hello".to_string().into_bytes());
+        assert_eq!(packet.data, "Hello".to_owned().into_bytes());
 
-        let data = "bSGVsbG8=".to_string().into_bytes();
+        let data = "bSGVsbG8=".to_owned().into_bytes();
         assert_eq!(Packet::encode_base64(packet), data);
     }
 
     #[test]
     fn test_decode_payload() {
-        let data = "1Hello\x1e1HelloWorld".to_string().into_bytes();
+        let data = "1Hello\x1e1HelloWorld".to_owned().into_bytes();
         let packets = decode_payload(data).unwrap();
 
         assert_eq!(packets[0].packet_id, PacketId::Close);
-        assert_eq!(packets[0].data, ("Hello".to_string().into_bytes()));
+        assert_eq!(packets[0].data, ("Hello".to_owned().into_bytes()));
         assert_eq!(packets[1].packet_id, PacketId::Close);
-        assert_eq!(packets[1].data, ("HelloWorld".to_string().into_bytes()));
+        assert_eq!(packets[1].data, ("HelloWorld".to_owned().into_bytes()));
 
-        let data = "1Hello\x1e1HelloWorld".to_string().into_bytes();
+        let data = "1Hello\x1e1HelloWorld".to_owned().into_bytes();
         assert_eq!(encode_payload(packets), data);
     }
 
@@ -190,11 +190,11 @@ mod tests {
         let packets = decode_payload(data).unwrap();
 
         assert_eq!(packets[0].packet_id, PacketId::Message);
-        assert_eq!(packets[0].data, ("Hello".to_string().into_bytes()));
+        assert_eq!(packets[0].data, ("Hello".to_owned().into_bytes()));
         assert_eq!(packets[1].packet_id, PacketId::Message);
-        assert_eq!(packets[1].data, ("HelloWorld".to_string().into_bytes()));
+        assert_eq!(packets[1].data, ("HelloWorld".to_owned().into_bytes()));
 
-        let data = "bSGVsbG8=\x1ebSGVsbG9Xb3JsZA==".to_string().into_bytes();
+        let data = "4Hello\x1e4HelloWorld".to_owned().into_bytes();
         assert_eq!(encode_payload(packets), data);
     }
 }
