@@ -10,17 +10,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The different types of transport. Used for actually transmitting the
-/// payload.
+/// The different types of transport used for transmitting a payload.
 #[derive(Debug, Clone)]
 enum TransportType {
     Polling(Arc<Mutex<Client>>),
 }
 
-/// Type of a callback function. (Normal closures can be passed in here).
+/// Type of a `Callback` function. (Normal closures can be passed in here).
 type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
 
-/// A client that handles the plain transmission of packets in the engine.io
+/// A client which handles the plain transmission of packets in the `engine.io`
 /// protocol. Used by the wrapper `EngineSocket`. This struct also holds the
 /// callback functions.
 #[derive(Clone)]
@@ -39,8 +38,7 @@ pub struct TransportClient {
     engine_io_mode: Arc<AtomicBool>,
 }
 
-/// The data that gets exchanged in the handshake. Its content is usually
-/// defined by the server.
+/// Data which gets exchanged in a handshake as defined by the server.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct HandshakeData {
     sid: String,
@@ -52,7 +50,7 @@ struct HandshakeData {
 }
 
 impl TransportClient {
-    /// Creates an instance.
+    /// Creates an instance of `TransportClient`.
     pub fn new(engine_io_mode: bool) -> Self {
         TransportClient {
             transport: TransportType::Polling(Arc::new(Mutex::new(Client::new()))),
@@ -125,8 +123,8 @@ impl TransportClient {
         Ok(())
     }
 
-    /// Opens the connection to a certain server. This includes an opening GET
-    /// request to the server. The server passes back the handshake data in the
+    /// Opens the connection to a specified server. Includes an opening `GET`
+    /// request to the server, the server passes back the handshake data in the
     /// response. Afterwards a first Pong packet is sent to the server to
     /// trigger the Ping-cycle.
     pub fn open<T: Into<String> + Clone>(&mut self, address: T) -> Result<(), Error> {
@@ -409,7 +407,7 @@ mod test {
     use crate::engineio::packet::{Packet, PacketId};
 
     use super::*;
-    /// The engine.io server for testing runs on port 4201
+    /// The `engine.io` server for testing runs on port 4201
     const SERVER_URL: &str = "http://localhost:4201";
 
     #[test]

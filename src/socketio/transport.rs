@@ -20,9 +20,10 @@ use super::event::Event;
 /// The type of a callback function.
 pub(crate) type Callback<I> = RwLock<Box<dyn FnMut(I) + 'static + Sync + Send>>;
 
-/// Represents an Ack which is given back to the caller. This holds the internal
-/// id as well as well as information about the ack's timeout duration and the
-// callback function that is called as soon as the ack got acked.
+/// Represents an `Ack` as given back to the caller. Holds the internal `id` as
+/// well as the current ack'ed state. Holds data which will be accessible as
+/// soon as the ack'ed state is set to true. An `Ack` that didn't get ack'ed
+/// won't contain data.
 pub struct Ack {
     pub id: i32,
     timeout: Duration,
@@ -30,7 +31,7 @@ pub struct Ack {
     callback: Callback<String>,
 }
 
-/// A struct that handles communication in the socket.io protocol.
+/// Handles communication in the `socket.io` protocol.
 #[derive(Clone)]
 pub struct TransportClient {
     engine_socket: Arc<Mutex<EngineSocket>>,
@@ -44,7 +45,7 @@ pub struct TransportClient {
 }
 
 impl TransportClient {
-    /// Creates an instance.
+    /// Creates an instance of `TransportClient`.
     pub fn new<T: Into<String>>(address: T, nsp: Option<String>) -> Self {
         TransportClient {
             engine_socket: Arc::new(Mutex::new(EngineSocket::new(false))),
@@ -57,7 +58,7 @@ impl TransportClient {
         }
     }
 
-    /// Registers a new event with a certain callback function F.
+    /// Registers a new event with some callback function `F`.
     pub fn on<F>(&mut self, event: Event, callback: F) -> Result<(), Error>
     where
         F: FnMut(String) + 'static + Sync + Send,
@@ -93,7 +94,7 @@ impl TransportClient {
         self.send(&open_packet)
     }
 
-    /// Sends a socket.io packet to the server using the engine.io client.
+    /// Sends a `socket.io` packet to the server using the `engine.io` client.
     pub fn send(&self, packet: &SocketPacket) -> Result<(), Error> {
         if !self.engineio_connected.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
@@ -129,9 +130,9 @@ impl TransportClient {
         self.send(&socket_packet)
     }
 
-    /// Emits and requests an ack. The ack is returned a `Arc<RwLock<Ack>>` to
-    /// acquire shared mutability. This ack will be changed as soon as the
-    /// server answered with an ack.
+    /// Emits and requests an `ack`. The `ack` returns a `Arc<RwLock<Ack>>` to
+    /// acquire shared mutability. This `ack` will be changed as soon as the
+    /// server answered with an `ack`.
     pub fn emit_with_ack<F>(
         &mut self,
         event: Event,

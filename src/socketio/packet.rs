@@ -1,7 +1,7 @@
 use crate::error::Error;
 use regex::Regex;
 
-/// An enumeration of the different Paccket types in the socket.io protocol.
+/// An enumeration of the different `Packet` types in the `socket.io` protocol.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum PacketId {
     Connect = 0,
@@ -13,7 +13,7 @@ pub enum PacketId {
     BinaryAck = 6,
 }
 
-/// A packet which gets send or received during in the socket-io protocol.
+/// A packet which gets sent or received during in the `socket.io` protocol.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Packet {
     pub packet_type: PacketId,
@@ -24,7 +24,7 @@ pub struct Packet {
     pub attachements: Option<u8>,
 }
 
-/// Converts an u8 byte to a `PacketId`.
+/// Converts a `u8` into a `PacketId`.
 #[inline]
 pub const fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
     match b as char {
@@ -59,7 +59,7 @@ impl Packet {
         }
     }
 
-    /// Encodes the packet to a u8 byte stream.
+    /// Method for encoding from a `Packet` to a `u8` byte stream.
     pub fn encode(&self) -> Vec<u8> {
         // first the packet type
         let mut string = (self.packet_type as u8).to_string();
@@ -111,7 +111,7 @@ impl Packet {
         buffer
     }
 
-    /// Decodes a packet given an utf-8 string.
+    /// Decodes to a `Packet` given a `utf-8` as `String`.
     pub fn decode_string(string: String) -> Result<Self, Error> {
         let mut i = 0;
         let packet_id = u8_to_packet_id(string.as_bytes()[i])?;
