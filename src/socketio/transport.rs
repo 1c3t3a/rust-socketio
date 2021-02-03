@@ -178,6 +178,7 @@ impl TransportClient {
     /// Handles the incoming messages and classifies what callbacks to call and how.
     /// This method is later registered as the callback for the `on_data` event of the
     /// engineio client.
+    #[inline]
     fn handle_new_message(socket_bytes: Vec<u8>, clone_self: &TransportClient) {
         if let Ok(socket_packet) =
             SocketPacket::decode_string(std::str::from_utf8(&socket_bytes).unwrap().to_owned())
@@ -227,6 +228,8 @@ impl TransportClient {
         }
     }
 
+    /// Handles the incoming acks and classifies what callbacks to call and how.
+    #[inline]
     fn handle_ack(socket_packet: SocketPacket, clone_self: &TransportClient) {
         let mut to_be_removed = Vec::new();
         if let Some(id) = socket_packet.id {
@@ -375,6 +378,7 @@ mod test {
     use std::time::Duration;
 
     use super::*;
+    /// The socket.io server for testing runs on port 4200
     const SERVER_URL: &str = "http://localhost:4200";
 
     #[test]

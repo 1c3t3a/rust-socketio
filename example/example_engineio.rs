@@ -23,12 +23,12 @@ fn main() {
 
     socket.emit(Packet::new(
             PacketId::Message,
-            "Hello World".to_string().into_bytes(),
+            "Hello World".to_owned().into_bytes(),
     )).unwrap();
 
     socket.emit(Packet::new(
             PacketId::Message,
-            "Hello World2".to_string().into_bytes(),
+            "Hello World2".to_owned().into_bytes(),
     )).unwrap();
 
     socket.emit(Packet::new(PacketId::Pong, Vec::new())).unwrap();
@@ -39,6 +39,6 @@ fn main() {
 
     socket.emit(Packet::new(
         PacketId::Message,
-        "Hello World3".to_string().into_bytes(),
+        "Hello World3".to_owned().into_bytes(),
     )).unwrap();
 }

@@ -409,6 +409,7 @@ mod test {
     use crate::engineio::packet::{Packet, PacketId};
 
     use super::*;
+    /// The engine.io server for testing runs on port 4201
     const SERVER_URL: &str = "http://localhost:4201";
 
     #[test]
@@ -419,7 +420,7 @@ mod test {
         assert!(socket
             .emit(Packet::new(
                 PacketId::Message,
-                "HelloWorld".to_string().into_bytes(),
+                "HelloWorld".to_owned().into_bytes(),
             ))
             .is_ok());
 
@@ -430,10 +431,11 @@ mod test {
             );
         }))));
 
+        // closes the connection
         assert!(socket
             .emit(Packet::new(
                 PacketId::Message,
-                "PlsEnd".to_string().into_bytes(),
+                "CLOSE".to_owned().into_bytes(),
             ))
             .is_ok());
 
