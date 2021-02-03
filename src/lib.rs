@@ -89,7 +89,7 @@ use crate::socketio::transport::TransportClient;
 /// A socket which handles communication with the server. It's initialized with
 /// a specific address as well as an optional namespace to connect to. If `None`
 /// is given the server will connect to the default namespace `"/"`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Socket {
     /// The inner transport client to delegate the methods to.
     transport: TransportClient,
