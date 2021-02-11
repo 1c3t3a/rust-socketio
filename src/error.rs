@@ -5,7 +5,7 @@ use std::{
     num::ParseIntError,
 };
 
-/// An enumeration of all possible Errors in the socket.io context.
+/// Enumeration of all possible errors in the `socket.io` context.
 #[derive(Debug)]
 pub enum Error {
     InvalidPacketId(u8),
