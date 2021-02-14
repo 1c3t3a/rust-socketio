@@ -180,9 +180,7 @@ impl TransportClient {
     /// engineio client.
     #[inline]
     fn handle_new_message(socket_bytes: Vec<u8>, clone_self: &TransportClient) {
-        if let Ok(socket_packet) =
-            SocketPacket::decode_string(std::str::from_utf8(&socket_bytes).unwrap().to_owned())
-        {
+        if let Ok(socket_packet) = SocketPacket::decode_bytes(socket_bytes) {
             if socket_packet.nsp
                 != clone_self
                     .nsp
