@@ -180,8 +180,8 @@ impl TransportClient {
     /// This method is later registered as the callback for the `on_data` event of the
     /// engineio client.
     #[inline]
-    fn handle_new_message(socket_bytes: Vec<u8>, clone_self: &TransportClient) {
-        if let Ok(socket_packet) = SocketPacket::decode_bytes(socket_bytes) {
+    fn handle_new_message(socket_bytes: &[u8], clone_self: &TransportClient) {
+        if let Ok(socket_packet) = SocketPacket::decode_bytes(&socket_bytes) {
             if socket_packet.nsp
                 != clone_self
                     .nsp
@@ -301,7 +301,7 @@ impl TransportClient {
         let clone_self = self.clone();
         self.engine_socket
             .lock()?
-            .on_data(move |data| Self::handle_new_message(data, &clone_self))
+            .on_data(move |data| Self::handle_new_message(&data, &clone_self))
     }
 
     /// A method for handling the Event Socket Packets.

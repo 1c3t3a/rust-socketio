@@ -111,8 +111,8 @@ impl Packet {
         buffer
     }
 
-    /// Decodes a packet given a `Vec<u8>`.
-    pub fn decode_bytes(payload: Vec<u8>) -> Result<Self, Error> {
+    /// Decodes a packet given a `&[u8]`.
+    pub fn decode_bytes(payload: &[u8]) -> Result<Self, Error> {
         let mut i = 0;
         let packet_id = u8_to_packet_id(*payload.first().ok_or(Error::EmptyPacket)?)?;
 
@@ -259,7 +259,7 @@ mod test {
     /// This test suite is taken from the explanation section here:
     /// https://github.com/socketio/socket.io-protocol
     fn test_decode() {
-        let packet = Packet::decode_bytes("0{\"token\":\"123\"}".as_bytes().to_vec());
+        let packet = Packet::decode_bytes("0{\"token\":\"123\"}".as_bytes());
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -274,7 +274,7 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_bytes("0/admin,{\"token\":\"123\"}".as_bytes().to_vec());
+        let packet = Packet::decode_bytes("0/admin,{\"token\":\"123\"}".as_bytes());
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -289,7 +289,7 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_bytes("1/admin,".as_bytes().to_vec());
+        let packet = Packet::decode_bytes("1/admin,".as_bytes());
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -304,7 +304,7 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_bytes("2[\"hello\",1]".as_bytes().to_vec());
+        let packet = Packet::decode_bytes("2[\"hello\",1]".as_bytes());
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -319,8 +319,7 @@ mod test {
             packet.unwrap()
         );
 
-        let packet =
-            Packet::decode_bytes("2/admin,456[\"project:delete\",123]".as_bytes().to_vec());
+        let packet = Packet::decode_bytes("2/admin,456[\"project:delete\",123]".as_bytes());
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -335,7 +334,7 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_bytes("3/admin,456[]".as_bytes().to_vec());
+        let packet = Packet::decode_bytes("3/admin,456[]".as_bytes());
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -350,11 +349,7 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_bytes(
-            "4/admin,{\"message\":\"Not authorized\"}"
-                .as_bytes()
-                .to_vec(),
-        );
+        let packet = Packet::decode_bytes("4/admin,{\"message\":\"Not authorized\"}".as_bytes());
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -370,9 +365,7 @@ mod test {
         );
 
         let packet = Packet::decode_bytes(
-            "51-[\"hello\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03"
-                .as_bytes()
-                .to_vec(),
+            "51-[\"hello\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03".as_bytes(),
         );
         assert!(packet.is_ok());
 
@@ -390,8 +383,7 @@ mod test {
 
         let packet = Packet::decode_bytes(
             "51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03"
-                .as_bytes()
-                .to_vec(),
+                .as_bytes(),
         );
         assert!(packet.is_ok());
 
@@ -408,9 +400,7 @@ mod test {
         );
 
         let packet = Packet::decode_bytes(
-            "61-/admin,456[{\"_placeholder\":true,\"num\":0}]\x03\x02\x01"
-                .as_bytes()
-                .to_vec(),
+            "61-/admin,456[{\"_placeholder\":true,\"num\":0}]\x03\x02\x01".as_bytes(),
         );
         assert!(packet.is_ok());
 
