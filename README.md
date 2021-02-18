@@ -3,7 +3,7 @@
 
 # Rust-socketio-client
 
-An asynchronous implementation of a socket.io client written in the Rust programming language.
+An implementation of a socket.io client written in the Rust programming language. This implementation currently supports revision 5 of the socket.io protocol and therefore revision 4 of the engine.io protocol.
 
 ## Example usage
 
@@ -29,7 +29,7 @@ fn main() {
             println!("Yehaa! My ack got acked?");
             println!("Ack data: {}", message);
     };
-
+    
     // emit with an ack
     let ack = socket
             .emit_with_ack("test", &payload.to_string(), Duration::from_secs(2), ack_callback)
@@ -43,7 +43,7 @@ Documentation of this crate can be found up on [docs.rs](https://docs.rs/rust_so
 
 ## Current features
 
-This is the first released version of the client, so it still lacks some features that the normal client would provide. First of all the underlying engine.io protocol still uses long-polling instead of websockets. This will be resolved as soon as both the reqwest libary as well as tungstenite-websockets will bump their tokio version to 1.0.0. At the moment only reqwest is used for async long polling. In general the full engine-io protocol is implemented and most of the features concerning the 'normal' socket.io protocol work as well.
+This is the first released version of the client, so it still lacks some features that the normal client would provide. First of all the underlying engine.io protocol still uses long-polling instead of websockets. This will be resolved as soon as both the reqwest libary as well as tungstenite-websockets will bump their tokio version to 1.0.0. At the moment only reqwest is used for long polling. In general the full engine-io protocol is implemented and most of the features concerning the 'normal' socket.io protocol work as well.
 
 Here's an overview of possible use-cases:
 
@@ -59,7 +59,7 @@ Here's an overview of possible use-cases:
 
 What's currently missing is the emitting of binary data - I aim to implement this as soon as possible.
 
-The whole crate is written in asynchronous rust and it's necessary to use [tokio](https://docs.rs/tokio/1.0.1/tokio/), or other executors with this libary to resolve the futures.
+The whole crate is written in rust and it's necessary to use [tokio](https://docs.rs/tokio/1.0.1/tokio/), or other executors with this libary to resolve the futures.
 
 ## Content of this repository
 

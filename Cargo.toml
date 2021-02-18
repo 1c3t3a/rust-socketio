@@ -3,24 +3,20 @@ name = "rust_socketio"
 version = "0.1.1"
 authors = ["Bastian Kersting <bastian@cmbt.de>"]
 edition = "2018"
-description = "An implementation of a socketio client written in async rust."
+description = "An implementation of a socketio client written in rust."
 readme = "README.md"
 repository = "https://github.com/1c3t3a/rust-socketio"
-keywords = ["socketio", "engineio", "network"]
-categories = ["asynchronous", "network-programming", "web-programming", "web-programming::websocket"]
+keywords = ["socketio", "engineio", "network", "socket.io", "client"]
+categories = ["network-programming", "web-programming", "web-programming::websocket"]
 license = "MIT"
 
 [dependencies]
 base64 = "0.13.0"
 rand = "0.8.1"
 crossbeam-utils = "0.8.1"
-reqwest = "0.11.0"
-tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.11.0", features = ["blocking"] }
 adler32 = "1.2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 regex = "1.4.2"
 if_chain = "1.0.1"
-
-[dev-dependencies]
-actix-rt = "2.0.0-beta.2"

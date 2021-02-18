@@ -5,7 +5,7 @@ use std::str;
 
 use crate::error::Error;
 
-/// Enumeration of the engineio Packet types.
+/// Enumeration of the `engine.io` `Packet` types.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum PacketId {
     Open = 0,
@@ -17,7 +17,7 @@ pub enum PacketId {
     Noop = 6,
 }
 
-/// A packet send in the engineio protocol.
+/// A `Packet` sent via the `engine.io` protocol.
 #[derive(Debug, Clone)]
 pub struct Packet {
     pub packet_id: PacketId,
@@ -27,9 +27,9 @@ pub struct Packet {
 // see https://en.wikipedia.org/wiki/Delimiter#ASCII_delimited_text
 const SEPERATOR: char = '\x1e';
 
-/// Converts a byte into the corresponding packet id.
+/// Converts a byte into the corresponding `PacketId`.
 #[inline]
-fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
+const fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
     match b as char {
         '0' => Ok(PacketId::Open),
         '1' => Ok(PacketId::Close),
@@ -43,25 +43,27 @@ fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
 }
 
 impl Packet {
-    /// Creates a new packet.
+    /// Creates a new `Packet`.
     pub fn new(packet_id: PacketId, data: Vec<u8>) -> Self {
         Packet { packet_id, data }
     }
 
-    // TODO: Maybe replace the Vec<u8> by a u8 array as this might be inefficient
-    /// Decodes a single packet from an u8 byte stream.
+    // TODO: replace the Vec<u8> by a u8 array as this might be
+    // inefficient
+
+    /// Decodes a single `Packet` from an `u8` byte stream.
     fn decode_packet(bytes: Vec<u8>) -> Result<Self, Error> {
         if bytes.is_empty() {
             return Err(Error::EmptyPacket);
         }
 
-        let is_base64 = bytes[0] == b'b';
+        let is_base64 = *bytes.get(0).ok_or(Error::IncompletePacket)? == b'b';
 
         // only 'messages' packets could be encoded
         let packet_id = if is_base64 {
             PacketId::Message
         } else {
-            u8_to_packet_id(bytes[0])?
+            u8_to_packet_id(*bytes.get(0).ok_or(Error::IncompletePacket)?)?
         };
 
         if bytes.len() == 1 && packet_id == PacketId::Message {
@@ -80,7 +82,7 @@ impl Packet {
         })
     }
 
-    /// Encodes a packet into an u8 byte stream.
+    /// Encodes a `Packet` into an `u8` byte stream.
     #[inline]
     fn encode_packet(self) -> Vec<u8> {
         let mut result = Vec::new();
@@ -89,8 +91,10 @@ impl Packet {
         result
     }
 
-    /// Encodes a packet with the payload as base64. Observed some strange
-    /// behavior while doing this with socket.io packets, works with engine.io packets.
+    // TODO: Observed some strange behavior while doing this with socket.io
+    // packets, works with engine.io packets.
+
+    /// Encodes a `Packet` with the payload as `base64`.
     #[allow(dead_code)]
     #[inline]
     fn encode_base64(self) -> Vec<u8> {
@@ -104,20 +108,22 @@ impl Packet {
     }
 }
 
-/// Decodes a payload. Payload in the engine.io context means a chain of normal packets seperated
-/// by a certain SEPERATOR, in this case the delimiter \x30.
+/// Decodes a `payload` which in the `engine.io` context means a chain of normal
+/// packets separated by a certain SEPERATOR, in this case the delimiter `\x30`.
 pub fn decode_payload(payload: Vec<u8>) -> Result<Vec<Packet>, Error> {
     let mut vec = Vec::new();
     for packet_bytes in payload.split(|byte| (*byte as char) == SEPERATOR) {
-        // this conversion might be inefficent, as the 'to_vec' method copies the elements
+        // TODO this conversion might be inefficent, as the 'to_vec' method
+        // copies the elements
         vec.push(Packet::decode_packet((*packet_bytes).to_vec())?);
     }
 
     Ok(vec)
 }
 
-/// Encodes a payload. Payload in the engine.io context means a chain of normal packets seperated
-/// by a certain SEPERATOR, in this case the delimiter \x30.
+/// Encodes a payload. Payload in the `engine.io` context means a chain of
+/// normal `packets` separated by a SEPERATOR, in this case the delimiter
+/// `\x30`.
 pub fn encode_payload(packets: Vec<Packet>) -> Vec<u8> {
     let mut vec = Vec::new();
     for packet in packets {
@@ -143,40 +149,40 @@ mod tests {
 
     #[test]
     fn test_is_reflexive() {
-        let data = "1Hello World".to_string().into_bytes();
+        let data = "1Hello World".to_owned().into_bytes();
         let packet = Packet::decode_packet(data).unwrap();
 
         assert_eq!(packet.packet_id, PacketId::Close);
-        assert_eq!(packet.data, "Hello World".to_string().into_bytes());
+        assert_eq!(packet.data, "Hello World".to_owned().into_bytes());
 
-        let data: Vec<u8> = "1Hello World".to_string().into_bytes();
+        let data: Vec<u8> = "1Hello World".to_owned().into_bytes();
         assert_eq!(Packet::encode_packet(packet), data);
     }
 
     #[test]
     fn test_binary_packet() {
         // SGVsbG8= is the encoded string for 'Hello'
-        let data = "bSGVsbG8=".to_string().into_bytes();
+        let data = "bSGVsbG8=".to_owned().into_bytes();
         let packet = Packet::decode_packet(data).unwrap();
 
         assert_eq!(packet.packet_id, PacketId::Message);
-        assert_eq!(packet.data, "Hello".to_string().into_bytes());
+        assert_eq!(packet.data, "Hello".to_owned().into_bytes());
 
-        let data = "bSGVsbG8=".to_string().into_bytes();
+        let data = "bSGVsbG8=".to_owned().into_bytes();
         assert_eq!(Packet::encode_base64(packet), data);
     }
 
     #[test]
     fn test_decode_payload() {
-        let data = "1Hello\x1e1HelloWorld".to_string().into_bytes();
+        let data = "1Hello\x1e1HelloWorld".to_owned().into_bytes();
         let packets = decode_payload(data).unwrap();
 
         assert_eq!(packets[0].packet_id, PacketId::Close);
-        assert_eq!(packets[0].data, ("Hello".to_string().into_bytes()));
+        assert_eq!(packets[0].data, ("Hello".to_owned().into_bytes()));
         assert_eq!(packets[1].packet_id, PacketId::Close);
-        assert_eq!(packets[1].data, ("HelloWorld".to_string().into_bytes()));
+        assert_eq!(packets[1].data, ("HelloWorld".to_owned().into_bytes()));
 
-        let data = "1Hello\x1e1HelloWorld".to_string().into_bytes();
+        let data = "1Hello\x1e1HelloWorld".to_owned().into_bytes();
         assert_eq!(encode_payload(packets), data);
     }
 
@@ -186,11 +192,11 @@ mod tests {
         let packets = decode_payload(data).unwrap();
 
         assert_eq!(packets[0].packet_id, PacketId::Message);
-        assert_eq!(packets[0].data, ("Hello".to_string().into_bytes()));
+        assert_eq!(packets[0].data, ("Hello".to_owned().into_bytes()));
         assert_eq!(packets[1].packet_id, PacketId::Message);
-        assert_eq!(packets[1].data, ("HelloWorld".to_string().into_bytes()));
+        assert_eq!(packets[1].data, ("HelloWorld".to_owned().into_bytes()));
 
-        let data = "bSGVsbG8=\x1ebSGVsbG9Xb3JsZA==".to_string().into_bytes();
+        let data = "4Hello\x1e4HelloWorld".to_owned().into_bytes();
         assert_eq!(encode_payload(packets), data);
     }
 }

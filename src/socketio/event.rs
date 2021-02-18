@@ -1,5 +1,4 @@
-/// An Event in the socket.io. Could either be one of the common (`Message`, `Error`)
-///  or a custom one.
+/// An `Event` in `socket.io` could either (`Message`, `Error`) or custom.
 #[derive(Debug, PartialEq, PartialOrd)]
 pub enum Event {
     Message,
@@ -30,10 +29,10 @@ impl From<&str> for Event {
 impl From<Event> for String {
     fn from(event: Event) -> Self {
         match event {
-            Event::Message => String::from("message"),
-            Event::Connect => String::from("open"),
-            Event::Close => String::from("close"),
-            Event::Error => String::from("error"),
+            Event::Message => Self::from("message"),
+            Event::Connect => Self::from("open"),
+            Event::Close => Self::from("close"),
+            Event::Error => Self::from("error"),
             Event::Custom(string) => string,
         }
     }

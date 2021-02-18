@@ -14,4 +14,5 @@ io.on('connection', client => {
       });
     client.emit("test", "Hello Wld");
 });
+// the socket.io client runs on port 4201
 server.listen(4200);

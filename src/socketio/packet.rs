@@ -1,8 +1,8 @@
 use crate::error::Error;
 use regex::Regex;
 
-/// An enumeration of the different Paccket types in the socket.io protocol.
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+/// An enumeration of the different `Packet` types in the `socket.io` protocol.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum PacketId {
     Connect = 0,
     Disconnect = 1,
@@ -13,7 +13,7 @@ pub enum PacketId {
     BinaryAck = 6,
 }
 
-/// A packet which get's send or received during in the socket-io protocol.
+/// A packet which gets sent or received during in the `socket.io` protocol.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Packet {
     pub packet_type: PacketId,
@@ -24,9 +24,9 @@ pub struct Packet {
     pub attachements: Option<u8>,
 }
 
-/// Converts an u8 byte to an PacketId.
+/// Converts a `u8` into a `PacketId`.
 #[inline]
-pub fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
+pub const fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
     match b as char {
         '0' => Ok(PacketId::Connect),
         '1' => Ok(PacketId::Disconnect),
@@ -41,7 +41,7 @@ pub fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
 
 impl Packet {
     /// Creates an instance.
-    pub fn new(
+    pub const fn new(
         packet_type: PacketId,
         nsp: String,
         data: Option<String>,
@@ -59,7 +59,7 @@ impl Packet {
         }
     }
 
-    /// Encodes the packet to an u8 byte stream.
+    /// Method for encoding from a `Packet` to a `u8` byte stream.
     pub fn encode(&self) -> Vec<u8> {
         // first the packet type
         let mut string = (self.packet_type as u8).to_string();
@@ -73,7 +73,8 @@ impl Packet {
             _ => (),
         }
 
-        // if the namespace is different from the default one append it as well, followed by ','
+        // if the namespace is different from the default one append it as well,
+        // followed by ','
         if self.nsp != "/" {
             string.push_str(self.nsp.as_ref());
             string.push(',');
@@ -110,7 +111,7 @@ impl Packet {
         buffer
     }
 
-    /// Decodes a packet given an utf-8 string.
+    /// Decodes to a `Packet` given a `utf-8` as `String`.
     pub fn decode_string(string: String) -> Result<Self, Error> {
         let mut i = 0;
         let packet_id = u8_to_packet_id(string.as_bytes()[i])?;
@@ -118,7 +119,7 @@ impl Packet {
         let attachements = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
             let start = i + 1;
 
-            while string.chars().nth(i).unwrap() != '-' && i < string.len() {
+            while string.chars().nth(i).ok_or(Error::IncompletePacket)? != '-' && i < string.len() {
                 i += 1;
             }
             Some(
@@ -127,16 +128,15 @@ impl Packet {
                     .skip(start)
                     .take(i - start)
                     .collect::<String>()
-                    .parse::<u8>()
-                    .unwrap(),
+                    .parse::<u8>()?,
             )
         } else {
             None
         };
 
-        let nsp = if string.chars().nth(i + 1).unwrap() == '/' {
+        let nsp = if string.chars().nth(i + 1).ok_or(Error::IncompletePacket)? == '/' {
             let start = i + 1;
-            while string.chars().nth(i).unwrap() != ',' && i < string.len() {
+            while string.chars().nth(i).ok_or(Error::IncompletePacket)? != ',' && i < string.len() {
                 i += 1;
             }
             string
@@ -152,7 +152,13 @@ impl Packet {
         let id = if next.is_digit(10) && i < string.len() {
             let start = i + 1;
             i += 1;
-            while string.chars().nth(i).unwrap().is_digit(10) && i < string.len() {
+            while string
+                .chars()
+                .nth(i)
+                .ok_or(Error::IncompletePacket)?
+                .is_digit(10)
+                && i < string.len()
+            {
                 i += 1;
             }
 
@@ -162,8 +168,7 @@ impl Packet {
                     .skip(start)
                     .take(i - start)
                     .collect::<String>()
-                    .parse::<i32>()
-                    .unwrap(),
+                    .parse::<i32>()?,
             )
         } else {
             None
@@ -189,6 +194,8 @@ impl Packet {
             }
 
             if end != start {
+                // unwrapping here is infact safe as we checked for errors in the
+                // condition of the loop
                 json_data = serde_json::from_str(
                     &string
                         .chars()
@@ -211,12 +218,14 @@ impl Packet {
                             .to_vec(),
                     );
 
-                    let re_open = Regex::new(r"^\[").unwrap();
                     let re_close = Regex::new(r",]$|]$").unwrap();
                     let mut str = json_data
                         .to_string()
                         .replace("{\"_placeholder\":true,\"num\":0}", "");
-                    str = re_open.replace(&str, "").to_string();
+
+                    if str.starts_with('[') {
+                        str.remove(0);
+                    }
                     str = re_close.replace(&str, "").to_string();
 
                     if str.is_empty() {
@@ -247,7 +256,8 @@ mod test {
     use super::*;
 
     #[test]
-    /// This test suites is taken from the explanation section here: https://github.com/socketio/socket.io-protocol
+    /// This test suite is taken from the explanation section here:
+    /// https://github.com/socketio/socket.io-protocol
     fn test_decode() {
         let packet = Packet::decode_string("0{\"token\":\"123\"}".to_string());
         assert!(packet.is_ok());
@@ -408,7 +418,8 @@ mod test {
     }
 
     #[test]
-    /// This test suites is taken from the explanation section here: https://github.com/socketio/socket.io-protocol
+    /// This test suites is taken from the explanation section here:
+    /// https://github.com/socketio/socket.io-protocol
     fn test_encode() {
         let packet = Packet::new(
             PacketId::Connect,
