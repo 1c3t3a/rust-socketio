@@ -10,10 +10,9 @@ An implementation of a socket.io client written in the Rust programming language
 ``` rust
 use rust_socketio::Socket;
 use serde_json::json;
-use tokio::time::sleep;
 
 fn main() {
-    let mut socket = Socket::new(String::from("http://localhost:80"), Some("/admin"));
+    let mut socket = Socket::new("http://localhost:80", Some("/admin"));
 
     // callback for the "foo" event
     socket.on("foo", |message| println!("{}", message)).unwrap();
@@ -23,17 +22,18 @@ fn main() {
 
     // emit to the "foo" event
     let payload = json!({"token": 123});
-    socket.emit("foo", payload.to_string()).expect("Server unreachable");
+    socket.emit("foo", &payload.to_string()).expect("Server unreachable");
 
+    // define a callback, that's executed when the ack got acked
+    let ack_callback = |message: String| {
+            println!("Yehaa! My ack got acked?");
+            println!("Ack data: {}", message);
+    };
+    
     // emit with an ack
-    let ack = socket.emit_with_ack("foo", payload.to_string(), Duration::from_secs(2)).unwrap();
-
-    sleep(Duration::from_secs(2));
-
-    // check if ack is present and read the data
-    if ack.read().expect("Server panicked anyway").acked {
-        println!("{}", ack.read().expect("Server panicked anyway").data.as_ref().unwrap());
-    }
+    let ack = socket
+            .emit_with_ack("test", &payload.to_string(), Duration::from_secs(2), ack_callback)
+            .expect("Server unreachable");
  }
 ```
 
