@@ -4,6 +4,7 @@ use crate::engineio::{
 };
 use crate::error::Error;
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
+use bytes::Bytes;
 use if_chain::if_chain;
 use rand::{thread_rng, Rng};
 use std::{
@@ -101,7 +102,7 @@ impl TransportClient {
         }
 
         // the packet, encoded as an engine.io message packet
-        let engine_packet = EnginePacket::new(EnginePacketId::Message, packet.encode());
+        let engine_packet = EnginePacket::new(EnginePacketId::Message, packet.encode().to_vec());
 
         self.engine_socket.lock()?.emit(engine_packet)
     }
@@ -181,7 +182,9 @@ impl TransportClient {
     /// engineio client.
     #[inline]
     fn handle_new_message(socket_bytes: &[u8], clone_self: &TransportClient) {
-        if let Ok(socket_packet) = SocketPacket::decode_bytes(&socket_bytes) {
+        // TODO: Refactor the copy as soon as engine.io uses the Bytes type as well
+        if let Ok(socket_packet) = SocketPacket::decode_bytes(Bytes::copy_from_slice(socket_bytes))
+        {
             if socket_packet.nsp
                 != clone_self
                     .nsp
