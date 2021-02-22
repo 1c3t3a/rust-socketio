@@ -61,6 +61,10 @@
 //! library to resolve the futures.
 //!
 #![allow(clippy::rc_buffer)]
+#![warn(clippy::complexity)]
+#![warn(clippy::style)]
+#![warn(clippy::perf)]
+#![warn(clippy::correctness)]
 /// A small macro that spawns a scoped thread. Used for calling the callback
 /// functions.
 macro_rules! spawn_scoped {

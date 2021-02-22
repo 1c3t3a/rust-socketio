@@ -4,6 +4,7 @@ use crate::engineio::{
 };
 use crate::error::Error;
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
+use bytes::Bytes;
 use if_chain::if_chain;
 use rand::{thread_rng, Rng};
 use std::{
@@ -101,7 +102,7 @@ impl TransportClient {
         }
 
         // the packet, encoded as an engine.io message packet
-        let engine_packet = EnginePacket::new(EnginePacketId::Message, packet.encode());
+        let engine_packet = EnginePacket::new(EnginePacketId::Message, packet.encode().to_vec());
 
         self.engine_socket.lock()?.emit(engine_packet)
     }
@@ -180,9 +181,9 @@ impl TransportClient {
     /// This method is later registered as the callback for the `on_data` event of the
     /// engineio client.
     #[inline]
-    fn handle_new_message(socket_bytes: Vec<u8>, clone_self: &TransportClient) {
-        if let Ok(socket_packet) =
-            SocketPacket::decode_string(std::str::from_utf8(&socket_bytes).unwrap().to_owned())
+    fn handle_new_message(socket_bytes: &[u8], clone_self: &TransportClient) {
+        // TODO: Refactor the copy as soon as engine.io uses the Bytes type as well
+        if let Ok(socket_packet) = SocketPacket::decode_bytes(Bytes::copy_from_slice(socket_bytes))
         {
             if socket_packet.nsp
                 != clone_self
@@ -303,7 +304,7 @@ impl TransportClient {
         let clone_self = self.clone();
         self.engine_socket
             .lock()?
-            .on_data(move |data| Self::handle_new_message(data, &clone_self))
+            .on_data(move |data| Self::handle_new_message(&data, &clone_self))
     }
 
     /// A method for handling the Event Socket Packets.

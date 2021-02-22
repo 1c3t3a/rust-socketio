@@ -1,4 +1,5 @@
 use crate::error::Error;
+use bytes::Bytes;
 use regex::Regex;
 
 /// An enumeration of the different `Packet` types in the `socket.io` protocol.
@@ -60,7 +61,7 @@ impl Packet {
     }
 
     /// Method for encoding from a `Packet` to a `u8` byte stream.
-    pub fn encode(&self) -> Vec<u8> {
+    pub fn encode(&self) -> Bytes {
         // first the packet type
         let mut string = (self.packet_type as u8).to_string();
 
@@ -108,25 +109,26 @@ impl Packet {
             buffer.extend(data.to_string().into_bytes());
         }
 
-        buffer
+        Bytes::copy_from_slice(buffer.as_slice())
     }
 
-    /// Decodes to a `Packet` given a `utf-8` as `String`.
-    pub fn decode_string(string: String) -> Result<Self, Error> {
+    /// Decodes a packet given a `Bytes` type.
+    pub fn decode_bytes(payload: Bytes) -> Result<Self, Error> {
         let mut i = 0;
-        let packet_id = u8_to_packet_id(string.as_bytes()[i])?;
+        let packet_id = u8_to_packet_id(*payload.first().ok_or(Error::EmptyPacket)?)?;
 
         let attachements = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
             let start = i + 1;
 
-            while string.chars().nth(i).ok_or(Error::IncompletePacket)? != '-' && i < string.len() {
+            while payload.get(i).ok_or(Error::IncompletePacket)? != &b'-' && i < payload.len() {
                 i += 1;
             }
             Some(
-                string
-                    .chars()
+                payload
+                    .iter()
                     .skip(start)
                     .take(i - start)
+                    .map(|byte| *byte as char)
                     .collect::<String>()
                     .parse::<u8>()?,
             )
@@ -134,39 +136,37 @@ impl Packet {
             None
         };
 
-        let nsp = if string.chars().nth(i + 1).ok_or(Error::IncompletePacket)? == '/' {
+        let nsp = if payload.get(i + 1).ok_or(Error::IncompletePacket)? == &b'/' {
             let start = i + 1;
-            while string.chars().nth(i).ok_or(Error::IncompletePacket)? != ',' && i < string.len() {
+            while payload.get(i).ok_or(Error::IncompletePacket)? != &b',' && i < payload.len() {
                 i += 1;
             }
-            string
-                .chars()
+            payload
+                .iter()
                 .skip(start)
                 .take(i - start)
+                .map(|byte| *byte as char)
                 .collect::<String>()
         } else {
             String::from("/")
         };
 
-        let next = string.chars().nth(i + 1).unwrap_or('_');
-        let id = if next.is_digit(10) && i < string.len() {
+        let next = payload.get(i + 1).unwrap_or(&b'_');
+        let id = if (*next as char).is_digit(10) && i < payload.len() {
             let start = i + 1;
             i += 1;
-            while string
-                .chars()
-                .nth(i)
-                .ok_or(Error::IncompletePacket)?
-                .is_digit(10)
-                && i < string.len()
+            while (*payload.get(i).ok_or(Error::IncompletePacket)? as char).is_digit(10)
+                && i < payload.len()
             {
                 i += 1;
             }
 
             Some(
-                string
-                    .chars()
+                payload
+                    .iter()
                     .skip(start)
                     .take(i - start)
+                    .map(|byte| *byte as char)
                     .collect::<String>()
                     .parse::<i32>()?,
             )
@@ -175,17 +175,18 @@ impl Packet {
         };
 
         let mut binary_data = None;
-        let data = if string.chars().nth(i + 1).is_some() {
+        let data = if payload.get(i + 1).is_some() {
             let start = if id.is_some() { i } else { i + 1 };
 
             let mut json_data = serde_json::Value::Null;
 
-            let mut end = string.len();
+            let mut end = payload.len();
             while serde_json::from_str::<serde_json::Value>(
-                &string
-                    .chars()
+                &payload
+                    .iter()
                     .skip(start)
                     .take(end - start)
+                    .map(|byte| *byte as char)
                     .collect::<String>(),
             )
             .is_err()
@@ -197,10 +198,11 @@ impl Packet {
                 // unwrapping here is infact safe as we checked for errors in the
                 // condition of the loop
                 json_data = serde_json::from_str(
-                    &string
-                        .chars()
+                    &payload
+                        .iter()
                         .skip(start)
                         .take(end - start)
+                        .map(|byte| *byte as char)
                         .collect::<String>(),
                 )
                 .unwrap();
@@ -209,13 +211,12 @@ impl Packet {
             match packet_id {
                 PacketId::BinaryAck | PacketId::BinaryEvent => {
                     binary_data = Some(
-                        string
-                            .chars()
+                        payload
+                            .iter()
                             .skip(end)
-                            .take(string.len() - end)
-                            .collect::<String>()
-                            .as_bytes()
-                            .to_vec(),
+                            .take(payload.len() - end)
+                            .copied()
+                            .collect(),
                     );
 
                     let re_close = Regex::new(r",]$|]$").unwrap();
@@ -259,7 +260,7 @@ mod test {
     /// This test suite is taken from the explanation section here:
     /// https://github.com/socketio/socket.io-protocol
     fn test_decode() {
-        let packet = Packet::decode_string("0{\"token\":\"123\"}".to_string());
+        let packet = Packet::decode_bytes(Bytes::from_static(b"0{\"token\":\"123\"}"));
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -274,7 +275,7 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_string("0/admin,{\"token\":\"123\"}".to_string());
+        let packet = Packet::decode_bytes(Bytes::from_static(b"0/admin,{\"token\":\"123\"}"));
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -289,7 +290,7 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_string("1/admin,".to_string());
+        let packet = Packet::decode_bytes(Bytes::from_static(b"1/admin,"));
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -304,7 +305,7 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_string("2[\"hello\",1]".to_string());
+        let packet = Packet::decode_bytes(Bytes::from_static(b"2[\"hello\",1]"));
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -319,7 +320,8 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_string("2/admin,456[\"project:delete\",123]".to_string());
+        let packet =
+            Packet::decode_bytes(Bytes::from_static(b"2/admin,456[\"project:delete\",123]"));
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -334,7 +336,7 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_string("3/admin,456[]".to_string());
+        let packet = Packet::decode_bytes(Bytes::from_static(b"3/admin,456[]"));
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -349,7 +351,9 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_string("4/admin,{\"message\":\"Not authorized\"}".to_string());
+        let packet = Packet::decode_bytes(Bytes::from_static(
+            b"4/admin,{\"message\":\"Not authorized\"}",
+        ));
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -364,9 +368,9 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_string(
-            "51-[\"hello\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03".to_string(),
-        );
+        let packet = Packet::decode_bytes(Bytes::from_static(
+            b"51-[\"hello\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03",
+        ));
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -381,10 +385,9 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_string(
-            "51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03"
-                .to_string(),
-        );
+        let packet = Packet::decode_bytes(Bytes::from_static(
+            b"51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03",
+        ));
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -399,9 +402,9 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_string(
-            "61-/admin,456[{\"_placeholder\":true,\"num\":0}]\x03\x02\x01".to_string(),
-        );
+        let packet = Packet::decode_bytes(Bytes::from_static(
+            b"61-/admin,456[{\"_placeholder\":true,\"num\":0}]\x03\x02\x01",
+        ));
         assert!(packet.is_ok());
 
         assert_eq!(
