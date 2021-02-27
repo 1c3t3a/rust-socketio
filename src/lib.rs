@@ -85,7 +85,7 @@ pub mod socketio;
 /// crate. Handles all kinds of errors.
 pub mod error;
 
-use crate::error::Error;
+use crate::error::Result;
 use std::time::Duration;
 
 use crate::socketio::transport::TransportClient;
@@ -134,7 +134,7 @@ impl Socket {
     ///
     /// assert!(result.is_ok());
     /// ```
-    pub fn on<F>(&mut self, event: &str, callback: F) -> Result<(), Error>
+    pub fn on<F>(&mut self, event: &str, callback: F) -> Result<()>
     where
         F: FnMut(String) + 'static + Sync + Send,
     {
@@ -156,7 +156,7 @@ impl Socket {
     ///
     /// assert!(result.is_ok());
     /// ```
-    pub fn connect(&mut self) -> Result<(), Error> {
+    pub fn connect(&mut self) -> Result<()> {
         self.transport.connect()
     }
 
@@ -182,7 +182,7 @@ impl Socket {
     /// assert!(result.is_ok());
     /// ```
     #[inline]
-    pub fn emit(&mut self, event: &str, data: &str) -> Result<(), Error> {
+    pub fn emit(&mut self, event: &str, data: &str) -> Result<()> {
         self.transport.emit(event.into(), data)
     }
 
@@ -226,7 +226,7 @@ impl Socket {
         data: &str,
         timeout: Duration,
         callback: F,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     where
         F: FnMut(String) + 'static + Send + Sync,
     {

@@ -2,7 +2,7 @@ use crate::engineio::{
     packet::{Packet as EnginePacket, PacketId as EnginePacketId},
     socket::EngineSocket,
 };
-use crate::error::Error;
+use crate::error::{Error, Result};
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
 use bytes::Bytes;
 use if_chain::if_chain;
@@ -60,7 +60,7 @@ impl TransportClient {
     }
 
     /// Registers a new event with some callback function `F`.
-    pub fn on<F>(&mut self, event: Event, callback: F) -> Result<(), Error>
+    pub fn on<F>(&mut self, event: Event, callback: F) -> Result<()>
     where
         F: FnMut(String) + 'static + Sync + Send,
     {
@@ -72,7 +72,7 @@ impl TransportClient {
 
     /// Connects to the server. This includes a connection of the underlying
     /// engine.io client and afterwards an opening socket.io request.
-    pub fn connect(&mut self) -> Result<(), Error> {
+    pub fn connect(&mut self) -> Result<()> {
         self.setup_callbacks()?;
 
         self.engine_socket
@@ -96,7 +96,7 @@ impl TransportClient {
     }
 
     /// Sends a `socket.io` packet to the server using the `engine.io` client.
-    pub fn send(&self, packet: &SocketPacket) -> Result<(), Error> {
+    pub fn send(&self, packet: &SocketPacket) -> Result<()> {
         if !self.engineio_connected.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
         }
@@ -109,7 +109,7 @@ impl TransportClient {
 
     /// Emits to certain event with given data. The data needs to be JSON,
     /// otherwise this returns an `InvalidJson` error.
-    pub fn emit(&self, event: Event, data: &str) -> Result<(), Error> {
+    pub fn emit(&self, event: Event, data: &str) -> Result<()> {
         if serde_json::from_str::<serde_json::Value>(data).is_err() {
             return Err(Error::InvalidJson(data.to_owned()));
         }
@@ -140,7 +140,7 @@ impl TransportClient {
         data: &str,
         timeout: Duration,
         callback: F,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     where
         F: FnMut(String) + 'static + Send + Sync,
     {
@@ -265,7 +265,7 @@ impl TransportClient {
 
     /// Sets up the callback routes on the engine.io socket, called before
     /// opening the connection.
-    fn setup_callbacks(&mut self) -> Result<(), Error> {
+    fn setup_callbacks(&mut self) -> Result<()> {
         let clone_self = self.clone();
         let error_callback = move |msg| {
             if let Some(function) = clone_self.get_event_callback(&Event::Error) {
@@ -309,10 +309,7 @@ impl TransportClient {
 
     /// A method for handling the Event Socket Packets.
     // this could only be called with an event
-    fn handle_event(
-        socket_packet: SocketPacket,
-        clone_self: &TransportClient,
-    ) -> Result<(), Error> {
+    fn handle_event(socket_packet: SocketPacket, clone_self: &TransportClient) -> Result<()> {
         // unwrap the potential data
         if let Some(data) = socket_packet.data {
             if_chain! {

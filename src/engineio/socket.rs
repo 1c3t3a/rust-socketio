@@ -3,7 +3,7 @@ use std::thread;
 
 use super::packet::Packet;
 use crate::engineio::transport::TransportClient;
-use crate::error::Error;
+use crate::error::{Error, Result};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, RwLock,
@@ -28,7 +28,7 @@ impl EngineSocket {
 
     /// Binds the socket to a certain `address`. Attention! This doesn't allow
     /// to configure callbacks afterwards.
-    pub fn bind<T: Into<String>>(&self, address: T) -> Result<(), Error> {
+    pub fn bind<T: Into<String>>(&self, address: T) -> Result<()> {
         self.transport_client.write()?.open(address.into())?;
 
         let cl = Arc::clone(&self.transport_client);
@@ -52,7 +52,7 @@ impl EngineSocket {
     }
 
     /// Sends a packet to the server.
-    pub fn emit(&mut self, packet: Packet) -> Result<(), Error> {
+    pub fn emit(&mut self, packet: Packet) -> Result<()> {
         if !self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
         }
@@ -60,7 +60,7 @@ impl EngineSocket {
     }
 
     /// Registers the `on_open` callback.
-    pub fn on_open<F>(&mut self, function: F) -> Result<(), Error>
+    pub fn on_open<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(()) + 'static + Sync + Send,
     {
@@ -72,7 +72,7 @@ impl EngineSocket {
     }
 
     /// Registers the `on_close` callback.
-    pub fn on_close<F>(&mut self, function: F) -> Result<(), Error>
+    pub fn on_close<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(()) + 'static + Sync + Send,
     {
@@ -84,7 +84,7 @@ impl EngineSocket {
     }
 
     /// Registers the `on_packet` callback.
-    pub fn on_packet<F>(&mut self, function: F) -> Result<(), Error>
+    pub fn on_packet<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(Packet) + 'static + Sync + Send,
     {
@@ -96,7 +96,7 @@ impl EngineSocket {
     }
 
     /// Registers the `on_data` callback.
-    pub fn on_data<F>(&mut self, function: F) -> Result<(), Error>
+    pub fn on_data<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(Vec<u8>) + 'static + Sync + Send,
     {
@@ -108,7 +108,7 @@ impl EngineSocket {
     }
 
     /// Registers the `on_error` callback.
-    pub fn on_error<F>(&mut self, function: F) -> Result<(), Error>
+    pub fn on_error<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(String) + 'static + Sync + Send + Send,
     {

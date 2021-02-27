@@ -25,6 +25,10 @@ pub enum Error {
     PoisonedLockError,
 }
 
+impl std::error::Error for Error {}
+
+pub(crate) type Result<T> = std::result::Result<T, Error>;
+
 impl From<DecodeError> for Error {
     fn from(error: DecodeError) -> Self {
         Self::Base64Error(error)

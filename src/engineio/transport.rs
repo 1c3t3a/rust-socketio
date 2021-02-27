@@ -1,5 +1,5 @@
 use crate::engineio::packet::{decode_payload, encode_payload, Packet, PacketId};
-use crate::error::Error;
+use crate::error::{Error, Result};
 use adler32::adler32;
 use reqwest::{blocking::Client, Url};
 use serde::{Deserialize, Serialize};
@@ -69,7 +69,7 @@ impl TransportClient {
     }
 
     /// Registers an `on_open` callback.
-    pub fn set_on_open<F>(&mut self, function: F) -> Result<(), Error>
+    pub fn set_on_open<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(()) + 'static + Sync + Send,
     {
@@ -80,7 +80,7 @@ impl TransportClient {
     }
 
     /// Registers an `on_error` callback.
-    pub fn set_on_error<F>(&mut self, function: F) -> Result<(), Error>
+    pub fn set_on_error<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(String) + 'static + Sync + Send,
     {
@@ -91,7 +91,7 @@ impl TransportClient {
     }
 
     /// Registers an `on_packet` callback.
-    pub fn set_on_packet<F>(&mut self, function: F) -> Result<(), Error>
+    pub fn set_on_packet<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(Packet) + 'static + Sync + Send,
     {
@@ -102,7 +102,7 @@ impl TransportClient {
     }
 
     /// Registers an `on_data` callback.
-    pub fn set_on_data<F>(&mut self, function: F) -> Result<(), Error>
+    pub fn set_on_data<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(Vec<u8>) + 'static + Sync + Send,
     {
@@ -113,7 +113,7 @@ impl TransportClient {
     }
 
     /// Registers an `on_close` callback.
-    pub fn set_on_close<F>(&mut self, function: F) -> Result<(), Error>
+    pub fn set_on_close<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(()) + 'static + Sync + Send,
     {
@@ -127,7 +127,7 @@ impl TransportClient {
     /// request to the server, the server passes back the handshake data in the
     /// response. Afterwards a first Pong packet is sent to the server to
     /// trigger the Ping-cycle.
-    pub fn open<T: Into<String> + Clone>(&mut self, address: T) -> Result<(), Error> {
+    pub fn open<T: Into<String> + Clone>(&mut self, address: T) -> Result<()> {
         // TODO: Check if Relaxed is appropiate -> change all occurences if not
         if self.connected.load(Ordering::Relaxed) {
             return Ok(());
@@ -177,7 +177,7 @@ impl TransportClient {
     }
 
     /// Sends a packet to the server
-    pub fn emit(&self, packet: Packet) -> Result<(), Error> {
+    pub fn emit(&self, packet: Packet) -> Result<()> {
         if !self.connected.load(Ordering::Relaxed) {
             let error = Error::ActionBeforeOpen;
             self.call_error_callback(format!("{}", error))?;
@@ -214,7 +214,7 @@ impl TransportClient {
     /// Performs the server long polling procedure as long as the client is
     /// connected. This should run separately at all time to ensure proper
     /// response handling from the server.
-    pub fn poll_cycle(&self) -> Result<(), Error> {
+    pub fn poll_cycle(&self) -> Result<()> {
         if !self.connected.load(Ordering::Relaxed) {
             let error = Error::ActionBeforeOpen;
             self.call_error_callback(format!("{}", error))?;
@@ -324,7 +324,7 @@ impl TransportClient {
 
     /// Calls the error callback with a given message.
     #[inline]
-    fn call_error_callback(&self, text: String) -> Result<(), Error> {
+    fn call_error_callback(&self, text: String) -> Result<()> {
         let function = self.on_error.read()?;
         if let Some(function) = function.as_ref() {
             spawn_scoped!(function(text));

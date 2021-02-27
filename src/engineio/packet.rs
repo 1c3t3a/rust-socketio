@@ -3,8 +3,7 @@ use base64::{decode, encode};
 use std::char;
 use std::str;
 
-use crate::error::Error;
-
+use crate::error::{Error, Result};
 /// Enumeration of the `engine.io` `Packet` types.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum PacketId {
@@ -29,7 +28,7 @@ const SEPERATOR: char = '\x1e';
 
 /// Converts a byte into the corresponding `PacketId`.
 #[inline]
-const fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
+const fn u8_to_packet_id(b: u8) -> Result<PacketId> {
     match b as char {
         '0' => Ok(PacketId::Open),
         '1' => Ok(PacketId::Close),
@@ -52,7 +51,7 @@ impl Packet {
     // inefficient
 
     /// Decodes a single `Packet` from an `u8` byte stream.
-    fn decode_packet(bytes: Vec<u8>) -> Result<Self, Error> {
+    fn decode_packet(bytes: Vec<u8>) -> Result<Self> {
         if bytes.is_empty() {
             return Err(Error::EmptyPacket);
         }
@@ -110,7 +109,7 @@ impl Packet {
 
 /// Decodes a `payload` which in the `engine.io` context means a chain of normal
 /// packets separated by a certain SEPERATOR, in this case the delimiter `\x30`.
-pub fn decode_payload(payload: Vec<u8>) -> Result<Vec<Packet>, Error> {
+pub fn decode_payload(payload: Vec<u8>) -> Result<Vec<Packet>> {
     let mut vec = Vec::new();
     for packet_bytes in payload.split(|byte| (*byte as char) == SEPERATOR) {
         // TODO this conversion might be inefficent, as the 'to_vec' method
