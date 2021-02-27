@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::error::{Error, Result};
 use bytes::Bytes;
 use regex::Regex;
 
@@ -27,7 +27,7 @@ pub struct Packet {
 
 /// Converts a `u8` into a `PacketId`.
 #[inline]
-pub const fn u8_to_packet_id(b: u8) -> Result<PacketId, Error> {
+pub const fn u8_to_packet_id(b: u8) -> Result<PacketId> {
     match b as char {
         '0' => Ok(PacketId::Connect),
         '1' => Ok(PacketId::Disconnect),
@@ -113,7 +113,7 @@ impl Packet {
     }
 
     /// Decodes a packet given a `Bytes` type.
-    pub fn decode_bytes(payload: Bytes) -> Result<Self, Error> {
+    pub fn decode_bytes(payload: Bytes) -> Result<Self> {
         let mut i = 0;
         let packet_id = u8_to_packet_id(*payload.first().ok_or(Error::EmptyPacket)?)?;
 
