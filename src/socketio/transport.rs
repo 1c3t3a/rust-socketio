@@ -79,13 +79,11 @@ impl TransportClient {
             .lock()?
             .bind(self.host.as_ref().to_string())?;
 
+        let default = String::from("/");
         // construct the opening packet
         let open_packet = SocketPacket::new(
             SocketPacketId::Connect,
-            self.nsp
-                .as_ref()
-                .clone()
-                .unwrap_or_else(|| String::from("/")),
+            &self.nsp.as_ref().as_ref().unwrap_or(&default),
             None,
             None,
             None,
@@ -116,12 +114,10 @@ impl TransportClient {
 
         let payload = format!("[\"{}\",{}]", String::from(event), data);
 
+        let default = String::from("/");
         let socket_packet = SocketPacket::new(
             SocketPacketId::Event,
-            self.nsp
-                .as_ref()
-                .clone()
-                .unwrap_or_else(|| String::from("/")),
+            &self.nsp.as_ref().as_ref().unwrap_or(&default),
             Some(payload),
             None,
             None,
@@ -151,12 +147,10 @@ impl TransportClient {
         let payload = format!("[\"{}\",{}]", String::from(event), data);
         let id = thread_rng().gen_range(0..999);
 
+        let default = String::from("/");
         let socket_packet = SocketPacket::new(
             SocketPacketId::Event,
-            self.nsp
-                .as_ref()
-                .clone()
-                .unwrap_or_else(|| String::from("/")),
+            &self.nsp.as_ref().as_ref().unwrap_or(&default),
             Some(payload),
             None,
             Some(id),
@@ -183,15 +177,10 @@ impl TransportClient {
     #[inline]
     fn handle_new_message(socket_bytes: &[u8], clone_self: &TransportClient) {
         // TODO: Refactor the copy as soon as engine.io uses the Bytes type as well
-        if let Ok(socket_packet) = SocketPacket::decode_bytes(Bytes::copy_from_slice(socket_bytes))
+        if let Ok(socket_packet) = SocketPacket::decode_bytes(&Bytes::copy_from_slice(socket_bytes))
         {
-            if socket_packet.nsp
-                != clone_self
-                    .nsp
-                    .as_ref()
-                    .clone()
-                    .unwrap_or_else(|| String::from("/"))
-            {
+            let default = String::from("/");
+            if socket_packet.nsp != clone_self.nsp.as_ref().as_ref().unwrap_or(&default) {
                 return;
             }
             match socket_packet.packet_type {
@@ -266,7 +255,7 @@ impl TransportClient {
     /// Sets up the callback routes on the engine.io socket, called before
     /// opening the connection.
     fn setup_callbacks(&mut self) -> Result<()> {
-        let clone_self = self.clone();
+        let clone_self: TransportClient = self.clone();
         let error_callback = move |msg| {
             if let Some(function) = clone_self.get_event_callback(&Event::Error) {
                 let mut lock = function.1.write().unwrap();
@@ -320,8 +309,8 @@ impl TransportClient {
                     then {
                         // check which callback to use and call it with the data if it's present
                         if data.len() > 1 {
-                            if let serde_json::Value::String(event) = contents[0].clone() {
-                                if let Some(function) = clone_self.get_event_callback(&Event::Custom(event)) {
+                            if let serde_json::Value::String(event) = &contents[0] {
+                                if let Some(function) = clone_self.get_event_callback(&Event::Custom(event.to_owned())) {
                                     spawn_scoped!({
                                         let mut lock = function.1.write().unwrap();
                                         lock(contents[1].to_string());

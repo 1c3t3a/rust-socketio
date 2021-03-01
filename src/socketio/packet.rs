@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use byte::{ctx::Str, BytesExt};
 use bytes::Bytes;
 use regex::Regex;
 
@@ -16,9 +17,9 @@ pub enum PacketId {
 
 /// A packet which gets sent or received during in the `socket.io` protocol.
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Packet {
+pub struct Packet<'a> {
     pub packet_type: PacketId,
-    pub nsp: String,
+    pub nsp: &'a str,
     pub data: Option<String>,
     pub binary_data: Option<Vec<u8>>,
     pub id: Option<i32>,
@@ -40,11 +41,11 @@ pub const fn u8_to_packet_id(b: u8) -> Result<PacketId> {
     }
 }
 
-impl Packet {
+impl<'a> Packet<'a> {
     /// Creates an instance.
     pub const fn new(
         packet_type: PacketId,
-        nsp: String,
+        nsp: &'a str,
         data: Option<String>,
         binary_data: Option<Vec<u8>>,
         id: Option<i32>,
@@ -113,7 +114,7 @@ impl Packet {
     }
 
     /// Decodes a packet given a `Bytes` type.
-    pub fn decode_bytes(payload: Bytes) -> Result<Self> {
+    pub fn decode_bytes(payload: &'a Bytes) -> Result<Self> {
         let mut i = 0;
         let packet_id = u8_to_packet_id(*payload.first().ok_or(Error::EmptyPacket)?)?;
 
@@ -136,19 +137,17 @@ impl Packet {
             None
         };
 
-        let nsp = if payload.get(i + 1).ok_or(Error::IncompletePacket)? == &b'/' {
-            let start = i + 1;
+        let nsp: &'a str = if payload.get(i + 1).ok_or(Error::IncompletePacket)? == &b'/' {
+            let mut start = i + 1;
             while payload.get(i).ok_or(Error::IncompletePacket)? != &b',' && i < payload.len() {
                 i += 1;
             }
+            let len = i - start;
             payload
-                .iter()
-                .skip(start)
-                .take(i - start)
-                .map(|byte| *byte as char)
-                .collect::<String>()
+                .read_with(&mut start, Str::Len(len))
+                .map_err(|_| Error::IncompletePacket)?
         } else {
-            String::from("/")
+            "/"
         };
 
         let next = payload.get(i + 1).unwrap_or(&b'_');
@@ -260,13 +259,14 @@ mod test {
     /// This test suite is taken from the explanation section here:
     /// https://github.com/socketio/socket.io-protocol
     fn test_decode() {
-        let packet = Packet::decode_bytes(Bytes::from_static(b"0{\"token\":\"123\"}"));
+        let payload = Bytes::from_static(b"0{\"token\":\"123\"}");
+        let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
             Packet::new(
                 PacketId::Connect,
-                String::from("/"),
+                "/",
                 Some(String::from("{\"token\":\"123\"}")),
                 None,
                 None,
@@ -275,13 +275,14 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_bytes(Bytes::from_static(b"0/admin,{\"token\":\"123\"}"));
+        let payload = Bytes::from_static(b"0/admin,{\"token\":\"123\"}");
+        let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
             Packet::new(
                 PacketId::Connect,
-                String::from("/admin"),
+                "/admin",
                 Some(String::from("{\"token\":\"123\"}")),
                 None,
                 None,
@@ -290,28 +291,23 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_bytes(Bytes::from_static(b"1/admin,"));
+        let payload = Bytes::from_static(b"1/admin,");
+        let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
-            Packet::new(
-                PacketId::Disconnect,
-                String::from("/admin"),
-                None,
-                None,
-                None,
-                None,
-            ),
+            Packet::new(PacketId::Disconnect, "/admin", None, None, None, None,),
             packet.unwrap()
         );
 
-        let packet = Packet::decode_bytes(Bytes::from_static(b"2[\"hello\",1]"));
+        let payload = Bytes::from_static(b"2[\"hello\",1]");
+        let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
             Packet::new(
                 PacketId::Event,
-                String::from("/"),
+                "/",
                 Some(String::from("[\"hello\",1]")),
                 None,
                 None,
@@ -320,14 +316,14 @@ mod test {
             packet.unwrap()
         );
 
-        let packet =
-            Packet::decode_bytes(Bytes::from_static(b"2/admin,456[\"project:delete\",123]"));
+        let payload = Bytes::from_static(b"2/admin,456[\"project:delete\",123]");
+        let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
             Packet::new(
                 PacketId::Event,
-                String::from("/admin"),
+                "/admin",
                 Some(String::from("[\"project:delete\",123]")),
                 None,
                 Some(456),
@@ -336,13 +332,14 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_bytes(Bytes::from_static(b"3/admin,456[]"));
+        let payload = Bytes::from_static(b"3/admin,456[]");
+        let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
             Packet::new(
                 PacketId::Ack,
-                String::from("/admin"),
+                "/admin",
                 Some(String::from("[]")),
                 None,
                 Some(456),
@@ -351,15 +348,14 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_bytes(Bytes::from_static(
-            b"4/admin,{\"message\":\"Not authorized\"}",
-        ));
+        let payload = Bytes::from_static(b"4/admin,{\"message\":\"Not authorized\"}");
+        let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
             Packet::new(
                 PacketId::ConnectError,
-                String::from("/admin"),
+                "/admin",
                 Some(String::from("{\"message\":\"Not authorized\"}")),
                 None,
                 None,
@@ -368,15 +364,15 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_bytes(Bytes::from_static(
-            b"51-[\"hello\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03",
-        ));
+        let payload =
+            Bytes::from_static(b"51-[\"hello\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03");
+        let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
             Packet::new(
                 PacketId::BinaryEvent,
-                String::from("/"),
+                "/",
                 Some(String::from("\"hello\"")),
                 Some(vec![1, 2, 3]),
                 None,
@@ -385,15 +381,16 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_bytes(Bytes::from_static(
+        let payload = Bytes::from_static(
             b"51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03",
-        ));
+        );
+        let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
             Packet::new(
                 PacketId::BinaryEvent,
-                String::from("/admin"),
+                "/admin",
                 Some(String::from("\"project:delete\"")),
                 Some(vec![1, 2, 3]),
                 Some(456),
@@ -402,15 +399,15 @@ mod test {
             packet.unwrap()
         );
 
-        let packet = Packet::decode_bytes(Bytes::from_static(
-            b"61-/admin,456[{\"_placeholder\":true,\"num\":0}]\x03\x02\x01",
-        ));
+        let payload =
+            Bytes::from_static(b"61-/admin,456[{\"_placeholder\":true,\"num\":0}]\x03\x02\x01");
+        let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
             Packet::new(
                 PacketId::BinaryAck,
-                String::from("/admin"),
+                "/admin",
                 None,
                 Some(vec![3, 2, 1]),
                 Some(456),
@@ -426,7 +423,7 @@ mod test {
     fn test_encode() {
         let packet = Packet::new(
             PacketId::Connect,
-            String::from("/"),
+            "/",
             Some(String::from("{\"token\":\"123\"}")),
             None,
             None,
@@ -440,7 +437,7 @@ mod test {
 
         let packet = Packet::new(
             PacketId::Connect,
-            String::from("/admin"),
+            "/admin",
             Some(String::from("{\"token\":\"123\"}")),
             None,
             None,
@@ -452,20 +449,13 @@ mod test {
             "0/admin,{\"token\":\"123\"}".to_string().into_bytes()
         );
 
-        let packet = Packet::new(
-            PacketId::Disconnect,
-            String::from("/admin"),
-            None,
-            None,
-            None,
-            None,
-        );
+        let packet = Packet::new(PacketId::Disconnect, "/admin", None, None, None, None);
 
         assert_eq!(packet.encode(), "1/admin,".to_string().into_bytes());
 
         let packet = Packet::new(
             PacketId::Event,
-            String::from("/"),
+            "/",
             Some(String::from("[\"hello\",1]")),
             None,
             None,
@@ -476,7 +466,7 @@ mod test {
 
         let packet = Packet::new(
             PacketId::Event,
-            String::from("/admin"),
+            "/admin",
             Some(String::from("[\"project:delete\",123]")),
             None,
             Some(456),
@@ -492,7 +482,7 @@ mod test {
 
         let packet = Packet::new(
             PacketId::Ack,
-            String::from("/admin"),
+            "/admin",
             Some(String::from("[]")),
             None,
             Some(456),
@@ -503,7 +493,7 @@ mod test {
 
         let packet = Packet::new(
             PacketId::ConnectError,
-            String::from("/admin"),
+            "/admin",
             Some(String::from("{\"message\":\"Not authorized\"}")),
             None,
             None,
@@ -519,7 +509,7 @@ mod test {
 
         let packet = Packet::new(
             PacketId::BinaryEvent,
-            String::from("/"),
+            "/",
             Some(String::from("\"hello\"")),
             Some(vec![1, 2, 3]),
             None,
@@ -534,7 +524,7 @@ mod test {
 
         let packet = Packet::new(
             PacketId::BinaryEvent,
-            String::from("/admin"),
+            "/admin",
             Some(String::from("\"project:delete\"")),
             Some(vec![1, 2, 3]),
             Some(456),
@@ -549,7 +539,7 @@ mod test {
 
         let packet = Packet::new(
             PacketId::BinaryAck,
-            String::from("/admin"),
+            "/admin",
             None,
             Some(vec![3, 2, 1]),
             Some(456),

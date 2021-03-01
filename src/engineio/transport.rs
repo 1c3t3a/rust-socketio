@@ -138,7 +138,7 @@ impl TransportClient {
 
         match &mut self.transport {
             TransportType::Polling(client) => {
-                if let Ok(full_address) = Url::parse(&(address.clone().into() + &query_path)) {
+                if let Ok(full_address) = Url::parse(&(address.to_owned().into() + &query_path)) {
                     self.host_address = Arc::new(Mutex::new(Some(address.into())));
 
                     let response = client.lock()?.get(full_address).send()?.text()?;
@@ -189,14 +189,14 @@ impl TransportClient {
                 let query_path = self.get_query_path();
 
                 // build the target address
-                let host = self.host_address.lock()?.clone();
+                let host = self.host_address.lock()?;
                 let address =
                     Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
                 drop(host);
 
                 // send a post request with the encoded payload as body
                 let data = encode_payload(vec![packet]);
-                let client = client.lock()?.clone();
+                let client = client.lock()?;
                 let status = client.post(address).body(data).send()?.status().as_u16();
                 drop(client);
 
@@ -223,7 +223,7 @@ impl TransportClient {
         let client = Client::new();
 
         // as we don't have a mut self, the last_ping needs to be safed for later
-        let mut last_ping = *self.last_ping.clone().lock()?;
+        let mut last_ping = *self.last_ping.lock()?;
         // the time after we assume the server to be timed out
         let server_timeout = Duration::from_millis(
             Arc::as_ref(&self.connection_data)
@@ -243,7 +243,7 @@ impl TransportClient {
                 TransportType::Polling(_) => {
                     let query_path = self.get_query_path();
 
-                    let host = self.host_address.lock()?.clone();
+                    let host = self.host_address.lock()?;
                     let address =
                         Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
                     drop(host);
