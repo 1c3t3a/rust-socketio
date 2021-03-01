@@ -9,11 +9,14 @@ use std::{
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
+use websocket::{dataframe::DataFrame, receiver::Reader, sync::Writer};
+use websocket::{sync::stream::TcpStream, ClientBuilder};
 
 /// The different types of transport used for transmitting a payload.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 enum TransportType {
     Polling(Arc<Mutex<Client>>),
+    Websocket(Arc<Mutex<Reader<TcpStream>>>, Arc<Mutex<Writer<TcpStream>>>),
 }
 
 /// Type of a `Callback` function. (Normal closures can be passed in here).
@@ -24,7 +27,7 @@ type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
 /// callback functions.
 #[derive(Clone)]
 pub struct TransportClient {
-    transport: TransportType,
+    transport: Arc<TransportType>,
     pub on_error: Callback<String>,
     pub on_open: Callback<()>,
     pub on_close: Callback<()>,
@@ -34,7 +37,7 @@ pub struct TransportClient {
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     host_address: Arc<Mutex<Option<String>>>,
-    connection_data: Arc<Option<HandshakeData>>,
+    connection_data: Arc<RwLock<Option<HandshakeData>>>,
     engine_io_mode: Arc<AtomicBool>,
 }
 
@@ -53,7 +56,7 @@ impl TransportClient {
     /// Creates an instance of `TransportClient`.
     pub fn new(engine_io_mode: bool) -> Self {
         TransportClient {
-            transport: TransportType::Polling(Arc::new(Mutex::new(Client::new()))),
+            transport: Arc::new(TransportType::Polling(Arc::new(Mutex::new(Client::new())))),
             on_error: Arc::new(RwLock::new(None)),
             on_open: Arc::new(RwLock::new(None)),
             on_close: Arc::new(RwLock::new(None)),
@@ -63,7 +66,7 @@ impl TransportClient {
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
             host_address: Arc::new(Mutex::new(None)),
-            connection_data: Arc::new(None),
+            connection_data: Arc::new(RwLock::new(None)),
             engine_io_mode: Arc::new(AtomicBool::from(engine_io_mode)),
         }
     }
@@ -134,9 +137,9 @@ impl TransportClient {
         }
 
         // build the query path, random_t is used to prevent browser caching
-        let query_path = self.get_query_path();
+        let query_path = self.get_query_path()?;
 
-        match &mut self.transport {
+        match &mut self.transport.as_ref() {
             TransportType::Polling(client) => {
                 if let Ok(full_address) = Url::parse(&(address.to_owned().into() + &query_path)) {
                     self.host_address = Arc::new(Mutex::new(Some(address.into())));
@@ -144,8 +147,25 @@ impl TransportClient {
                     let response = client.lock()?.get(full_address).send()?.text()?;
 
                     // the response contains the handshake data
-                    if let Ok(conn_data) = serde_json::from_str(&response[1..]) {
-                        self.connection_data = Arc::new(conn_data);
+                    if let Ok(conn_data) = serde_json::from_str::<HandshakeData>(&response[1..]) {
+                        *Arc::get_mut(&mut self.connected).unwrap() = AtomicBool::from(true);
+
+                        // check if we could upgrade to websockets
+                        let websocket_upgrade = conn_data
+                            .upgrades
+                            .iter()
+                            .any(|upgrade| upgrade.to_lowercase() == *"websocket");
+
+                        // set the connection data
+                        let mut connection_data = self.connection_data.write()?;
+                        *connection_data = Some(conn_data);
+                        drop(connection_data);
+
+                        // if we have an upgrade option, send the corresponding request
+                        if websocket_upgrade {
+                            let upgrade_packet = Packet::new(PacketId::Upgrade, Vec::new());
+                            self.emit(upgrade_packet)?;
+                        }
 
                         // call the on_open callback
                         let function = self.on_open.read()?;
@@ -156,7 +176,6 @@ impl TransportClient {
 
                         // set the last ping to now and set the connected state
                         *self.last_ping.lock()? = Instant::now();
-                        *Arc::get_mut(&mut self.connected).unwrap() = AtomicBool::from(true);
 
                         // emit a pong packet to keep trigger the ping cycle on the server
                         self.emit(Packet::new(PacketId::Pong, Vec::new()))?;
@@ -173,7 +192,35 @@ impl TransportClient {
                 self.call_error_callback(format!("{}", error))?;
                 Err(error)
             }
+            _ => unreachable!("Can't happen as we initialize with polling and upgrade later"),
         }
+    }
+
+    fn upgrade_connection(&mut self, new_sid: &str) -> Result<()> {
+        let query_path = self.get_query_path()?;
+
+        let host = self.host_address.lock()?;
+        let mut address =
+            Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
+        drop(host);
+
+        address
+            .query_pairs_mut()
+            .append_pair("sid", &new_sid)
+            .finish();
+
+        let client = ClientBuilder::new(&dbg!(address.to_string()))
+            .unwrap()
+            .connect_insecure()
+            .unwrap();
+        let (sender, receiver) = client.split().unwrap();
+
+        self.transport = Arc::new(TransportType::Websocket(
+            Arc::new(Mutex::new(sender)),
+            Arc::new(Mutex::new(receiver)),
+        ));
+
+        Ok(())
     }
 
     /// Sends a packet to the server
@@ -183,19 +230,18 @@ impl TransportClient {
             self.call_error_callback(format!("{}", error))?;
             return Err(error);
         }
+        // build the target address
+        let query_path = self.get_query_path()?;
 
-        match &self.transport {
+        let host = self.host_address.lock()?;
+        let address = Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
+        drop(host);
+
+        // send a post request with the encoded payload as body
+        let data = encode_payload(vec![packet]);
+
+        match &self.transport.as_ref() {
             TransportType::Polling(client) => {
-                let query_path = self.get_query_path();
-
-                // build the target address
-                let host = self.host_address.lock()?;
-                let address =
-                    Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
-                drop(host);
-
-                // send a post request with the encoded payload as body
-                let data = encode_payload(vec![packet]);
                 let client = client.lock()?;
                 let status = client.post(address).body(data).send()?.status().as_u16();
                 drop(client);
@@ -208,13 +254,21 @@ impl TransportClient {
 
                 Ok(())
             }
+            TransportType::Websocket(_, writer) => {
+                let mut writer = writer.lock()?;
+
+                let dataframe = DataFrame::new(false, websocket::dataframe::Opcode::Binary, data);
+                writer.send_dataframe(&dataframe).unwrap();
+
+                Ok(())
+            }
         }
     }
 
     /// Performs the server long polling procedure as long as the client is
     /// connected. This should run separately at all time to ensure proper
     /// response handling from the server.
-    pub fn poll_cycle(&self) -> Result<()> {
+    pub fn poll_cycle(&mut self) -> Result<()> {
         if !self.connected.load(Ordering::Relaxed) {
             let error = Error::ActionBeforeOpen;
             self.call_error_callback(format!("{}", error))?;
@@ -227,21 +281,23 @@ impl TransportClient {
         // the time after we assume the server to be timed out
         let server_timeout = Duration::from_millis(
             Arc::as_ref(&self.connection_data)
+                .read()?
                 .as_ref()
                 .unwrap()
                 .ping_timeout
                 + Arc::as_ref(&self.connection_data)
+                    .read()?
                     .as_ref()
                     .unwrap()
                     .ping_interval,
         );
 
         while self.connected.load(Ordering::Relaxed) {
-            match &self.transport {
+            let data = match &self.transport.as_ref() {
                 // we wont't use the shared client as this blocks the ressource
                 // in the long polling requests
                 TransportType::Polling(_) => {
-                    let query_path = self.get_query_path();
+                    let query_path = self.get_query_path()?;
 
                     let host = self.host_address.lock()?;
                     let address =
@@ -249,66 +305,87 @@ impl TransportClient {
                     drop(host);
 
                     // TODO: check if to_vec is inefficient here
-                    let response = client.get(address).send()?.bytes()?.to_vec();
-                    let packets = decode_payload(response)?;
+                    client.get(address).send()?.bytes()?.to_vec()
+                }
+                TransportType::Websocket(sender, _) => {
+                    let mut sender = sender.lock()?;
 
-                    for packet in packets {
-                        {
-                            let on_packet = self.on_packet.read()?;
-                            // call the packet callback
-                            if let Some(function) = on_packet.as_ref() {
-                                spawn_scoped!(function(packet.clone()));
-                            }
-                        }
-                        // check for the appropiate action or callback
-                        match packet.packet_id {
-                            PacketId::Message => {
-                                let on_data = self.on_data.read()?;
-                                if let Some(function) = on_data.as_ref() {
-                                    spawn_scoped!(function(packet.data));
-                                }
-                                drop(on_data);
-                            }
+                    sender.recv_dataframe().unwrap().data
+                }
+            };
 
-                            PacketId::Close => {
-                                let on_close = self.on_close.read()?;
-                                if let Some(function) = on_close.as_ref() {
-                                    spawn_scoped!(function(()));
-                                }
-                                drop(on_close);
-                                // set current state to not connected and stop polling
-                                self.connected
-                                    .compare_and_swap(true, false, Ordering::Acquire);
-                            }
-                            PacketId::Open => {
-                                // this will never happen as the client connects
-                                // to the server and the open packet is already
-                                // received in the 'open' method
-                                unreachable!();
-                            }
-                            PacketId::Upgrade => {
-                                todo!("Upgrade the connection, but only if possible");
-                            }
-                            PacketId::Ping => {
-                                last_ping = Instant::now();
-                                self.emit(Packet::new(PacketId::Pong, Vec::new()))?;
-                            }
-                            PacketId::Pong => {
-                                // this will never happen as the pong packet is
-                                // only sent by the client
-                                unreachable!();
-                            }
-                            PacketId::Noop => (),
+            if data.is_empty() {
+                return Ok(());
+            }
+
+            let packets = decode_payload(data)?;
+
+            for packet in packets {
+                {
+                    let on_packet = self.on_packet.read()?;
+                    // call the packet callback
+                    if let Some(function) = on_packet.as_ref() {
+                        spawn_scoped!(function(packet.clone()));
+                    }
+                }
+                // check for the appropiate action or callback
+                match packet.packet_id {
+                    PacketId::Message => {
+                        let on_data = self.on_data.read()?;
+                        if let Some(function) = on_data.as_ref() {
+                            spawn_scoped!(function(packet.data));
                         }
+                        drop(on_data);
                     }
 
-                    if server_timeout < last_ping.elapsed() {
-                        // the server is unreachable
+                    PacketId::Close => {
+                        let on_close = self.on_close.read()?;
+                        if let Some(function) = on_close.as_ref() {
+                            spawn_scoped!(function(()));
+                        }
+                        drop(on_close);
                         // set current state to not connected and stop polling
                         self.connected
                             .compare_and_swap(true, false, Ordering::Acquire);
                     }
+                    PacketId::Open => {
+                        // this will only happen in case our upgrade request suceeded
+                        // this contains a the handshake data
+                        let handshake_str = std::str::from_utf8(&packet.data)?;
+                        let new_sid: String;
+                        if let Ok(conn_data) = serde_json::from_str::<HandshakeData>(handshake_str)
+                        {
+                            new_sid = conn_data.sid.clone();
+                            // set the new connection data
+                            let mut connection_data = self.connection_data.write()?;
+                            *connection_data = Some(conn_data);
+                            drop(connection_data);
+                        } else {
+                            return Err(Error::HandshakeError(handshake_str.to_owned()));
+                        }
+                        self.upgrade_connection(&new_sid)?;
+                    }
+                    PacketId::Upgrade => {
+                        todo!("Upgrade the connection, but only if possible");
+                    }
+                    PacketId::Ping => {
+                        last_ping = Instant::now();
+                        self.emit(Packet::new(PacketId::Pong, Vec::new()))?;
+                    }
+                    PacketId::Pong => {
+                        // this will never happen as the pong packet is
+                        // only sent by the client
+                        unreachable!();
+                    }
+                    PacketId::Noop => (),
                 }
+            }
+
+            if server_timeout < last_ping.elapsed() {
+                // the server is unreachable
+                // set current state to not connected and stop polling
+                self.connected
+                    .compare_and_swap(true, false, Ordering::Acquire);
             }
         }
         Ok(())
@@ -336,7 +413,7 @@ impl TransportClient {
 
     // Constructs the path for a request, depending on the different situations.
     #[inline]
-    fn get_query_path(&self) -> String {
+    fn get_query_path(&self) -> Result<String> {
         // build the base path
         let mut path = format!(
             "/{}/?EIO=4&transport={}&t={}",
@@ -345,20 +422,38 @@ impl TransportClient {
             } else {
                 "socket.io"
             },
-            match self.transport {
+            match self.transport.as_ref() {
                 TransportType::Polling(_) => "polling",
+                TransportType::Websocket(_, _) => "websocket",
             },
             TransportClient::get_random_t(),
         );
+
         // append a session id if the socket is connected
         if self.connected.load(Ordering::Relaxed) {
             path.push_str(&format!(
                 "&sid={}",
-                Arc::as_ref(&self.connection_data).as_ref().unwrap().sid
+                Arc::as_ref(&self.connection_data)
+                    .read()?
+                    .as_ref()
+                    .unwrap()
+                    .sid
             ));
         }
 
-        path
+        Ok(path)
+    }
+}
+
+impl Debug for TransportType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "TransportType({})",
+            match self {
+                Self::Polling(_) => "Polling",
+                Self::Websocket(_, _) => "Websocket",
+            }
+        ))
     }
 }
 

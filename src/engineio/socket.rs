@@ -33,7 +33,7 @@ impl EngineSocket {
 
         let cl = Arc::clone(&self.transport_client);
         thread::spawn(move || {
-            let s = cl.read().unwrap().clone();
+            let mut s = cl.read().unwrap().clone();
             // tries to restart a poll cycle whenever a 'normal' error occurs,
             // it just panics on network errors, in case the poll cycle returned
             // `Result::Ok`, the server receives a close frame so it's safe to
