@@ -9,7 +9,10 @@ use std::{
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
-use websocket::{dataframe::DataFrame, receiver::Reader, sync::Writer};
+use websocket::{
+    dataframe::DataFrame as WsDataFrame, receiver::Reader, sync::Writer, ws::dataframe::DataFrame,
+    OwnedMessage,
+};
 use websocket::{sync::stream::TcpStream, ClientBuilder};
 
 /// The different types of transport used for transmitting a payload.
@@ -156,16 +159,15 @@ impl TransportClient {
                             .iter()
                             .any(|upgrade| upgrade.to_lowercase() == *"websocket");
 
+                        // if we have an upgrade option, send the corresponding request
+                        if websocket_upgrade && self.upgrade_connection(&conn_data.sid).is_err() {
+                            eprintln!("upgrading to websockets was not succesfull, proceeding via polling");
+                        }
+
                         // set the connection data
                         let mut connection_data = self.connection_data.write()?;
                         *connection_data = Some(conn_data);
                         drop(connection_data);
-
-                        // if we have an upgrade option, send the corresponding request
-                        if websocket_upgrade {
-                            let upgrade_packet = Packet::new(PacketId::Upgrade, Vec::new());
-                            self.emit(upgrade_packet)?;
-                        }
 
                         // call the on_open callback
                         let function = self.on_open.read()?;
@@ -196,31 +198,65 @@ impl TransportClient {
         }
     }
 
+    /// This handles the upgrade from polling to websocket transport. Looking at the protocol
+    /// specs, this needs the following preconditions:
+    /// - the handshake must have already happened
+    /// - the handshake `upgrade` field needs to contain the value `websocket`.
+    /// If those precondionts are valid, it is save to call the method. The protocol then
+    /// requires the following procedure:
+    /// - the client starts to connect to the server via websocket, mentioning the related `sid` received
+    ///   in the handshake.
+    /// - to test out the connection, the client sends a `ping` packet with the payload `probe`.
+    /// - if the server receives this correctly, it responses by sending a `pong` packet with the payload `probe`.
+    /// - if the client receives that both sides can be sure that the upgrade is save and the client requests
+    ///   the final updgrade by sending another `update` packet over `websocket`.
+    /// If this procedure is alright, the new transport is established.
     fn upgrade_connection(&mut self, new_sid: &str) -> Result<()> {
-        let query_path = self.get_query_path()?;
+        let host_address = self.host_address.lock()?;
+        if let Some(address) = &*host_address {
+            // unwrapping here is infact save as we only set this url if it gets orderly parsed
+            let mut address = Url::parse(&address).unwrap();
 
-        let host = self.host_address.lock()?;
-        let mut address =
-            Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
-        drop(host);
+            let full_address = address
+                .query_pairs_mut()
+                .clear()
+                .append_pair("EIO", "4")
+                .append_pair("transport", "websocket")
+                .append_pair("sid", new_sid)
+                .finish();
 
-        address
-            .query_pairs_mut()
-            .append_pair("sid", &new_sid)
-            .finish();
+            // connect to the server via websockets
+            let client = ClientBuilder::new(full_address.as_ref())?.connect_insecure()?;
 
-        let client = ClientBuilder::new(&dbg!(address.to_string()))
-            .unwrap()
-            .connect_insecure()
-            .unwrap();
-        let (sender, receiver) = client.split().unwrap();
+            let (mut receiver, mut sender) = client.split()?;
 
-        self.transport = Arc::new(TransportType::Websocket(
-            Arc::new(Mutex::new(sender)),
-            Arc::new(Mutex::new(receiver)),
-        ));
+            // send the probe packet
+            let probe_packet = Packet::new(PacketId::Ping, b"probe".to_vec());
+            sender.send_dataframe(&WsDataFrame::new(
+                true,
+                websocket::dataframe::Opcode::Text,
+                encode_payload(vec![probe_packet]),
+            ))?;
 
-        Ok(())
+            // expect to receive a probe packet
+            let message = receiver.recv_message()?;
+            if message.take_payload() != b"3probe" {
+                eprintln!("Error while handshaking ws");
+                return Err(Error::HandshakeError("Error".to_owned()));
+            }
+
+            // finally send the upgrade request
+            sender.send_message(&OwnedMessage::Text("5".to_owned()))?;
+
+            // upgrade the transport layer
+            self.transport = Arc::new(TransportType::Websocket(
+                Arc::new(Mutex::new(receiver)),
+                Arc::new(Mutex::new(sender)),
+            ));
+
+            return Ok(());
+        }
+        Err(Error::HandshakeError("Error - invalid url".to_owned()))
     }
 
     /// Sends a packet to the server
@@ -257,7 +293,7 @@ impl TransportClient {
             TransportType::Websocket(_, writer) => {
                 let mut writer = writer.lock()?;
 
-                let dataframe = DataFrame::new(false, websocket::dataframe::Opcode::Binary, data);
+                let dataframe = WsDataFrame::new(true, websocket::dataframe::Opcode::Text, data);
                 writer.send_dataframe(&dataframe).unwrap();
 
                 Ok(())
@@ -307,10 +343,11 @@ impl TransportClient {
                     // TODO: check if to_vec is inefficient here
                     client.get(address).send()?.bytes()?.to_vec()
                 }
-                TransportType::Websocket(sender, _) => {
-                    let mut sender = sender.lock()?;
+                TransportType::Websocket(receiver, _) => {
+                    let mut receiver = receiver.lock()?;
 
-                    sender.recv_dataframe().unwrap().data
+                    println!("About to receive");
+                    dbg!(receiver.recv_message().unwrap().take_payload())
                 }
             };
 
@@ -349,21 +386,7 @@ impl TransportClient {
                             .compare_and_swap(true, false, Ordering::Acquire);
                     }
                     PacketId::Open => {
-                        // this will only happen in case our upgrade request suceeded
-                        // this contains a the handshake data
-                        let handshake_str = std::str::from_utf8(&packet.data)?;
-                        let new_sid: String;
-                        if let Ok(conn_data) = serde_json::from_str::<HandshakeData>(handshake_str)
-                        {
-                            new_sid = conn_data.sid.clone();
-                            // set the new connection data
-                            let mut connection_data = self.connection_data.write()?;
-                            *connection_data = Some(conn_data);
-                            drop(connection_data);
-                        } else {
-                            return Err(Error::HandshakeError(handshake_str.to_owned()));
-                        }
-                        self.upgrade_connection(&new_sid)?;
+                        unreachable!("Won't happen as we open the connection beforehand");
                     }
                     PacketId::Upgrade => {
                         todo!("Upgrade the connection, but only if possible");
