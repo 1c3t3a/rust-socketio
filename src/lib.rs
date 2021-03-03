@@ -31,20 +31,20 @@
 //!     .expect("Server unreachable");
 //! ```
 //!
-//! The main entry point for using this crate is the `SocketBuilder` which provides 
+//! The main entry point for using this crate is the `SocketBuilder` which provides
 //! a way to easily configure a socket in the needed way. When the `connect` method
 //! is called on the builder, it returns a connected client which then could be used
 //! to emit messages to certain events. One client can only be connected to one namespace.
-//! If you need to listen to the messages in different namespaces you need to 
+//! If you need to listen to the messages in different namespaces you need to
 //! allocate multiple sockets.
 //!
 //! ## Current features
 //!
-//! This implementation support most of the features of the socket.io protocol. In general 
+//! This implementation support most of the features of the socket.io protocol. In general
 //! the full engine-io protocol is implemented, and concerning the socket.io part only binary
-//! events and binary acks are not yet implemented. This implementation generally tries to 
+//! events and binary acks are not yet implemented. This implementation generally tries to
 //! make use of websockets as often as possible. This means most times only the opening request
-//! uses http and as soon as the server mentions that he is able to use websockets, an upgrade 
+//! uses http and as soon as the server mentions that he is able to use websockets, an upgrade
 //! is performed. But if this upgrade is not successful or the server does not mention an upgrade
 //! possibilty, http-long polling is used (as specified in the protocol specs).
 //!
