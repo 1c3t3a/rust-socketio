@@ -23,6 +23,7 @@ pub enum Error {
     InvalidJson(String),
     DidNotReceiveProperAck(i32),
     IllegalActionAfterOpen,
+    IllegalNamespace(String),
     PoisonedLockError,
     FromWebsocketError(WebSocketError),
     FromWebsocketParseError(ParseError),
@@ -105,6 +106,7 @@ impl Display for Error {
             Self::ActionBeforeOpen => {
                 write!(f, "Called an action before the connection was established")
             }
+            Self::IllegalNamespace(nsp) => write!(f, "Specified namespace {} is not valid", nsp),
             Self::HttpError(status_code) => write!(
                 f,
                 "Network request returned with status code: {}",

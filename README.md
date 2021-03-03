@@ -1,4 +1,5 @@
 [![Latest Version](https://img.shields.io/crates/v/rust_socketio)](https://crates.io/crates/rust_socketio)
+
 ![tests](https://github.com/1c3t3a/rust-socketio/workflows/Rust/badge.svg)
 
 # Rust-socketio-client
@@ -12,13 +13,14 @@ use rust_socketio::Socket;
 use serde_json::json;
 
 fn main() {
-    let mut socket = Socket::new("http://localhost:80", Some("/admin"));
-
-    // callback for the "foo" event
-    socket.on("foo", |message| println!("{}", message)).unwrap();
-
-    // connect to the server
-    socket.connect().expect("Connection failed");
+    // connect to a server on localhost with the /admin namespace and
+    // a foo event handler
+    let mut socket = SocketBuilder::new("http://localhost:80")
+          .set_namespace("/admin")
+          .expect("illegal namespace")
+          .on("test", |str| println!("Received: {}", str))
+          .connect()
+          .expect("Connection failed");
 
     // emit to the "foo" event
     let payload = json!({"token": 123});

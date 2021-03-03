@@ -41,8 +41,8 @@ pub struct TransportClient {
     engineio_connected: Arc<AtomicBool>,
     on: Arc<Vec<(Event, Callback<String>)>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
-    // Namespace, for multiplexing messages
-    nsp: Arc<Option<String>>,
+    // namespace, for multiplexing messages
+    pub(crate) nsp: Arc<Option<String>>,
 }
 
 impl TransportClient {
