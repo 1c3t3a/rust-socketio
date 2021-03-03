@@ -42,7 +42,7 @@ pub struct TransportClient {
     on: Arc<Vec<(Event, Callback<String>)>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
     // Namespace, for multiplexing messages
-    nsp: Arc<Option<String>>,
+    pub(crate) nsp: Arc<Option<String>>,
 }
 
 impl TransportClient {

@@ -10,8 +10,10 @@ use std::{
     time::{Duration, Instant},
 };
 use websocket::{
-    dataframe::DataFrame as WsDataFrame, receiver::Reader, sync::Writer, ws::dataframe::DataFrame,
-    OwnedMessage,
+    dataframe::DataFrame as WsDataFrame,
+    receiver::Reader,
+    sync::{client::Client as WsClient, stream::TlsStream, Writer},
+    ws::dataframe::DataFrame,
 };
 use websocket::{sync::stream::TcpStream, ClientBuilder};
 
@@ -19,6 +21,7 @@ use websocket::{sync::stream::TcpStream, ClientBuilder};
 #[derive(Clone)]
 enum TransportType {
     Polling(Arc<Mutex<Client>>),
+    WebsocketSecure(Arc<Mutex<WsClient<TlsStream<TcpStream>>>>),
     Websocket(Arc<Mutex<Reader<TcpStream>>>, Arc<Mutex<Writer<TcpStream>>>),
 }
 
@@ -131,8 +134,9 @@ impl TransportClient {
 
     /// Opens the connection to a specified server. Includes an opening `GET`
     /// request to the server, the server passes back the handshake data in the
-    /// response. Afterwards a first Pong packet is sent to the server to
-    /// trigger the Ping-cycle.
+    /// response. If the handshake data mentions a websocket upgrade possibility,
+    /// we try to upgrade the connection. Afterwards a first Pong packet is sent
+    /// to the server to trigger the Ping-cycle.
     pub fn open<T: Into<String> + Clone>(&mut self, address: T) -> Result<()> {
         // TODO: Check if Relaxed is appropiate -> change all occurences if not
         if self.connected.load(Ordering::Relaxed) {
@@ -159,9 +163,12 @@ impl TransportClient {
                             .iter()
                             .any(|upgrade| upgrade.to_lowercase() == *"websocket");
 
-                        // if we have an upgrade option, send the corresponding request
-                        if websocket_upgrade && self.upgrade_connection(&conn_data.sid).is_err() {
-                            eprintln!("upgrading to websockets was not succesfull, proceeding via polling");
+                        // if we have an upgrade option, send the corresponding request, if this doesnt work
+                        // for some reason, proceed via polling
+                        if websocket_upgrade {
+                            if let Err(error) = self.upgrade_connection(&conn_data.sid) {
+                                eprintln!("upgrading to websockets was not succesfull because of [{}], proceeding via polling", error);
+                            }
                         }
 
                         // set the connection data
@@ -217,6 +224,12 @@ impl TransportClient {
             // unwrapping here is infact save as we only set this url if it gets orderly parsed
             let mut address = Url::parse(&address).unwrap();
 
+            if self.engine_io_mode.load(Ordering::Relaxed) {
+                address.set_path(&(address.path().to_owned() + "engine.io/"));
+            } else {
+                address.set_path(&(address.path().to_owned() + "socket.io/"));
+            }
+
             let full_address = address
                 .query_pairs_mut()
                 .clear()
@@ -225,36 +238,83 @@ impl TransportClient {
                 .append_pair("sid", new_sid)
                 .finish();
 
-            // connect to the server via websockets
-            let client = ClientBuilder::new(full_address.as_ref())?.connect_insecure()?;
-
-            let (mut receiver, mut sender) = client.split()?;
-
-            // send the probe packet
+            // create the probe packet
             let probe_packet = Packet::new(PacketId::Ping, b"probe".to_vec());
-            sender.send_dataframe(&WsDataFrame::new(
+            let probe_df = WsDataFrame::new(
                 true,
                 websocket::dataframe::Opcode::Text,
                 encode_payload(vec![probe_packet]),
-            ))?;
+            );
 
-            // expect to receive a probe packet
-            let message = receiver.recv_message()?;
-            if message.take_payload() != b"3probe" {
-                eprintln!("Error while handshaking ws");
-                return Err(Error::HandshakeError("Error".to_owned()));
+            let upgrade_packet = Packet::new(PacketId::Upgrade, Vec::new());
+            let upgrade_df = WsDataFrame::new(
+                true,
+                websocket::dataframe::Opcode::Text,
+                encode_payload(vec![upgrade_packet]),
+            );
+
+            // connect either secure or unsecure
+            match full_address.scheme() {
+                "https" => {
+                    let mut client = ClientBuilder::new(dbg!(full_address.as_ref()))?
+                        .connect_secure(None)
+                        .unwrap();
+                    // connect to the server via websockets
+                    client.set_nonblocking(false)?;
+
+                    // send the probe packet
+                    client.send_dataframe(&probe_df)?;
+
+                    // expect to receive a probe packet
+                    let message = client.recv_dataframe()?;
+                    if message.take_payload() != b"3probe" {
+                        eprintln!("Error while handshaking ws");
+                        return Err(Error::HandshakeError(
+                            "Error received wrong packet".to_owned(),
+                        ));
+                    }
+
+                    // finally send the upgrade request
+                    client.send_dataframe(&upgrade_df)?;
+
+                    // upgrade the transport layer
+                    self.transport =
+                        Arc::new(TransportType::WebsocketSecure(Arc::new(Mutex::new(client))));
+
+                    return Ok(());
+                }
+                "http" => {
+                    let client =
+                        ClientBuilder::new(dbg!(full_address.as_ref()))?.connect_insecure()?;
+                    client.set_nonblocking(false)?;
+
+                    let (mut receiver, mut sender) = client.split()?;
+
+                    // send the probe packet
+                    sender.send_dataframe(&probe_df)?;
+
+                    // expect to receive a probe packet
+                    let message = receiver.recv_dataframe()?;
+                    if message.take_payload() != b"3probe" {
+                        eprintln!("Error while handshaking ws");
+                        return Err(Error::HandshakeError(
+                            "Error received wrong packet".to_owned(),
+                        ));
+                    }
+
+                    // finally send the upgrade request
+                    sender.send_dataframe(&upgrade_df)?;
+
+                    // upgrade the transport layer
+                    self.transport = Arc::new(TransportType::Websocket(
+                        Arc::new(Mutex::new(receiver)),
+                        Arc::new(Mutex::new(sender)),
+                    ));
+
+                    return Ok(());
+                }
+                _ => return Err(Error::InvalidUrl(address.to_string())),
             }
-
-            // finally send the upgrade request
-            sender.send_message(&OwnedMessage::Text("5".to_owned()))?;
-
-            // upgrade the transport layer
-            self.transport = Arc::new(TransportType::Websocket(
-                Arc::new(Mutex::new(receiver)),
-                Arc::new(Mutex::new(sender)),
-            ));
-
-            return Ok(());
         }
         Err(Error::HandshakeError("Error - invalid url".to_owned()))
     }
@@ -295,6 +355,14 @@ impl TransportClient {
 
                 let dataframe = WsDataFrame::new(true, websocket::dataframe::Opcode::Text, data);
                 writer.send_dataframe(&dataframe).unwrap();
+
+                Ok(())
+            }
+            TransportType::WebsocketSecure(client) => {
+                let mut client = client.lock()?;
+
+                let dataframe = WsDataFrame::new(true, websocket::dataframe::Opcode::Text, data);
+                client.send_dataframe(&dataframe).unwrap();
 
                 Ok(())
             }
@@ -346,8 +414,12 @@ impl TransportClient {
                 TransportType::Websocket(receiver, _) => {
                     let mut receiver = receiver.lock()?;
 
-                    println!("About to receive");
-                    dbg!(receiver.recv_message().unwrap().take_payload())
+                    receiver.recv_message()?.take_payload()
+                }
+                TransportType::WebsocketSecure(client) => {
+                    let mut client = client.lock()?;
+
+                    client.recv_dataframe()?.take_payload()
                 }
             };
 
@@ -374,7 +446,6 @@ impl TransportClient {
                         }
                         drop(on_data);
                     }
-
                     PacketId::Close => {
                         let on_close = self.on_close.read()?;
                         if let Some(function) = on_close.as_ref() {
@@ -447,7 +518,7 @@ impl TransportClient {
             },
             match self.transport.as_ref() {
                 TransportType::Polling(_) => "polling",
-                TransportType::Websocket(_, _) => "websocket",
+                TransportType::Websocket(_, _) | TransportType::WebsocketSecure(_) => "websocket",
             },
             TransportClient::get_random_t(),
         );
@@ -474,7 +545,8 @@ impl Debug for TransportType {
             "TransportType({})",
             match self {
                 Self::Polling(_) => "Polling",
-                Self::Websocket(_, _) => "Websocket",
+                Self::Websocket(_, _) => "Websocket without TLS",
+                Self::WebsocketSecure(_) => "Websocket with TLS",
             }
         ))
     }
@@ -527,11 +599,43 @@ mod test {
     use super::*;
     /// The `engine.io` server for testing runs on port 4201
     const SERVER_URL: &str = "http://localhost:4201";
+    const SERVER_URL_SECURE: &str = "https://localhost:433";
 
     #[test]
     fn test_connection() {
         let mut socket = TransportClient::new(true);
         assert!(socket.open(SERVER_URL).is_ok());
+
+        assert!(socket
+            .emit(Packet::new(
+                PacketId::Message,
+                "HelloWorld".to_owned().into_bytes(),
+            ))
+            .is_ok());
+
+        socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
+            println!(
+                "Received: {:?}",
+                std::str::from_utf8(&data).expect("Error while decoding utf-8")
+            );
+        }))));
+
+        // closes the connection
+        assert!(socket
+            .emit(Packet::new(
+                PacketId::Message,
+                "CLOSE".to_owned().into_bytes(),
+            ))
+            .is_ok());
+
+        // assert!(socket.poll_cycle().is_ok());
+        socket.poll_cycle().unwrap();
+    }
+
+    #[test]
+    fn test_connection_ssl() {
+        let mut socket = TransportClient::new(true);
+        socket.open(SERVER_URL_SECURE).unwrap();
 
         assert!(socket
             .emit(Packet::new(

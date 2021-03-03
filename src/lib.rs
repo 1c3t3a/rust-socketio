@@ -86,7 +86,7 @@ pub mod socketio;
 pub mod error;
 
 use crate::error::Result;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use crate::socketio::transport::TransportClient;
 
@@ -97,6 +97,36 @@ use crate::socketio::transport::TransportClient;
 pub struct Socket {
     /// The inner transport client to delegate the methods to.
     transport: TransportClient,
+}
+
+pub struct SocketBuilder {
+    socket: Socket,
+}
+
+impl SocketBuilder {
+    pub fn new<T: Into<String>>(address: T) -> Self {
+        Self {
+            socket: Socket::new(address, Some("/")),
+        }
+    }
+
+    pub fn set_namespace<T: Into<String>>(mut self, namespace: T) -> Self {
+        self.socket.set_namespace(namespace.into());
+        self
+    }
+
+    pub fn on<F>(mut self, event: &str, callback: F) -> Result<Self>
+    where
+        F: FnMut(String) + 'static + Sync + Send,
+    {
+        self.socket.on(event, callback)?;
+        Ok(self)
+    }
+
+    pub fn connect(mut self) -> Result<Socket> {
+        self.socket.connect()?;
+        Ok(self.socket)
+    }
 }
 
 impl Socket {
@@ -233,6 +263,11 @@ impl Socket {
         self.transport
             .emit_with_ack(event.into(), data, timeout, callback)
     }
+
+    /// Sets the namespace attribute on a client (used by the builder class)
+    pub(crate) fn set_namespace<T: Into<String>>(&mut self, namespace: T) {
+        *Arc::get_mut(&mut self.transport.nsp).unwrap() = Some(namespace.into());
+    }
 }
 
 #[cfg(test)]
@@ -277,5 +312,17 @@ mod test {
         assert!(ack.is_ok());
 
         sleep(Duration::from_secs(2));
+    }
+
+    #[test]
+    fn test_builder() {
+        let socket_builder = SocketBuilder::new(SERVER_URL)
+            .on("test", |str| println!("Received: {}", str));
+        
+        assert!(socket_builder.is_ok());
+        let socket = socket_builder.unwrap().connect();
+        assert!(socket.is_ok());
+
+        assert!(socket.unwrap().emit("test", &json!({"hello": "world"}).to_string()).is_ok());
     }
 }
