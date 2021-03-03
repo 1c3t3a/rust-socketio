@@ -11,7 +11,6 @@ use std::{
 };
 use websocket::{
     dataframe::DataFrame as WsDataFrame, receiver::Reader, sync::Writer, ws::dataframe::DataFrame,
-    OwnedMessage,
 };
 use websocket::{sync::stream::TcpStream, ClientBuilder};
 
@@ -131,8 +130,9 @@ impl TransportClient {
 
     /// Opens the connection to a specified server. Includes an opening `GET`
     /// request to the server, the server passes back the handshake data in the
-    /// response. Afterwards a first Pong packet is sent to the server to
-    /// trigger the Ping-cycle.
+    /// response. If the handshake data mentions a websocket upgrade possibility,
+    /// we try to upgrade the connection. Afterwards a first Pong packet is sent
+    /// to the server to trigger the Ping-cycle.
     pub fn open<T: Into<String> + Clone>(&mut self, address: T) -> Result<()> {
         // TODO: Check if Relaxed is appropiate -> change all occurences if not
         if self.connected.load(Ordering::Relaxed) {
@@ -159,9 +159,12 @@ impl TransportClient {
                             .iter()
                             .any(|upgrade| upgrade.to_lowercase() == *"websocket");
 
-                        // if we have an upgrade option, send the corresponding request
-                        if websocket_upgrade && self.upgrade_connection(&conn_data.sid).is_err() {
-                            eprintln!("upgrading to websockets was not succesfull, proceeding via polling");
+                        // if we have an upgrade option, send the corresponding request, if this doesnt work
+                        // for some reason, proceed via polling
+                        if websocket_upgrade {
+                            if let Err(error) = self.upgrade_connection(&conn_data.sid) {
+                                eprintln!("upgrading to websockets was not succesfull because of [{}], proceeding via polling", error);
+                            }
                         }
 
                         // set the connection data
@@ -217,6 +220,12 @@ impl TransportClient {
             // unwrapping here is infact save as we only set this url if it gets orderly parsed
             let mut address = Url::parse(&address).unwrap();
 
+            if self.engine_io_mode.load(Ordering::Relaxed) {
+                address.set_path(&(address.path().to_owned() + "engine.io/"));
+            } else {
+                address.set_path(&(address.path().to_owned() + "socket.io/"));
+            }
+
             let full_address = address
                 .query_pairs_mut()
                 .clear()
@@ -227,6 +236,7 @@ impl TransportClient {
 
             // connect to the server via websockets
             let client = ClientBuilder::new(full_address.as_ref())?.connect_insecure()?;
+            client.set_nonblocking(false)?;
 
             let (mut receiver, mut sender) = client.split()?;
 
@@ -239,14 +249,19 @@ impl TransportClient {
             ))?;
 
             // expect to receive a probe packet
-            let message = receiver.recv_message()?;
+            let message = receiver.recv_dataframe()?;
             if message.take_payload() != b"3probe" {
                 eprintln!("Error while handshaking ws");
                 return Err(Error::HandshakeError("Error".to_owned()));
             }
 
+            let upgrade_packet = Packet::new(PacketId::Upgrade, Vec::new());
             // finally send the upgrade request
-            sender.send_message(&OwnedMessage::Text("5".to_owned()))?;
+            sender.send_dataframe(&WsDataFrame::new(
+                true,
+                websocket::dataframe::Opcode::Text,
+                encode_payload(vec![upgrade_packet]),
+            ))?;
 
             // upgrade the transport layer
             self.transport = Arc::new(TransportType::Websocket(
@@ -346,8 +361,7 @@ impl TransportClient {
                 TransportType::Websocket(receiver, _) => {
                     let mut receiver = receiver.lock()?;
 
-                    println!("About to receive");
-                    dbg!(receiver.recv_message().unwrap().take_payload())
+                    receiver.recv_message().unwrap().take_payload()
                 }
             };
 
