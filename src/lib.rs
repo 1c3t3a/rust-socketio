@@ -31,15 +31,22 @@
 //!     .expect("Server unreachable");
 //! ```
 //!
+//! The main entry point for using this crate is the `SocketBuilder` which provides 
+//! a way to easily configure a socket in the needed way. When the `connect` method
+//! is called on the builder, it returns a connected client which then could be used
+//! to emit messages to certain events. One client can only be connected to one namespace.
+//! If you need to listen to the messages in different namespaces you need to 
+//! allocate multiple sockets.
+//!
 //! ## Current features
 //!
-//! This version of the client lacks some features that the reference client
-//! would provide. The underlying `engine.io` protocol still uses long-polling
-//! instead of websockets. This will be resolved as soon as both the reqwest
-//! libary as well as `tungsenite-websockets` will bump their `tokio` version to
-//! 1.0.0. At the moment only `reqwest` is used for long-polling. The full
-//! `engine-io` protocol is implemented and most of the features concerning the
-//! 'normal' `socket.io` protocol are working.
+//! This implementation support most of the features of the socket.io protocol. In general 
+//! the full engine-io protocol is implemented, and concerning the socket.io part only binary
+//! events and binary acks are not yet implemented. This implementation generally tries to 
+//! make use of websockets as often as possible. This means most times only the opening request
+//! uses http and as soon as the server mentions that he is able to use websockets, an upgrade 
+//! is performed. But if this upgrade is not successful or the server does not mention an upgrade
+//! possibilty, http-long polling is used (as specified in the protocol specs).
 //!
 //! Here's an overview of possible use-cases:
 //!
