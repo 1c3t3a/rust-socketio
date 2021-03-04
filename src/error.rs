@@ -1,44 +1,54 @@
 use base64::DecodeError;
-use std::str;
-use std::{
-    fmt::{self, Display, Formatter},
-    num::ParseIntError,
-};
+use thiserror::Error;
+use std::{num::ParseIntError, str};
 use websocket::{client::ParseError, WebSocketError};
 
 /// Enumeration of all possible errors in the `socket.io` context.
-#[derive(Debug)]
+#[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
+    #[error("Invalid packet id: {0}")]
     InvalidPacketId(u8),
+    #[error("Error while parsing an empty packet")]
     EmptyPacket,
+    #[error("Error while parsing an incomplete packet")]
     IncompletePacket,
+    #[error("Got an invalid packet which did not follow the protocol format")]
     InvalidPacket,
-    Utf8Error(str::Utf8Error),
-    Base64Error(DecodeError),
+    #[error("An error occured while decoding the utf-8 text: {0}")]
+    Utf8Error(#[from] str::Utf8Error),
+    #[error("An error occured while encoding/decoding base64: {0}")]
+    Base64Error(#[from] DecodeError),
+    #[error("Invalid Url: {0}")]
     InvalidUrl(String),
-    ReqwestError(reqwest::Error),
+    #[error("Error during connection via http: {0}")]
+    ReqwestError(#[from] reqwest::Error),
+    #[error("Network request returned with status code: {0}")]
     HttpError(u16),
+    #[error("Got illegal handshake response: {0}")]
     HandshakeError(String),
+    #[error("Called an action before the connection was established")]
     ActionBeforeOpen,
+    #[error("string is not json serializable: {0}")]
     InvalidJson(String),
+    #[error("Did not receive an ack for id: {0}")]
     DidNotReceiveProperAck(i32),
+    #[error("An illegal action (such as setting a callback after being connected) was triggered")]
     IllegalActionAfterOpen,
+    #[error("Specified namespace {0} is not valid")]
     IllegalNamespace(String),
+    #[error("A lock was poisoned")]
     PoisonedLockError,
-    FromWebsocketError(WebSocketError),
-    FromWebsocketParseError(ParseError),
-    FromIoError(std::io::Error),
+    #[error("Got a websocket error: {0}")]
+    FromWebsocketError(#[from] WebSocketError),
+    #[error("Error while parsing the url for the websocket connection: {0}")]
+    FromWebsocketParseError(#[from] ParseError),
+    #[error("Got an IO-Error: {0}")]
+    FromIoError(#[from] std::io::Error),
 }
 
-impl std::error::Error for Error {}
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
-
-impl From<DecodeError> for Error {
-    fn from(error: DecodeError) -> Self {
-        Self::Base64Error(error)
-    }
-}
 
 impl<T> From<std::sync::PoisonError<T>> for Error {
     fn from(_: std::sync::PoisonError<T>) -> Self {
@@ -46,80 +56,9 @@ impl<T> From<std::sync::PoisonError<T>> for Error {
     }
 }
 
-impl From<str::Utf8Error> for Error {
-    fn from(error: str::Utf8Error) -> Self {
-        Self::Utf8Error(error)
-    }
-}
-
-impl From<reqwest::Error> for Error {
-    fn from(error: reqwest::Error) -> Self {
-        Self::ReqwestError(error)
-    }
-}
-
 impl From<ParseIntError> for Error {
     fn from(_: ParseIntError) -> Self {
         // this is used for parsing integers from the a packet string
         Self::InvalidPacket
-    }
-}
-
-impl From<WebSocketError> for Error {
-    fn from(error: WebSocketError) -> Self {
-        Self::FromWebsocketError(error)
-    }
-}
-
-impl From<ParseError> for Error {
-    fn from(error: ParseError) -> Self {
-        Self::FromWebsocketParseError(error)
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(error: std::io::Error) -> Self {
-        Self::FromIoError(error)
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match &self {
-            Self::InvalidPacketId(id) => write!(f, "Invalid packet id: {}", id),
-            Self::EmptyPacket => write!(f, "Error while parsing an empty packet"),
-            Self::IncompletePacket => write!(f, "Error while parsing an incomplete packet"),
-            Self::Utf8Error(e) => {
-                write!(f, "An error occured while decoding the utf-8 text: {}", e)
-            }
-            Self::Base64Error(e) => {
-                write!(f, "An error occured while encoding/decoding base64: {}", e)
-            }
-            Self
-            ::InvalidUrl(url) => write!(f, "Unable to connect to: {}", url),
-            Self::ReqwestError(error) => {
-                write!(f, "Error during connection via Reqwest: {}", error)
-            }
-            Self::HandshakeError(response) => {
-                write!(f, "Got illegal handshake response: {}", response)
-            }
-            Self::ActionBeforeOpen => {
-                write!(f, "Called an action before the connection was established")
-            }
-            Self::IllegalNamespace(nsp) => write!(f, "Specified namespace {} is not valid", nsp),
-            Self::HttpError(status_code) => write!(
-                f,
-                "Network request returned with status code: {}",
-                status_code
-            ),
-            Self::InvalidJson(string) => write!(f, "string is not json serializable: {}", string),
-            Self::DidNotReceiveProperAck(id) => write!(f, "Did not receive an ack for id: {}", id),
-            Self::IllegalActionAfterOpen => write!(f, "An illegal action (such as setting a callback after being connected) was triggered"),
-            Self::PoisonedLockError => write!(f, "A lock was poisoned"),
-            Self::InvalidPacket => write!(f, "Got an invalid packet which did not follow the protocol format"),
-            Self::FromWebsocketError(error) => write!(f, "Got a websocket error: {}", error),
-            Self::FromWebsocketParseError(error) => write!(f, "Error while parsing the url for the websocket connection: {}", error),
-            Self::FromIoError(error) => write!(f, "Got an IoError: {}", error),
-        }
     }
 }
