@@ -2,18 +2,18 @@
 //! ## Example usage
 //!
 //! ``` rust
-//! use rust_socketio::Socket;
+//! use rust_socketio::SocketBuilder;
 //! use serde_json::json;
-//! use std::thread::sleep;
 //! use std::time::Duration;
 //!
-//! let mut socket = Socket::new(String::from("http://localhost:4200"), Some("/admin"));
-//!
-//! // callback for the "foo" event
-//! socket.on("foo", |message| println!("{}", message)).unwrap();
-//!
-//! // connect to the server
-//! socket.connect().expect("Connection failed");
+//! // get a socket that is connected to the admin namespace
+//! let mut socket = SocketBuilder::new("http://localhost:4200")
+//!      .set_namespace("/admin")
+//!      .expect("illegal namespace")
+//!      .on("test", |str| println!("Received: {}", str))
+//!      .on("error", |err| eprintln!("Error: {}", err))
+//!      .connect()
+//!      .expect("Connection failed");
 //!
 //! // emit to the "foo" event
 //! let payload = json!({"token": 123});
@@ -25,23 +25,28 @@
 //!     println!("Ack data: {}", message);
 //! };
 //!
-//! sleep(Duration::from_secs(2));
-//!
 //! // emit with an ack
 //! let ack = socket
 //!     .emit_with_ack("test", &payload.to_string(), Duration::from_secs(2), ack_callback)
 //!     .expect("Server unreachable");
 //! ```
 //!
+//! The main entry point for using this crate is the `SocketBuilder` which provides
+//! a way to easily configure a socket in the needed way. When the `connect` method
+//! is called on the builder, it returns a connected client which then could be used
+//! to emit messages to certain events. One client can only be connected to one namespace.
+//! If you need to listen to the messages in different namespaces you need to
+//! allocate multiple sockets.
+//!
 //! ## Current features
 //!
-//! This version of the client lacks some features that the reference client
-//! would provide. The underlying `engine.io` protocol still uses long-polling
-//! instead of websockets. This will be resolved as soon as both the reqwest
-//! libary as well as `tungsenite-websockets` will bump their `tokio` version to
-//! 1.0.0. At the moment only `reqwest` is used for long-polling. The full
-//! `engine-io` protocol is implemented and most of the features concerning the
-//! 'normal' `socket.io` protocol are working.
+//! This implementation support most of the features of the socket.io protocol. In general
+//! the full engine-io protocol is implemented, and concerning the socket.io part only binary
+//! events and binary acks are not yet implemented. This implementation generally tries to
+//! make use of websockets as often as possible. This means most times only the opening request
+//! uses http and as soon as the server mentions that he is able to use websockets, an upgrade
+//! is performed. But if this upgrade is not successful or the server does not mention an upgrade
+//! possibilty, http-long polling is used (as specified in the protocol specs).
 //!
 //! Here's an overview of possible use-cases:
 //!
@@ -55,10 +60,6 @@
 //! - send JSON data to the server (via `serde_json` which provides safe
 //! handling).
 //! - send JSON data to the server and receive an `ack`.
-//!
-//! The whole crate is written in asynchronous Rust and it's necessary to use
-//! [tokio](https://docs.rs/tokio/1.0.1/tokio/), or other executors with this
-//! library to resolve the futures.
 //!
 #![allow(clippy::rc_buffer)]
 #![warn(clippy::complexity)]
@@ -85,8 +86,10 @@ pub mod socketio;
 /// crate. Handles all kinds of errors.
 pub mod error;
 
+use error::Error;
+
 use crate::error::Result;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use crate::socketio::transport::TransportClient;
 
@@ -99,24 +102,114 @@ pub struct Socket {
     transport: TransportClient,
 }
 
+/// A builder class for a `socket.io` socket. This handles setting up the client and
+/// configuring the callback, the namespace and metadata of the socket. If no
+/// namespace is specified, the default namespace `/` is taken. The `connect` method
+/// acts the `build` method and returns a connected [`Socket`].
+pub struct SocketBuilder {
+    socket: Socket,
+}
+
+impl SocketBuilder {
+    /// Create as client builder from a URL. URLs must be in the form
+    /// `[ws or wss or http or https]://[domain]:[port]/[path]`. The
+    /// path of the URL is optional and if no port is given, port 80
+    /// will be used.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::SocketBuilder;
+    /// use serde_json::json;
+    ///
+    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    ///     .set_namespace("/admin")
+    ///     .expect("illegal namespace")
+    ///     .on("test", |str| println!("Received: {}", str))
+    ///     .connect()
+    ///     .expect("error while connecting");
+    ///
+    /// // use the socket
+    /// let payload = json!({"token": 123});
+    /// let result = socket.emit("foo", &payload.to_string());
+    ///
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn new<T: Into<String>>(address: T) -> Self {
+        Self {
+            socket: Socket::new(address, Some("/")),
+        }
+    }
+
+    /// Sets the target namespace of the client. The namespace must start
+    /// with a leading `/`. Valid examples are e.g. `/admin`, `/foo`.
+    pub fn set_namespace<T: Into<String>>(mut self, namespace: T) -> Result<Self> {
+        let nsp = namespace.into();
+        if !nsp.starts_with('/') {
+            return Err(Error::IllegalNamespace(nsp));
+        }
+        self.socket.set_namespace(nsp);
+        Ok(self)
+    }
+
+    /// Registers a new callback for a certain [`socketio::event::Event`]. The event could either be
+    /// one of the common events like `message`, `error`, `connect`, `close` or a custom
+    /// event defined by a string, e.g. `onPayment` or `foo`.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::SocketBuilder;
+    ///
+    /// let socket = SocketBuilder::new("http://localhost:4200")
+    ///     .set_namespace("/admin")
+    ///     .expect("illegal namespace")
+    ///     .on("test", |str| println!("Received: {}", str))
+    ///     .on("error", |err| eprintln!("Error: {}", err))
+    ///     .connect();
+    ///
+    ///
+    /// ```
+    pub fn on<F>(mut self, event: &str, callback: F) -> Self
+    where
+        F: FnMut(String) + 'static + Sync + Send,
+    {
+        // unwrapping here is safe as this only returns an error
+        // when the client is already connected, which is
+        // impossible here
+        self.socket.on(event, callback).unwrap();
+        self
+    }
+
+    /// Connects the socket to a certain endpoint. This returns a connected
+    /// [`Socket`] instance. This method returns an [`std::result::Result::Err`]
+    /// value if something goes wrong during connection.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::SocketBuilder;
+    /// use serde_json::json;
+    ///
+    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    ///     .set_namespace("/admin")
+    ///     .expect("illegal namespace")
+    ///     .on("test", |str| println!("Received: {}", str))
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    /// // use the socket
+    /// let payload = json!({"token": 123});
+    /// let result = socket.emit("foo", &payload.to_string());
+    ///
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn connect(mut self) -> Result<Socket> {
+        self.socket.connect()?;
+        Ok(self.socket)
+    }
+}
+
 impl Socket {
     /// Creates a socket with a certain adress to connect to as well as a
     /// namespace. If `None` is passed in as namespace, the default namespace
     /// `"/"` is taken.
-    ///
-    /// # Example
-    /// ```rust
-    /// use rust_socketio::Socket;
-    ///
-    /// // this connects the socket to the given url as well as the default
-    /// // namespace "/"
-    /// let socket = Socket::new("http://localhost:80", None);
-    ///
-    /// // this connects the socket to the given url as well as the namespace
-    /// // "/admin"
-    /// let socket = Socket::new("http://localhost:80", Some("/admin"));
     /// ```
-    pub fn new<T: Into<String>>(address: T, namespace: Option<&str>) -> Self {
+    pub(crate) fn new<T: Into<String>>(address: T, namespace: Option<&str>) -> Self {
         Socket {
             transport: TransportClient::new(address, namespace.map(String::from)),
         }
@@ -125,16 +218,7 @@ impl Socket {
     /// Registers a new callback for a certain event. This returns an
     /// `Error::IllegalActionAfterOpen` error if the callback is registered
     /// after a call to the `connect` method.
-    /// # Example
-    /// ```rust
-    /// use rust_socketio::Socket;
-    ///
-    /// let mut socket = Socket::new("http://localhost:4200", None);
-    /// let result = socket.on("foo", |message| println!("{}", message));
-    ///
-    /// assert!(result.is_ok());
-    /// ```
-    pub fn on<F>(&mut self, event: &str, callback: F) -> Result<()>
+    pub(crate) fn on<F>(&mut self, event: &str, callback: F) -> Result<()>
     where
         F: FnMut(String) + 'static + Sync + Send,
     {
@@ -144,19 +228,7 @@ impl Socket {
     /// Connects the client to a server. Afterwards the `emit_*` methods can be
     /// called to interact with the server. Attention: it's not allowed to add a
     /// callback after a call to this method.
-    ///
-    /// # Example
-    /// ```rust
-    /// use rust_socketio::Socket;
-    ///
-    /// let mut socket = Socket::new("http://localhost:4200", None);
-    ///
-    /// socket.on("foo", |message| println!("{}", message)).unwrap();
-    /// let result = socket.connect();
-    ///
-    /// assert!(result.is_ok());
-    /// ```
-    pub fn connect(&mut self) -> Result<()> {
+    pub(crate) fn connect(&mut self) -> Result<()> {
         self.transport.connect()
     }
 
@@ -168,13 +240,13 @@ impl Socket {
     ///
     /// # Example
     /// ```
-    /// use rust_socketio::Socket;
+    /// use rust_socketio::SocketBuilder;
     /// use serde_json::json;
     ///
-    /// let mut socket = Socket::new("http://localhost:4200", None);
-    ///
-    /// socket.on("foo", |message| println!("{}", message)).unwrap();
-    /// socket.connect().expect("Connection failed");
+    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    ///     .on("test", |str| println!("Received: {}", str))
+    ///     .connect()
+    ///     .expect("connection failed");
     ///
     /// let payload = json!({"token": 123});
     /// let result = socket.emit("foo", &payload.to_string());
@@ -201,15 +273,16 @@ impl Socket {
     ///
     /// # Example
     /// ```
-    /// use rust_socketio::Socket;
+    /// use rust_socketio::SocketBuilder;
     /// use serde_json::json;
     /// use std::time::Duration;
     /// use std::thread::sleep;
     ///
-    /// let mut socket = Socket::new("http://localhost:4200", None);
+    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    ///     .on("foo", |str| println!("Received: {}", str))
+    ///     .connect()
+    ///     .expect("connection failed");
     ///
-    /// socket.on("foo", |message| println!("{}", message)).unwrap();
-    /// socket.connect().expect("Connection failed");
     ///
     /// let payload = json!({"token": 123});
     /// let ack_callback = |message| { println!("{}", message) };
@@ -232,6 +305,11 @@ impl Socket {
     {
         self.transport
             .emit_with_ack(event.into(), data, timeout, callback)
+    }
+
+    /// Sets the namespace attribute on a client (used by the builder class)
+    pub(crate) fn set_namespace<T: Into<String>>(&mut self, namespace: T) {
+        *Arc::get_mut(&mut self.transport.nsp).unwrap() = Some(namespace.into());
     }
 }
 
@@ -277,5 +355,21 @@ mod test {
         assert!(ack.is_ok());
 
         sleep(Duration::from_secs(2));
+    }
+
+    #[test]
+    fn test_builder() {
+        let socket_builder = SocketBuilder::new(SERVER_URL).set_namespace("/admin");
+
+        assert!(socket_builder.is_ok());
+
+        let socket = socket_builder
+            .unwrap()
+            .on("error", |err| eprintln!("Error!!: {}", err))
+            .on("test", |str| println!("Received: {}", str))
+            .on("message", |msg| println!("Received: {}", msg))
+            .connect();
+
+        assert!(socket.is_ok());
     }
 }

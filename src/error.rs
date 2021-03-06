@@ -4,6 +4,7 @@ use std::{
     fmt::{self, Display, Formatter},
     num::ParseIntError,
 };
+use websocket::{client::ParseError, WebSocketError};
 
 /// Enumeration of all possible errors in the `socket.io` context.
 #[derive(Debug)]
@@ -22,7 +23,11 @@ pub enum Error {
     InvalidJson(String),
     DidNotReceiveProperAck(i32),
     IllegalActionAfterOpen,
+    IllegalNamespace(String),
     PoisonedLockError,
+    FromWebsocketError(WebSocketError),
+    FromWebsocketParseError(ParseError),
+    FromIoError(std::io::Error),
 }
 
 impl std::error::Error for Error {}
@@ -60,6 +65,24 @@ impl From<ParseIntError> for Error {
     }
 }
 
+impl From<WebSocketError> for Error {
+    fn from(error: WebSocketError) -> Self {
+        Self::FromWebsocketError(error)
+    }
+}
+
+impl From<ParseError> for Error {
+    fn from(error: ParseError) -> Self {
+        Self::FromWebsocketParseError(error)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(error: std::io::Error) -> Self {
+        Self::FromIoError(error)
+    }
+}
+
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match &self {
@@ -83,6 +106,7 @@ impl Display for Error {
             Self::ActionBeforeOpen => {
                 write!(f, "Called an action before the connection was established")
             }
+            Self::IllegalNamespace(nsp) => write!(f, "Specified namespace {} is not valid", nsp),
             Self::HttpError(status_code) => write!(
                 f,
                 "Network request returned with status code: {}",
@@ -93,6 +117,9 @@ impl Display for Error {
             Self::IllegalActionAfterOpen => write!(f, "An illegal action (such as setting a callback after being connected) was triggered"),
             Self::PoisonedLockError => write!(f, "A lock was poisoned"),
             Self::InvalidPacket => write!(f, "Got an invalid packet which did not follow the protocol format"),
+            Self::FromWebsocketError(error) => write!(f, "Got a websocket error: {}", error),
+            Self::FromWebsocketParseError(error) => write!(f, "Error while parsing the url for the websocket connection: {}", error),
+            Self::FromIoError(error) => write!(f, "Got an IoError: {}", error),
         }
     }
 }
