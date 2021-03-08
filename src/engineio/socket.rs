@@ -1,7 +1,7 @@
 #![allow(unused)]
 use std::thread;
 
-use super::packet::Packet;
+use super::packet::{Packet, PacketId};
 use crate::engineio::transport::TransportClient;
 use crate::error::{Error, Result};
 use std::sync::{
@@ -56,7 +56,17 @@ impl EngineSocket {
         if !self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
         }
-        self.transport_client.read()?.emit(packet)
+        self.transport_client.read()?.emit(packet, false)
+    }
+
+    /// Sends a socketio binary attachement to the server.
+    pub fn emit_binary_attachement(&mut self, attachement: Vec<u8>) -> Result<()> {
+        if !self.serving.load(Ordering::Relaxed) {
+            return Err(Error::ActionBeforeOpen);
+        }
+        let packet = Packet::new(PacketId::Message, attachement);
+
+        self.transport_client.read()?.emit(packet, true)
     }
 
     /// Registers the `on_open` callback.

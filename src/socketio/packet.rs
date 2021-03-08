@@ -88,7 +88,7 @@ impl Packet {
         }
 
         let mut buffer = string.into_bytes();
-        if let Some(bin_data) = self.binary_data.as_ref() {
+        if self.binary_data.as_ref().is_some() {
             // check if an event type is present
             let placeholder = if let Some(event_type) = self.data.as_ref() {
                 format!(
@@ -105,7 +105,6 @@ impl Packet {
 
             // build the buffers
             buffer.extend(placeholder.into_bytes());
-            buffer.extend(bin_data);
         } else if let Some(data) = self.data.as_ref() {
             buffer.extend(data.to_string().into_bytes());
         }
@@ -361,8 +360,7 @@ mod test {
             packet.unwrap()
         );
 
-        let payload =
-            Bytes::from_static(b"51-[\"hello\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03");
+        let payload = Bytes::from_static(b"51-[\"hello\",{\"_placeholder\":true,\"num\":0}]");
         let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
@@ -371,7 +369,7 @@ mod test {
                 PacketId::BinaryEvent,
                 "/".to_owned(),
                 Some(String::from("\"hello\"")),
-                Some(vec![1, 2, 3]),
+                None,
                 None,
                 Some(1),
             ),
@@ -379,7 +377,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(
-            b"51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03",
+            b"51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]",
         );
         let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
@@ -389,15 +387,14 @@ mod test {
                 PacketId::BinaryEvent,
                 "/admin".to_owned(),
                 Some(String::from("\"project:delete\"")),
-                Some(vec![1, 2, 3]),
+                None,
                 Some(456),
                 Some(1),
             ),
             packet.unwrap()
         );
 
-        let payload =
-            Bytes::from_static(b"61-/admin,456[{\"_placeholder\":true,\"num\":0}]\x03\x02\x01");
+        let payload = Bytes::from_static(b"61-/admin,456[{\"_placeholder\":true,\"num\":0}]");
         let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
@@ -406,7 +403,7 @@ mod test {
                 PacketId::BinaryAck,
                 "/admin".to_owned(),
                 None,
-                Some(vec![3, 2, 1]),
+                None,
                 Some(456),
                 Some(1),
             ),

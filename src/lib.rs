@@ -371,7 +371,7 @@ mod test {
         );
         assert!(ack.is_ok());
 
-        sleep(Duration::from_secs(5));
+        sleep(Duration::from_secs(2));
     }
 
     #[test]
@@ -385,5 +385,14 @@ mod test {
             .connect();
 
         assert!(socket.is_ok());
+
+        let mut socket = socket.unwrap();
+        assert!(socket
+            .emit("message", Payload::String(json!("Hello World").to_string()))
+            .is_ok());
+
+        assert!(socket.emit("binary", Payload::Binary(vec![46, 88])).is_ok());
+
+        sleep(Duration::from_secs(2));
     }
 }

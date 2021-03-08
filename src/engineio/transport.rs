@@ -183,7 +183,7 @@ impl TransportClient {
                         *self.last_ping.lock()? = Instant::now();
 
                         // emit a pong packet to keep trigger the ping cycle on the server
-                        self.emit(Packet::new(PacketId::Pong, Vec::new()))?;
+                        self.emit(Packet::new(PacketId::Pong, Vec::new()), false)?;
 
                         return Ok(());
                     }
@@ -274,8 +274,9 @@ impl TransportClient {
         Err(Error::HandshakeError("Error - invalid url".to_owned()))
     }
 
-    /// Sends a packet to the server
-    pub fn emit(&self, packet: Packet) -> Result<()> {
+    /// Sends a packet to the server. This optionally handles sending of a
+    /// socketio binary attachement via the boolean attribute `is_binary_att`.
+    pub fn emit(&self, packet: Packet, is_binary_att: bool) -> Result<()> {
         if !self.connected.load(Ordering::Relaxed) {
             let error = Error::ActionBeforeOpen;
             self.call_error_callback(format!("{}", error))?;
@@ -289,12 +290,32 @@ impl TransportClient {
         drop(host);
 
         // send a post request with the encoded payload as body
-        let data = encode_payload(vec![packet]);
+        // if this is a binary attachement, then send the raw bytes
+        let data = if is_binary_att {
+            packet.data
+        } else {
+            encode_payload(vec![packet])
+        };
 
         match &self.transport.as_ref() {
             TransportType::Polling(client) => {
+                let data_to_send = if is_binary_att {
+                    // the binary attachement gets `base64` encoded
+                    let mut prefix = vec![b'b'];
+                    prefix.extend(base64::encode(data).as_bytes());
+                    prefix
+                } else {
+                    data
+                };
+
                 let client = client.lock()?;
-                let status = client.post(address).body(data).send()?.status().as_u16();
+                let status = client
+                    .post(address)
+                    .body(data_to_send)
+                    .send()?
+                    .status()
+                    .as_u16();
+
                 drop(client);
 
                 if status != 200 {
@@ -308,7 +329,12 @@ impl TransportClient {
             TransportType::Websocket(_, writer) => {
                 let mut writer = writer.lock()?;
 
-                let dataframe = WsDataFrame::new(true, websocket::dataframe::Opcode::Text, data);
+                let opcode = if is_binary_att {
+                    websocket::dataframe::Opcode::Binary
+                } else {
+                    websocket::dataframe::Opcode::Text
+                };
+                let dataframe = WsDataFrame::new(true, opcode, data);
                 writer.send_dataframe(&dataframe).unwrap();
 
                 Ok(())
@@ -417,7 +443,7 @@ impl TransportClient {
                     }
                     PacketId::Ping => {
                         last_ping = Instant::now();
-                        self.emit(Packet::new(PacketId::Pong, Vec::new()))?;
+                        self.emit(Packet::new(PacketId::Pong, Vec::new()), false)?;
                     }
                     PacketId::Pong => {
                         // this will never happen as the pong packet is
@@ -558,10 +584,10 @@ mod test {
         assert!(socket.open(SERVER_URL).is_ok());
 
         assert!(socket
-            .emit(Packet::new(
-                PacketId::Message,
-                "HelloWorld".to_owned().into_bytes(),
-            ))
+            .emit(
+                Packet::new(PacketId::Message, "HelloWorld".to_owned().into_bytes(),),
+                false,
+            )
             .is_ok());
 
         socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
@@ -573,10 +599,10 @@ mod test {
 
         // closes the connection
         assert!(socket
-            .emit(Packet::new(
-                PacketId::Message,
-                "CLOSE".to_owned().into_bytes(),
-            ))
+            .emit(
+                Packet::new(PacketId::Message, "CLOSE".to_owned().into_bytes(),),
+                false,
+            )
             .is_ok());
 
         // assert!(socket.poll_cycle().is_ok());

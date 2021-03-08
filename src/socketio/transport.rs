@@ -109,14 +109,37 @@ impl TransportClient {
         self.engine_socket.lock()?.emit(engine_packet)
     }
 
+    fn send_binary_attachement(&self, attachement: Vec<u8>) -> Result<()> {
+        if !self.engineio_connected.load(Ordering::Relaxed) {
+            return Err(Error::ActionBeforeOpen);
+        }
+
+        self.engine_socket
+            .lock()?
+            .emit_binary_attachement(attachement)
+    }
+
     /// Emits to certain event with given data. The data needs to be JSON,
     /// otherwise this returns an `InvalidJson` error.
     pub fn emit(&self, event: Event, data: Payload) -> Result<()> {
         let default = String::from("/");
         let nsp = self.nsp.as_ref().as_ref().unwrap_or(&default);
+
+        let is_string_packet = matches!(&data, &Payload::String(_));
         let socket_packet = self.build_packet_for_payload(data, event, nsp, None)?;
 
-        self.send(&socket_packet)
+        if is_string_packet {
+            self.send(&socket_packet)
+        } else {
+            // unwrapping here is safe as this is a binary payload
+            let binary_payload = socket_packet.binary_data.as_ref().unwrap();
+
+            // first send the raw packet announcing the attachement
+            self.send(&socket_packet)?;
+
+            // then send the attachement
+            self.send_binary_attachement(binary_payload.to_owned())
+        }
     }
 
     /// Returns a packet for a payload, could be used for bot binary and non binary
