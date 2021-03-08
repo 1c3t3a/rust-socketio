@@ -12,6 +12,7 @@ An implementation of a socket.io client written in the Rust programming language
 use rust_socketio::{SocketBuilder, Payload};
 use serde_json::json;
 use std::time::Duration;
+
 // define a callback which is called when a payload is received
 let callback = |payload: Payload| {
        match payload {
@@ -19,6 +20,7 @@ let callback = |payload: Payload| {
            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
        }
 };
+
 // get a socket that is connected to the admin namespace
 let mut socket = SocketBuilder::new("http://localhost:4200")
      .set_namespace("/admin")
@@ -27,17 +29,21 @@ let mut socket = SocketBuilder::new("http://localhost:4200")
      .on("error", |err| eprintln!("Error: {:#?}", err))
      .connect()
      .expect("Connection failed");
+
 // emit to the "foo" event
 let json_payload = json!({"token": 123});
 let payload = Payload::String(json_payload.to_string());
 socket.emit("foo", payload).expect("Server unreachable");
+
 // define a callback, that's executed when the ack got acked
 let ack_callback = |message: Payload| {
     println!("Yehaa! My ack got acked?");
     println!("Ack data: {:#?}", message);
 };
+
 let json_payload = json!({"myAckData": 123});
 let payload = Payload::String(json_payload.to_string());
+
 // emit with an ack
 let ack = socket
     .emit_with_ack("test", payload, Duration::from_secs(2), ack_callback)

@@ -297,10 +297,10 @@ impl Socket {
     /// server responded in a given timespan. This message takes an event, which
     /// could either be one of the common events like "message" or "error" or a
     /// custom event like "foo", as well as a data parameter. But be careful,
-    /// in case you send a [`Payload::String`], the string needs to be valid JSON. 
-    /// It's even recommended to use a library like serde_json to serialize the data properly. 
-    /// It also requires a timeout `Duration` in which the client needs to answer. 
-    /// If the ack is accked in the correct timespan, the specified callback is 
+    /// in case you send a [`Payload::String`], the string needs to be valid JSON.
+    /// It's even recommended to use a library like serde_json to serialize the data properly.
+    /// It also requires a timeout `Duration` in which the client needs to answer.
+    /// If the ack is accked in the correct timespan, the specified callback is
     /// called. The callback consumes a [`Payload`] which represents the data send
     /// by the server.
     ///

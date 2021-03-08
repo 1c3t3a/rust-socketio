@@ -111,7 +111,7 @@ impl TransportClient {
 
     /// Sends a single binary attachement to the server. This method
     /// should only be called if a `BinaryEvent` or `BinaryAck` was
-    /// send to the server mentioning this attachement in it's 
+    /// send to the server mentioning this attachement in it's
     /// `attachements` field.
     fn send_binary_attachement(&self, attachement: Vec<u8>) -> Result<()> {
         if !self.engineio_connected.load(Ordering::Relaxed) {
