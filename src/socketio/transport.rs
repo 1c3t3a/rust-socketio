@@ -109,6 +109,10 @@ impl TransportClient {
         self.engine_socket.lock()?.emit(engine_packet)
     }
 
+    /// Sends a single binary attachement to the server. This method
+    /// should only be called if a `BinaryEvent` or `BinaryAck` was
+    /// send to the server mentioning this attachement in it's 
+    /// `attachements` field.
     fn send_binary_attachement(&self, attachement: Vec<u8>) -> Result<()> {
         if !self.engineio_connected.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
@@ -373,6 +377,8 @@ impl TransportClient {
             .on_data(move |data| Self::handle_new_message(&data, &clone_self))
     }
 
+    /// Handles a binary event.
+    #[inline]
     fn handle_binary_event(
         socket_packet: SocketPacket,
         clone_self: &TransportClient,
