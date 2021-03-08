@@ -173,11 +173,7 @@ impl TransportClient {
                 let payload = format!("[\"{}\",{}]", String::from(event), str_data);
 
                 Ok(SocketPacket::new(
-                    if id.is_some() {
-                        SocketPacketId::Ack
-                    } else {
-                        SocketPacketId::Event
-                    },
+                    SocketPacketId::Event,
                     nsp.to_owned(),
                     Some(payload),
                     None,
@@ -274,15 +270,20 @@ impl TransportClient {
                     Self::handle_ack(socket_packet, clone_self);
                 }
                 SocketPacketId::BinaryEvent => {
+                    // in case of a binary event, check if this is the attachement or not and
+                    // then either handle the event or set the open packet
                     if is_finalized_packet {
                         Self::handle_binary_event(socket_packet, clone_self).unwrap();
                     } else {
-                        println!("Setting member");
                         *clone_self.unfinished_packet.write().unwrap() = Some(socket_packet);
                     }
                 }
                 SocketPacketId::BinaryAck => {
-                    // call the callback
+                    if is_finalized_packet {
+                        Self::handle_ack(socket_packet, clone_self);
+                    } else {
+                        *clone_self.unfinished_packet.write().unwrap() = Some(socket_packet);
+                    }
                 }
             }
         }

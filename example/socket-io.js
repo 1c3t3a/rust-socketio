@@ -12,11 +12,19 @@ io.on('connection', client => {
             ack('woot');
         }
     });
+
     client.on('binary', data => {
         var bufView = new Uint8Array(data);
         console.log("Yehaa binary payload!");
         for (elem in bufView) {
             console.log(elem);
+        }
+    });
+
+    client.on('binary', function (arg, ack) {
+        console.log('Ack received, answer with binary')
+        if (ack) {
+            ack(Buffer.from([1, 2, 3]));
         }
     });
     client.emit("test", "Hello Wld");

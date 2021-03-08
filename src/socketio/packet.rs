@@ -62,6 +62,8 @@ impl Packet {
     }
 
     /// Method for encoding from a `Packet` to a `u8` byte stream.
+    /// The binary payload of a packet is not put at the end of the
+    /// stream as it gets handled and send by it's own logic via the socket.
     pub fn encode(&self) -> Bytes {
         // first the packet type
         let mut string = (self.packet_type as u8).to_string();
@@ -113,6 +115,12 @@ impl Packet {
     }
 
     /// Decodes a packet given a `Bytes` type.
+    /// The binary payload of a packet is not put at the end of the
+    /// stream as it gets handled and send by it's own logic via the socket.
+    /// Therefore this method does not return the correct value for the
+    /// binary data, instead the socket is responsible for handling
+    /// this member. This is done because the attachement is usually
+    /// send in another packet.
     pub fn decode_bytes<'a>(payload: &'a Bytes) -> Result<Self> {
         let mut i = 0;
         let packet_id = u8_to_packet_id(*payload.first().ok_or(Error::EmptyPacket)?)?;
@@ -517,11 +525,12 @@ mod test {
             Some(1),
         );
 
-        let mut string_part = "51-[\"hello\",{\"_placeholder\":true,\"num\":0}]"
-            .to_string()
-            .into_bytes();
-        string_part.extend(vec![1, 2, 3]);
-        assert_eq!(packet.encode(), string_part);
+        assert_eq!(
+            packet.encode(),
+            "51-[\"hello\",{\"_placeholder\":true,\"num\":0}]"
+                .to_string()
+                .into_bytes()
+        );
 
         let packet = Packet::new(
             PacketId::BinaryEvent,
@@ -532,11 +541,12 @@ mod test {
             Some(1),
         );
 
-        let mut string_part = "51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]"
-            .to_string()
-            .into_bytes();
-        string_part.extend(vec![1, 2, 3]);
-        assert_eq!(packet.encode(), string_part);
+        assert_eq!(
+            packet.encode(),
+            "51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]"
+                .to_string()
+                .into_bytes()
+        );
 
         let packet = Packet::new(
             PacketId::BinaryAck,
@@ -547,10 +557,11 @@ mod test {
             Some(1),
         );
 
-        let mut string_part = "61-/admin,456[{\"_placeholder\":true,\"num\":0}]"
-            .to_string()
-            .into_bytes();
-        string_part.extend(vec![3, 2, 1]);
-        assert_eq!(packet.encode(), string_part);
+        assert_eq!(
+            packet.encode(),
+            "61-/admin,456[{\"_placeholder\":true,\"num\":0}]"
+                .to_string()
+                .into_bytes()
+        );
     }
 }
