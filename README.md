@@ -9,34 +9,39 @@ An implementation of a socket.io client written in the Rust programming language
 ## Example usage
 
 ``` rust
-use rust_socketio::Socket;
+use rust_socketio::{SocketBuilder, Payload};
 use serde_json::json;
-
-fn main() {
-    // connect to a server on localhost with the /admin namespace and
-    // a foo event handler
-    let mut socket = SocketBuilder::new("http://localhost:80")
-          .set_namespace("/admin")
-          .expect("illegal namespace")
-          .on("test", |str| println!("Received: {}", str))
-          .connect()
-          .expect("Connection failed");
-
-    // emit to the "foo" event
-    let payload = json!({"token": 123});
-    socket.emit("foo", &payload.to_string()).expect("Server unreachable");
-
-    // define a callback, that's executed when the ack got acked
-    let ack_callback = |message: String| {
-            println!("Yehaa! My ack got acked?");
-            println!("Ack data: {}", message);
-    };
-    
-    // emit with an ack
-    let ack = socket
-            .emit_with_ack("test", &payload.to_string(), Duration::from_secs(2), ack_callback)
-            .expect("Server unreachable");
- }
+use std::time::Duration;
+// define a callback which is called when a payload is received
+let callback = |payload: Payload| {
+       match payload {
+           Payload::String(str) => println!("Received: {}", str),
+           Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+       }
+};
+// get a socket that is connected to the admin namespace
+let mut socket = SocketBuilder::new("http://localhost:4200")
+     .set_namespace("/admin")
+     .expect("illegal namespace")
+     .on("test", callback)
+     .on("error", |err| eprintln!("Error: {:#?}", err))
+     .connect()
+     .expect("Connection failed");
+// emit to the "foo" event
+let json_payload = json!({"token": 123});
+let payload = Payload::String(json_payload.to_string());
+socket.emit("foo", payload).expect("Server unreachable");
+// define a callback, that's executed when the ack got acked
+let ack_callback = |message: Payload| {
+    println!("Yehaa! My ack got acked?");
+    println!("Ack data: {:#?}", message);
+};
+let json_payload = json!({"myAckData": 123});
+let payload = Payload::String(json_payload.to_string());
+// emit with an ack
+let ack = socket
+    .emit_with_ack("test", payload, Duration::from_secs(2), ack_callback)
+    .expect("Server unreachable");
 ```
 
 The main entry point for using this crate is the `SocketBuilder` which provides a way to easily configure a socket in the needed way. When the `connect` method is called on the builder, it returns a connected client which then could be used to emit messages to certain events. One client can only be connected to one namespace. If you need to listen to the messages in different namespaces you need to allocate multiple sockets.
@@ -47,19 +52,23 @@ Documentation of this crate can be found up on [docs.rs](https://docs.rs/rust_so
 
 ## Current features
 
-This implementation support most of the features of the socket.io protocol. In general the full engine-io protocol is implemented, and concerning the socket.io part only binary events and binary acks are not yet implemented. This implementation generally tries to make use of websockets as often as possible. This means most times only the opening request uses http and as soon as the server mentions that he is able to use websockets, an upgrade is performed. But if this upgrade is not successful or the server does not mention an upgrade possibilty, http-long polling is used (as specified in the protocol specs).
-
+This implementation now supports all of the features of the socket.io protocol mentioned [here](https://github.com/socketio/socket.io-protocol).
+It generally tries to make use of websockets as often as possible. This means most times
+only the opening request uses http and as soon as the server mentions that he is able to use
+websockets, an upgrade  is performed. But if this upgrade is not successful or the server
+does not mention an upgrade possibility, http-long polling is used (as specified in the protocol specs).
 Here's an overview of possible use-cases:
-
-* connecting to a server.
-* register callbacks for the following event types:
+- connecting to a server.
+- register callbacks for the following event types:
     - open
     - close
     - error
     - message
     - custom events like "foo", "on_payment", etc.
-* send json-data to the server (recommended to use serde_json as it provides safe handling of json data).
-* send json-data to the server and receive an ack with a possible message.
+- send JSON data to the server (via `serde_json` which provides safe
+handling).
+- send JSON data to the server and receive an `ack`.
+- send and handle Binary data.
 
 ## Content of this repository
 
