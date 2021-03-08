@@ -345,7 +345,7 @@ impl TransportClient {
 
         while self.connected.load(Ordering::Relaxed) {
             let data = match &self.transport.as_ref() {
-                // we wont't use the shared client as this blocks the ressource
+                // we wont't use the shared client as this blocks the resource
                 // in the long polling requests
                 TransportType::Polling(_) => {
                     let query_path = self.get_query_path()?;
@@ -361,7 +361,16 @@ impl TransportClient {
                 TransportType::Websocket(receiver, _) => {
                     let mut receiver = receiver.lock()?;
 
-                    receiver.recv_message().unwrap().take_payload()
+                    // if this is a binary payload, we mark it as a message
+                    let received_df = receiver.recv_dataframe()?;
+                    match received_df.opcode {
+                        websocket::dataframe::Opcode::Binary => {
+                            let mut message = vec![b'4'];
+                            message.extend(received_df.take_payload());
+                            message
+                        }
+                        _ => received_df.take_payload(),
+                    }
                 }
             };
 
@@ -379,7 +388,8 @@ impl TransportClient {
                         spawn_scoped!(function(packet.clone()));
                     }
                 }
-                // check for the appropiate action or callback
+
+                // check for the appropriate action or callback
                 match packet.packet_id {
                     PacketId::Message => {
                         let on_data = self.on_data.read()?;

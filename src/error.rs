@@ -1,6 +1,6 @@
 use base64::DecodeError;
-use thiserror::Error;
 use std::{num::ParseIntError, str};
+use thiserror::Error;
 use websocket::{client::ParseError, WebSocketError};
 
 /// Enumeration of all possible errors in the `socket.io` context.
@@ -46,7 +46,6 @@ pub enum Error {
     #[error("Got an IO-Error: {0}")]
     FromIoError(#[from] std::io::Error),
 }
-
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 

@@ -87,6 +87,7 @@ pub mod socketio;
 pub mod error;
 
 use error::Error;
+use socketio::{event::Event, payload::Payload};
 
 use crate::error::Result;
 use std::{sync::Arc, time::Duration};
@@ -168,7 +169,7 @@ impl SocketBuilder {
     /// ```
     pub fn on<F>(mut self, event: &str, callback: F) -> Self
     where
-        F: FnMut(String) + 'static + Sync + Send,
+        F: FnMut(Payload) + 'static + Sync + Send,
     {
         // unwrapping here is safe as this only returns an error
         // when the client is already connected, which is
@@ -220,7 +221,7 @@ impl Socket {
     /// after a call to the `connect` method.
     pub(crate) fn on<F>(&mut self, event: &str, callback: F) -> Result<()>
     where
-        F: FnMut(String) + 'static + Sync + Send,
+        F: FnMut(Payload) + 'static + Sync + Send,
     {
         self.transport.on(event.into(), callback)
     }
@@ -254,7 +255,7 @@ impl Socket {
     /// assert!(result.is_ok());
     /// ```
     #[inline]
-    pub fn emit(&mut self, event: &str, data: &str) -> Result<()> {
+    pub fn emit<E: Into<Event>>(&mut self, event: E, data: Payload) -> Result<()> {
         self.transport.emit(event.into(), data)
     }
 
@@ -293,15 +294,16 @@ impl Socket {
     /// sleep(Duration::from_secs(2));
     /// ```
     #[inline]
-    pub fn emit_with_ack<F>(
+    pub fn emit_with_ack<F, E>(
         &mut self,
-        event: &str,
-        data: &str,
+        event: E,
+        data: Payload,
         timeout: Duration,
         callback: F,
     ) -> Result<()>
     where
-        F: FnMut(String) + 'static + Send + Sync,
+        F: FnMut(Payload) + 'static + Send + Sync,
+        E: Into<Event>,
     {
         self.transport
             .emit_with_ack(event.into(), data, timeout, callback)
@@ -326,48 +328,60 @@ mod test {
     fn it_works() {
         let mut socket = Socket::new(SERVER_URL, None);
 
-        let result = socket.on("test", |msg| println!("{}", msg));
+        let result = socket.on("test", |msg| match msg {
+            Payload::String(str) => println!("Received string: {}", str),
+            Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
+        });
         assert!(result.is_ok());
 
         let result = socket.connect();
         assert!(result.is_ok());
 
         let payload = json!({"token": 123});
-        let result = socket.emit("test", &payload.to_string());
+        let result = socket.emit("test", Payload::String(payload.to_string()));
 
         assert!(result.is_ok());
 
         let mut socket_clone = socket.clone();
-        let ack_callback = move |message: String| {
-            let result = socket_clone.emit("test", &json!({"got ack": true}).to_string());
+        let ack_callback = move |message: Payload| {
+            let result = socket_clone.emit(
+                "test",
+                Payload::String(json!({"got ack": true}).to_string()),
+            );
             assert!(result.is_ok());
 
             println!("Yehaa! My ack got acked?");
-            println!("Ack data: {}", message);
+            match message {
+                Payload::Binary(bin) => {
+                    println!("Received binary Ack");
+                    println!("Data: {:#?}", bin);
+                }
+                Payload::String(str) => {
+                    println!("Received string Ack");
+                    println!("Ack data: {}", str);
+                }
+            }
         };
 
         let ack = socket.emit_with_ack(
             "test",
-            &payload.to_string(),
+            Payload::String(payload.to_string()),
             Duration::from_secs(2),
             ack_callback,
         );
         assert!(ack.is_ok());
 
-        sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(5));
     }
 
     #[test]
     fn test_builder() {
-        let socket_builder = SocketBuilder::new(SERVER_URL).set_namespace("/admin");
-
-        assert!(socket_builder.is_ok());
+        let socket_builder = SocketBuilder::new(SERVER_URL);
 
         let socket = socket_builder
-            .unwrap()
-            .on("error", |err| eprintln!("Error!!: {}", err))
-            .on("test", |str| println!("Received: {}", str))
-            .on("message", |msg| println!("Received: {}", msg))
+            .on("error", |err| eprintln!("Error!!: {:#?}", err))
+            .on("test", |str| println!("Received: {:#?}", str))
+            .on("message", |msg| println!("Received: {:#?}", msg))
             .connect();
 
         assert!(socket.is_ok());

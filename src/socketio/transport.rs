@@ -16,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::event::Event;
+use super::{event::Event, payload::Payload};
 
 /// The type of a callback function.
 pub(crate) type Callback<I> = RwLock<Box<dyn FnMut(I) + 'static + Sync + Send>>;
@@ -29,7 +29,7 @@ pub struct Ack {
     pub id: i32,
     timeout: Duration,
     time_started: Instant,
-    callback: Callback<String>,
+    callback: Callback<Payload>,
 }
 
 /// Handles communication in the `socket.io` protocol.
@@ -39,8 +39,11 @@ pub struct TransportClient {
     host: Arc<String>,
     connected: Arc<AtomicBool>,
     engineio_connected: Arc<AtomicBool>,
-    on: Arc<Vec<(Event, Callback<String>)>>,
+    on: Arc<Vec<(Event, Callback<Payload>)>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
+    // used to detect unfinished binary events as, as the attachements
+    // gets send in a seperate packet
+    unfinished_packet: Arc<RwLock<Option<SocketPacket>>>,
     // namespace, for multiplexing messages
     pub(crate) nsp: Arc<Option<String>>,
 }
@@ -55,6 +58,7 @@ impl TransportClient {
             engineio_connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
+            unfinished_packet: Arc::new(RwLock::new(None)),
             nsp: Arc::new(nsp),
         }
     }
@@ -62,7 +66,7 @@ impl TransportClient {
     /// Registers a new event with some callback function `F`.
     pub fn on<F>(&mut self, event: Event, callback: F) -> Result<()>
     where
-        F: FnMut(String) + 'static + Sync + Send,
+        F: FnMut(Payload) + 'static + Sync + Send,
     {
         Arc::get_mut(&mut self.on)
             .unwrap()
@@ -83,7 +87,7 @@ impl TransportClient {
         // construct the opening packet
         let open_packet = SocketPacket::new(
             SocketPacketId::Connect,
-            &self.nsp.as_ref().as_ref().unwrap_or(&default),
+            self.nsp.as_ref().as_ref().unwrap_or(&default).to_owned(),
             None,
             None,
             None,
@@ -107,24 +111,58 @@ impl TransportClient {
 
     /// Emits to certain event with given data. The data needs to be JSON,
     /// otherwise this returns an `InvalidJson` error.
-    pub fn emit(&self, event: Event, data: &str) -> Result<()> {
-        if serde_json::from_str::<serde_json::Value>(data).is_err() {
-            return Err(Error::InvalidJson(data.to_owned()));
-        }
-
-        let payload = format!("[\"{}\",{}]", String::from(event), data);
-
+    pub fn emit(&self, event: Event, data: Payload) -> Result<()> {
         let default = String::from("/");
-        let socket_packet = SocketPacket::new(
-            SocketPacketId::Event,
-            &self.nsp.as_ref().as_ref().unwrap_or(&default),
-            Some(payload),
-            None,
-            None,
-            None,
-        );
+        let nsp = self.nsp.as_ref().as_ref().unwrap_or(&default);
+        let socket_packet = self.build_packet_for_payload(data, event, nsp, None)?;
 
         self.send(&socket_packet)
+    }
+
+    /// Returns a packet for a payload, could be used for bot binary and non binary
+    /// events and acks.
+    #[inline]
+    fn build_packet_for_payload<'a>(
+        &'a self,
+        payload: Payload,
+        event: Event,
+        nsp: &'a str,
+        id: Option<i32>,
+    ) -> Result<SocketPacket> {
+        match payload {
+            Payload::Binary(bin_data) => Ok(SocketPacket::new(
+                if id.is_some() {
+                    SocketPacketId::BinaryAck
+                } else {
+                    SocketPacketId::BinaryEvent
+                },
+                nsp.to_owned(),
+                Some(serde_json::Value::String(event.into()).to_string()),
+                Some(bin_data),
+                id,
+                Some(1),
+            )),
+            Payload::String(str_data) => {
+                if serde_json::from_str::<serde_json::Value>(&str_data).is_err() {
+                    return Err(Error::InvalidJson(str_data));
+                }
+
+                let payload = format!("[\"{}\",{}]", String::from(event), str_data);
+
+                Ok(SocketPacket::new(
+                    if id.is_some() {
+                        SocketPacketId::Ack
+                    } else {
+                        SocketPacketId::Event
+                    },
+                    nsp.to_owned(),
+                    Some(payload),
+                    None,
+                    id,
+                    None,
+                ))
+            }
+        }
     }
 
     /// Emits and requests an `ack`. The `ack` returns a `Arc<RwLock<Ack>>` to
@@ -133,29 +171,17 @@ impl TransportClient {
     pub fn emit_with_ack<F>(
         &mut self,
         event: Event,
-        data: &str,
+        data: Payload,
         timeout: Duration,
         callback: F,
     ) -> Result<()>
     where
-        F: FnMut(String) + 'static + Send + Sync,
+        F: FnMut(Payload) + 'static + Send + Sync,
     {
-        if serde_json::from_str::<serde_json::Value>(data).is_err() {
-            return Err(Error::InvalidJson(data.into()));
-        }
-
-        let payload = format!("[\"{}\",{}]", String::from(event), data);
         let id = thread_rng().gen_range(0..999);
-
         let default = String::from("/");
-        let socket_packet = SocketPacket::new(
-            SocketPacketId::Event,
-            &self.nsp.as_ref().as_ref().unwrap_or(&default),
-            Some(payload),
-            None,
-            Some(id),
-            None,
-        );
+        let nsp = self.nsp.as_ref().as_ref().unwrap_or(&default);
+        let socket_packet = self.build_packet_for_payload(data, event, nsp, Some(id))?;
 
         let ack = Ack {
             id,
@@ -176,13 +202,28 @@ impl TransportClient {
     /// engineio client.
     #[inline]
     fn handle_new_message(socket_bytes: &[u8], clone_self: &TransportClient) {
-        // TODO: Refactor the copy as soon as engine.io uses the Bytes type as well
-        if let Ok(socket_packet) = SocketPacket::decode_bytes(&Bytes::copy_from_slice(socket_bytes))
-        {
+        let mut is_finalized_packet = false;
+        // either this is a complete packet or the rest of a binary packet (as attachements are
+        // sent in a seperate packet).
+        let decoded_packet = if clone_self.unfinished_packet.read().unwrap().is_some() {
+            // this must be an attachement, so parse it
+            let mut unfinished_packet = clone_self.unfinished_packet.write().unwrap();
+            let mut finalized_packet = unfinished_packet.take().unwrap();
+            finalized_packet.binary_data = Some(socket_bytes.to_vec());
+
+            is_finalized_packet = true;
+            Ok(finalized_packet)
+        } else {
+            // this is a normal packet, so decode it
+            SocketPacket::decode_bytes(&Bytes::copy_from_slice(socket_bytes))
+        };
+
+        if let Ok(socket_packet) = decoded_packet {
             let default = String::from("/");
-            if socket_packet.nsp != clone_self.nsp.as_ref().as_ref().unwrap_or(&default) {
+            if socket_packet.nsp != *clone_self.nsp.as_ref().as_ref().unwrap_or(&default) {
                 return;
             }
+
             match socket_packet.packet_type {
                 SocketPacketId::Connect => {
                     clone_self.connected.swap(true, Ordering::Relaxed);
@@ -191,12 +232,12 @@ impl TransportClient {
                     clone_self.connected.swap(false, Ordering::Relaxed);
                     if let Some(function) = clone_self.get_event_callback(&Event::Error) {
                         let mut lock = function.1.write().unwrap();
-                        lock(
+                        lock(Payload::String(
                             String::from("Received an ConnectError frame")
                                 + &socket_packet.data.unwrap_or_else(|| {
                                     String::from("\"No error message provided\"")
                                 }),
-                        );
+                        ));
                         drop(lock)
                     }
                 }
@@ -210,7 +251,12 @@ impl TransportClient {
                     Self::handle_ack(socket_packet, clone_self);
                 }
                 SocketPacketId::BinaryEvent => {
-                    // call the callback
+                    if is_finalized_packet {
+                        Self::handle_binary_event(socket_packet, clone_self).unwrap();
+                    } else {
+                        println!("Setting member");
+                        *clone_self.unfinished_packet.write().unwrap() = Some(socket_packet);
+                    }
                 }
                 SocketPacketId::BinaryAck => {
                     // call the callback
@@ -239,7 +285,14 @@ impl TransportClient {
                         if let Some(payload) = socket_packet.clone().data {
                             spawn_scoped!({
                                 let mut function = ack.callback.write().unwrap();
-                                function(payload);
+                                function(Payload::String(payload));
+                                drop(function);
+                            });
+                        }
+                        if let Some(payload) = socket_packet.clone().binary_data {
+                            spawn_scoped!({
+                                let mut function = ack.callback.write().unwrap();
+                                function(Payload::Binary(payload));
                                 drop(function);
                             });
                         }
@@ -259,7 +312,7 @@ impl TransportClient {
         let error_callback = move |msg| {
             if let Some(function) = clone_self.get_event_callback(&Event::Error) {
                 let mut lock = function.1.write().unwrap();
-                lock(msg);
+                lock(Payload::String(msg));
                 drop(lock)
             }
         };
@@ -269,7 +322,7 @@ impl TransportClient {
             clone_self.engineio_connected.swap(true, Ordering::Relaxed);
             if let Some(function) = clone_self.get_event_callback(&Event::Connect) {
                 let mut lock = function.1.write().unwrap();
-                lock(String::from("Connection is opened"));
+                lock(Payload::String(String::from("Connection is opened")));
                 drop(lock)
             }
         };
@@ -279,7 +332,7 @@ impl TransportClient {
             clone_self.engineio_connected.swap(false, Ordering::Relaxed);
             if let Some(function) = clone_self.get_event_callback(&Event::Close) {
                 let mut lock = function.1.write().unwrap();
-                lock(String::from("Connection is closed"));
+                lock(Payload::String(String::from("Connection is closed")));
                 drop(lock)
             }
         };
@@ -294,6 +347,28 @@ impl TransportClient {
         self.engine_socket
             .lock()?
             .on_data(move |data| Self::handle_new_message(&data, &clone_self))
+    }
+
+    fn handle_binary_event(
+        socket_packet: SocketPacket,
+        clone_self: &TransportClient,
+    ) -> Result<()> {
+        let event = if let Some(string_data) = socket_packet.data {
+            string_data.replace("\"", "").into()
+        } else {
+            Event::Message
+        };
+
+        if let Some(binary_payload) = socket_packet.binary_data {
+            if let Some(function) = clone_self.get_event_callback(&event) {
+                spawn_scoped!({
+                    let mut lock = function.1.write().unwrap();
+                    lock(Payload::Binary(binary_payload));
+                    drop(lock);
+                });
+            }
+        }
+        Ok(())
     }
 
     /// A method for handling the Event Socket Packets.
@@ -313,7 +388,7 @@ impl TransportClient {
                                 if let Some(function) = clone_self.get_event_callback(&Event::Custom(event.to_owned())) {
                                     spawn_scoped!({
                                         let mut lock = function.1.write().unwrap();
-                                        lock(contents[1].to_string());
+                                        lock(Payload::String(contents[1].to_string()));
                                         drop(lock);
                                     });
                                 }
@@ -321,7 +396,7 @@ impl TransportClient {
                         } else if let Some(function) = clone_self.get_event_callback(&Event::Message) {
                             spawn_scoped!({
                                 let mut lock = function.1.write().unwrap();
-                                lock(contents[0].to_string());
+                                lock(Payload::String(contents[0].to_string()));
                                 drop(lock);
                             });
                         }
@@ -334,7 +409,7 @@ impl TransportClient {
 
     /// A convenient method for finding a callback for a certain event.
     #[inline]
-    fn get_event_callback(&self, event: &Event) -> Option<&(Event, Callback<String>)> {
+    fn get_event_callback(&self, event: &Event) -> Option<&(Event, Callback<Payload>)> {
         self.on.iter().find(|item| item.0 == *event)
     }
 }
@@ -375,19 +450,35 @@ mod test {
 
         assert!(socket
             .on("test".into(), |s| {
-                println!("{}", s);
+                if let Payload::String(st) = s {
+                    println!("{}", st)
+                }
             })
             .is_ok());
 
         assert!(socket.connect().is_ok());
 
-        let ack_callback = |message: String| {
+        let ack_callback = |message: Payload| {
             println!("Yehaa! My ack got acked?");
-            println!("Ack data: {}", message);
+            match message {
+                Payload::String(str) => {
+                    println!("Received string ack");
+                    println!("Ack data: {}", str);
+                }
+                Payload::Binary(bin) => {
+                    println!("Received binary ack");
+                    println!("Ack data: {:#?}", bin);
+                }
+            }
         };
 
         assert!(socket
-            .emit_with_ack("test".into(), "123", Duration::from_secs(10), ack_callback)
+            .emit_with_ack(
+                "test".into(),
+                Payload::String("123".to_owned()),
+                Duration::from_secs(10),
+                ack_callback
+            )
             .is_ok());
     }
 }
