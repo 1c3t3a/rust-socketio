@@ -2,16 +2,19 @@
 //! ## Example usage
 //!
 //! ``` rust
-//! use rust_socketio::{SocketBuilder, Payload};
+//! use rust_socketio::{SocketBuilder, Payload, Socket};
 //! use serde_json::json;
 //! use std::time::Duration;
 //!
 //! // define a callback which is called when a payload is received
-//! let callback = |payload: Payload| {
+//! // this callback gets the payload as well as an instance of the
+//! // socket to communicate with the server
+//! let callback = |payload: Payload, mut socket: Socket| {
 //!        match payload {
 //!            Payload::String(str) => println!("Received: {}", str),
 //!            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
 //!        }
+//!        socket.emit("test", json!({"got ack": true})).expect("Server unreachable")
 //! };
 //!
 //! // get a socket that is connected to the admin namespace
@@ -19,7 +22,7 @@
 //!      .set_namespace("/admin")
 //!      .expect("illegal namespace")
 //!      .on("test", callback)
-//!      .on("error", |err| eprintln!("Error: {:#?}", err))
+//!      .on("error", |err, _| eprintln!("Error: {:#?}", err))
 //!      .connect()
 //!      .expect("Connection failed");
 //!
@@ -29,7 +32,7 @@
 //! socket.emit("foo", json_payload).expect("Server unreachable");
 //!
 //! // define a callback, that's executed when the ack got acked
-//! let ack_callback = |message: Payload| {
+//! let ack_callback = |message: Payload, _| {
 //!     println!("Yehaa! My ack got acked?");
 //!     println!("Ack data: {:#?}", message);
 //! };
@@ -133,7 +136,7 @@ impl SocketBuilder {
     /// use serde_json::json;
     ///
     ///
-    /// let callback = |payload: Payload| {
+    /// let callback = |payload: Payload, _| {
     ///            match payload {
     ///                Payload::String(str) => println!("Received: {}", str),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -178,7 +181,7 @@ impl SocketBuilder {
     /// ```rust
     /// use rust_socketio::{SocketBuilder, Payload};
     ///
-    /// let callback = |payload: Payload| {
+    /// let callback = |payload: Payload, _| {
     ///            match payload {
     ///                Payload::String(str) => println!("Received: {}", str),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -189,13 +192,13 @@ impl SocketBuilder {
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("test", callback)
-    ///     .on("error", |err| eprintln!("Error: {:#?}", err))
+    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
     ///     .connect();
     ///
     /// ```
     pub fn on<F>(mut self, event: &str, callback: F) -> Self
     where
-        F: FnMut(Payload) + 'static + Sync + Send,
+        F: FnMut(Payload, Socket) + 'static + Sync + Send,
     {
         // unwrapping here is safe as this only returns an error
         // when the client is already connected, which is
@@ -216,7 +219,7 @@ impl SocketBuilder {
     /// let mut socket = SocketBuilder::new("http://localhost:4200")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
-    ///     .on("error", |err| println!("Socket error!: {:#?}", err))
+    ///     .on("error", |err, _| eprintln!("Socket error!: {:#?}", err))
     ///     .connect()
     ///     .expect("connection failed");
     ///
@@ -249,7 +252,7 @@ impl Socket {
     /// after a call to the `connect` method.
     pub(crate) fn on<F>(&mut self, event: &str, callback: F) -> Result<()>
     where
-        F: FnMut(Payload) + 'static + Sync + Send,
+        F: FnMut(Payload, Socket) + 'static + Sync + Send,
     {
         self.transport.on(event.into(), callback)
     }
@@ -273,7 +276,10 @@ impl Socket {
     /// use serde_json::json;
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200")
-    ///     .on("test", |payload: Payload| println!("Received: {:#?}", payload))
+    ///     .on("test", |payload: Payload, mut socket| {
+    ///         println!("Received: {:#?}", payload);
+    ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
+    ///      })
     ///     .connect()
     ///     .expect("connection failed");
     ///
@@ -311,13 +317,13 @@ impl Socket {
     /// use std::thread::sleep;
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200")
-    ///     .on("foo", |payload: Payload| println!("Received: {:#?}", payload))
+    ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
     ///     .connect()
     ///     .expect("connection failed");
     ///
     ///
     ///
-    /// let ack_callback = |message: Payload| {
+    /// let ack_callback = |message: Payload, _| {
     ///     match message {
     ///         Payload::String(str) => println!("{}", str),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
@@ -338,7 +344,7 @@ impl Socket {
         callback: F,
     ) -> Result<()>
     where
-        F: FnMut(Payload) + 'static + Send + Sync,
+        F: FnMut(Payload, Socket) + 'static + Send + Sync,
         E: Into<Event>,
         D: Into<Payload>,
     {
@@ -365,7 +371,7 @@ mod test {
     fn it_works() {
         let mut socket = Socket::new(SERVER_URL, None);
 
-        let result = socket.on("test", |msg| match msg {
+        let result = socket.on("test", |msg, _| match msg {
             Payload::String(str) => println!("Received string: {}", str),
             Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
         });
@@ -379,9 +385,8 @@ mod test {
 
         assert!(result.is_ok());
 
-        let mut socket_clone = socket.clone();
-        let ack_callback = move |message: Payload| {
-            let result = socket_clone.emit(
+        let ack_callback = move |message: Payload, mut socket_: Socket| {
+            let result = socket_.emit(
                 "test",
                 Payload::String(json!({"got ack": true}).to_string()),
             );
@@ -408,7 +413,7 @@ mod test {
         );
         assert!(ack.is_ok());
 
-        sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(4));
     }
 
     #[test]
@@ -416,9 +421,9 @@ mod test {
         let socket_builder = SocketBuilder::new(SERVER_URL);
 
         let socket = socket_builder
-            .on("error", |err| eprintln!("Error!!: {:#?}", err))
-            .on("test", |str| println!("Received: {:#?}", str))
-            .on("message", |msg| println!("Received: {:#?}", msg))
+            .on("error", |err, _| eprintln!("Error!!: {:#?}", err))
+            .on("test", |str, _| println!("Received: {:#?}", str))
+            .on("message", |msg, _| println!("Received: {:#?}", msg))
             .connect();
 
         assert!(socket.is_ok());
@@ -428,7 +433,7 @@ mod test {
 
         assert!(socket.emit("binary", vec![46, 88]).is_ok());
 
-        let ack_cb = |payload| {
+        let ack_cb = |payload, _| {
             println!("Yehaa the ack got acked");
             println!("With data: {:#?}", payload);
         };

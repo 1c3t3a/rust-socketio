@@ -1,9 +1,12 @@
-use crate::engineio::{
-    packet::{Packet as EnginePacket, PacketId as EnginePacketId},
-    socket::EngineSocket,
-};
 use crate::error::{Error, Result};
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
+use crate::{
+    engineio::{
+        packet::{Packet as EnginePacket, PacketId as EnginePacketId},
+        socket::EngineSocket,
+    },
+    Socket,
+};
 use bytes::Bytes;
 use if_chain::if_chain;
 use rand::{thread_rng, Rng};
@@ -19,8 +22,9 @@ use std::{
 use super::{event::Event, payload::Payload};
 
 /// The type of a callback function.
-pub(crate) type Callback<I> = RwLock<Box<dyn FnMut(I) + 'static + Sync + Send>>;
+pub(crate) type Callback<I> = RwLock<Box<dyn FnMut(I, Socket) + 'static + Sync + Send>>;
 
+pub(crate) type EventCallback = (Event, Callback<Payload>);
 /// Represents an `Ack` as given back to the caller. Holds the internal `id` as
 /// well as the current ack'ed state. Holds data which will be accessible as
 /// soon as the ack'ed state is set to true. An `Ack` that didn't get ack'ed
@@ -39,7 +43,7 @@ pub struct TransportClient {
     host: Arc<String>,
     connected: Arc<AtomicBool>,
     engineio_connected: Arc<AtomicBool>,
-    on: Arc<Vec<(Event, Callback<Payload>)>>,
+    on: Arc<Vec<EventCallback>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
     // used to detect unfinished binary events as, as the attachements
     // gets send in a seperate packet
@@ -66,7 +70,7 @@ impl TransportClient {
     /// Registers a new event with some callback function `F`.
     pub fn on<F>(&mut self, event: Event, callback: F) -> Result<()>
     where
-        F: FnMut(Payload) + 'static + Sync + Send,
+        F: FnMut(Payload, Socket) + 'static + Sync + Send,
     {
         Arc::get_mut(&mut self.on)
             .unwrap()
@@ -199,7 +203,7 @@ impl TransportClient {
         callback: F,
     ) -> Result<()>
     where
-        F: FnMut(Payload) + 'static + Send + Sync,
+        F: FnMut(Payload, Socket) + 'static + Send + Sync,
     {
         let id = thread_rng().gen_range(0..999);
         let default = String::from("/");
@@ -254,14 +258,22 @@ impl TransportClient {
                 SocketPacketId::ConnectError => {
                     clone_self.connected.swap(false, Ordering::Relaxed);
                     if let Some(function) = clone_self.get_event_callback(&Event::Error) {
-                        let mut lock = function.1.write().unwrap();
-                        lock(Payload::String(
-                            String::from("Received an ConnectError frame")
-                                + &socket_packet.data.unwrap_or_else(|| {
-                                    String::from("\"No error message provided\"")
-                                }),
-                        ));
-                        drop(lock)
+                        spawn_scoped!({
+                            let mut lock = function.1.write().unwrap();
+                            let socket = Socket {
+                                transport: clone_self.clone(),
+                            };
+                            lock(
+                                Payload::String(
+                                    String::from("Received an ConnectError frame")
+                                        + &socket_packet.data.unwrap_or_else(|| {
+                                            String::from("\"No error message provided\"")
+                                        }),
+                                ),
+                                socket,
+                            );
+                            drop(lock);
+                        });
                     }
                 }
                 SocketPacketId::Disconnect => {
@@ -313,14 +325,20 @@ impl TransportClient {
                         if let Some(payload) = socket_packet.clone().data {
                             spawn_scoped!({
                                 let mut function = ack.callback.write().unwrap();
-                                function(Payload::String(payload));
+                                let socket = Socket {
+                                    transport: clone_self.clone(),
+                                };
+                                function(Payload::String(payload), socket);
                                 drop(function);
                             });
                         }
                         if let Some(payload) = socket_packet.clone().binary_data {
                             spawn_scoped!({
                                 let mut function = ack.callback.write().unwrap();
-                                function(Payload::Binary(payload));
+                                let socket = Socket {
+                                    transport: clone_self.clone(),
+                                };
+                                function(Payload::Binary(payload), socket);
                                 drop(function);
                             });
                         }
@@ -340,7 +358,10 @@ impl TransportClient {
         let error_callback = move |msg| {
             if let Some(function) = clone_self.get_event_callback(&Event::Error) {
                 let mut lock = function.1.write().unwrap();
-                lock(Payload::String(msg));
+                let socket = Socket {
+                    transport: clone_self.clone(),
+                };
+                lock(Payload::String(msg), socket);
                 drop(lock)
             }
         };
@@ -350,7 +371,13 @@ impl TransportClient {
             clone_self.engineio_connected.swap(true, Ordering::Relaxed);
             if let Some(function) = clone_self.get_event_callback(&Event::Connect) {
                 let mut lock = function.1.write().unwrap();
-                lock(Payload::String(String::from("Connection is opened")));
+                let socket = Socket {
+                    transport: clone_self.clone(),
+                };
+                lock(
+                    Payload::String(String::from("Connection is opened")),
+                    socket,
+                );
                 drop(lock)
             }
         };
@@ -360,7 +387,13 @@ impl TransportClient {
             clone_self.engineio_connected.swap(false, Ordering::Relaxed);
             if let Some(function) = clone_self.get_event_callback(&Event::Close) {
                 let mut lock = function.1.write().unwrap();
-                lock(Payload::String(String::from("Connection is closed")));
+                let socket = Socket {
+                    transport: clone_self.clone(),
+                };
+                lock(
+                    Payload::String(String::from("Connection is closed")),
+                    socket,
+                );
                 drop(lock)
             }
         };
@@ -393,7 +426,10 @@ impl TransportClient {
             if let Some(function) = clone_self.get_event_callback(&event) {
                 spawn_scoped!({
                     let mut lock = function.1.write().unwrap();
-                    lock(Payload::Binary(binary_payload));
+                    let socket = Socket {
+                        transport: clone_self.clone(),
+                    };
+                    lock(Payload::Binary(binary_payload), socket);
                     drop(lock);
                 });
             }
@@ -418,7 +454,10 @@ impl TransportClient {
                                 if let Some(function) = clone_self.get_event_callback(&Event::Custom(event.to_owned())) {
                                     spawn_scoped!({
                                         let mut lock = function.1.write().unwrap();
-                                        lock(Payload::String(contents[1].to_string()));
+                                        let socket = Socket {
+                                            transport: clone_self.clone(),
+                                        };
+                                        lock(Payload::String(contents[1].to_string()), socket);
                                         drop(lock);
                                     });
                                 }
@@ -426,7 +465,10 @@ impl TransportClient {
                         } else if let Some(function) = clone_self.get_event_callback(&Event::Message) {
                             spawn_scoped!({
                                 let mut lock = function.1.write().unwrap();
-                                lock(Payload::String(contents[0].to_string()));
+                                let socket = Socket {
+                                    transport: clone_self.clone(),
+                                };
+                                lock(Payload::String(contents[0].to_string()), socket);
                                 drop(lock);
                             });
                         }
@@ -479,8 +521,8 @@ mod test {
         let mut socket = TransportClient::new(SERVER_URL, None);
 
         assert!(socket
-            .on("test".into(), |s| {
-                if let Payload::String(st) = s {
+            .on("test".into(), |message, _| {
+                if let Payload::String(st) = message {
                     println!("{}", st)
                 }
             })
@@ -488,7 +530,7 @@ mod test {
 
         assert!(socket.connect().is_ok());
 
-        let ack_callback = |message: Payload| {
+        let ack_callback = |message: Payload, _| {
             println!("Yehaa! My ack got acked?");
             match message {
                 Payload::String(str) => {
