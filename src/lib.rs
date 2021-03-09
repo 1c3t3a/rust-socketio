@@ -25,9 +25,8 @@
 //!
 //! // emit to the "foo" event
 //! let json_payload = json!({"token": 123});
-//! let payload = Payload::String(json_payload.to_string());
 //!
-//! socket.emit("foo", payload).expect("Server unreachable");
+//! socket.emit("foo", json_payload).expect("Server unreachable");
 //!
 //! // define a callback, that's executed when the ack got acked
 //! let ack_callback = |message: Payload| {
@@ -36,11 +35,10 @@
 //! };
 //!
 //! let json_payload = json!({"myAckData": 123});
-//! let payload = Payload::String(json_payload.to_string());
 //!
 //! // emit with an ack
 //! let ack = socket
-//!     .emit_with_ack("test", payload, Duration::from_secs(2), ack_callback)
+//!     .emit_with_ack("test", json_payload, Duration::from_secs(2), ack_callback)
 //!     .expect("Server unreachable");
 //! ```
 //!
@@ -151,9 +149,8 @@ impl SocketBuilder {
     ///
     /// // use the socket
     /// let json_payload = json!({"token": 123});
-    /// let payload = Payload::String(json_payload.to_string());
     ///
-    /// let result = socket.emit("foo", payload);
+    /// let result = socket.emit("foo", json_payload);
     ///
     /// assert!(result.is_ok());
     /// ```
@@ -225,9 +222,8 @@ impl SocketBuilder {
     ///
     /// // use the socket
     /// let json_payload = json!({"token": 123});
-    /// let payload = Payload::String(json_payload.to_string());
     ///
-    /// let result = socket.emit("foo", payload);
+    /// let result = socket.emit("foo", json_payload);
     ///
     /// assert!(result.is_ok());
     /// ```
@@ -282,15 +278,18 @@ impl Socket {
     ///     .expect("connection failed");
     ///
     /// let json_payload = json!({"token": 123});
-    /// let socket_payload = Payload::String(json_payload.to_string());
     ///
-    /// let result = socket.emit("foo", socket_payload);
+    /// let result = socket.emit("foo", json_payload);
     ///
     /// assert!(result.is_ok());
     /// ```
     #[inline]
-    pub fn emit<E: Into<Event>>(&mut self, event: E, data: Payload) -> Result<()> {
-        self.transport.emit(event.into(), data)
+    pub fn emit<E, D>(&mut self, event: E, data: D) -> Result<()>
+    where
+        E: Into<Event>,
+        D: Into<Payload>,
+    {
+        self.transport.emit(event.into(), data.into())
     }
 
     /// Sends a message to the server but `alloc`s an `ack` to check whether the
@@ -317,8 +316,6 @@ impl Socket {
     ///     .expect("connection failed");
     ///
     ///
-    /// let json_payload = json!({"token": 123});
-    /// let payload = Payload::String(json_payload.to_string());
     ///
     /// let ack_callback = |message: Payload| {
     ///     match message {
@@ -327,24 +324,26 @@ impl Socket {
     ///    }    
     /// };
     ///
+    /// let payload = json!({"token": 123});
     /// socket.emit_with_ack("foo", payload, Duration::from_secs(2), ack_callback).unwrap();
     ///
     /// sleep(Duration::from_secs(2));
     /// ```
     #[inline]
-    pub fn emit_with_ack<F, E>(
+    pub fn emit_with_ack<F, E, D>(
         &mut self,
         event: E,
-        data: Payload,
+        data: D,
         timeout: Duration,
         callback: F,
     ) -> Result<()>
     where
         F: FnMut(Payload) + 'static + Send + Sync,
         E: Into<Event>,
+        D: Into<Payload>,
     {
         self.transport
-            .emit_with_ack(event.into(), data, timeout, callback)
+            .emit_with_ack(event.into(), data.into(), timeout, callback)
     }
 
     /// Sets the namespace attribute on a client (used by the builder class)
@@ -425,11 +424,9 @@ mod test {
         assert!(socket.is_ok());
 
         let mut socket = socket.unwrap();
-        assert!(socket
-            .emit("message", Payload::String(json!("Hello World").to_string()))
-            .is_ok());
+        assert!(socket.emit("message", json!("Hello World")).is_ok());
 
-        assert!(socket.emit("binary", Payload::Binary(vec![46, 88])).is_ok());
+        assert!(socket.emit("binary", vec![46, 88]).is_ok());
 
         let ack_cb = |payload| {
             println!("Yehaa the ack got acked");
@@ -437,12 +434,7 @@ mod test {
         };
 
         assert!(socket
-            .emit_with_ack(
-                "binary",
-                Payload::String(json!("pls ack").to_string()),
-                Duration::from_secs(1),
-                ack_cb,
-            )
+            .emit_with_ack("binary", json!("pls ack"), Duration::from_secs(1), ack_cb,)
             .is_ok());
 
         sleep(Duration::from_secs(2));
