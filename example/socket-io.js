@@ -11,8 +11,24 @@ io.on('connection', client => {
         if (ack) {
             ack('woot');
         }
-      });
+    });
+
+    client.on('binary', data => {
+        var bufView = new Uint8Array(data);
+        console.log("Yehaa binary payload!");
+        for (elem in bufView) {
+            console.log(elem);
+        }
+    });
+
+    client.on('binary', function (arg, ack) {
+        console.log('Ack received, answer with binary')
+        if (ack) {
+            ack(Buffer.from([1, 2, 3]));
+        }
+    });
     client.emit("test", "Hello Wld");
+    client.emit("test", Buffer.from([1, 2, 3]));
 });
 // the socket.io client runs on port 4201
 server.listen(4200);

@@ -1,5 +1,6 @@
 /target
 Cargo.lock
 .vscode
+.idea
 example/node_modules
 example/package-lock.json

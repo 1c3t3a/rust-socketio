@@ -1,37 +1,48 @@
-//! Rust socket.io is a socket.io client written in the Rust Programming Language.
+//! Rust-socket.io is a socket.io client written in the Rust Programming Language.
 //! ## Example usage
 //!
 //! ``` rust
-//! use rust_socketio::SocketBuilder;
+//! use rust_socketio::{SocketBuilder, Payload};
 //! use serde_json::json;
 //! use std::time::Duration;
+//!
+//! // define a callback which is called when a payload is received
+//! let callback = |payload: Payload| {
+//!        match payload {
+//!            Payload::String(str) => println!("Received: {}", str),
+//!            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+//!        }
+//! };
 //!
 //! // get a socket that is connected to the admin namespace
 //! let mut socket = SocketBuilder::new("http://localhost:4200")
 //!      .set_namespace("/admin")
 //!      .expect("illegal namespace")
-//!      .on("test", |str| println!("Received: {}", str))
-//!      .on("error", |err| eprintln!("Error: {}", err))
+//!      .on("test", callback)
+//!      .on("error", |err| eprintln!("Error: {:#?}", err))
 //!      .connect()
 //!      .expect("Connection failed");
 //!
 //! // emit to the "foo" event
-//! let payload = json!({"token": 123});
-//! socket.emit("foo", &payload.to_string()).expect("Server unreachable");
+//! let json_payload = json!({"token": 123});
+//!
+//! socket.emit("foo", json_payload).expect("Server unreachable");
 //!
 //! // define a callback, that's executed when the ack got acked
-//! let ack_callback = |message: String| {
+//! let ack_callback = |message: Payload| {
 //!     println!("Yehaa! My ack got acked?");
-//!     println!("Ack data: {}", message);
+//!     println!("Ack data: {:#?}", message);
 //! };
+//!
+//! let json_payload = json!({"myAckData": 123});
 //!
 //! // emit with an ack
 //! let ack = socket
-//!     .emit_with_ack("test", &payload.to_string(), Duration::from_secs(2), ack_callback)
+//!     .emit_with_ack("test", json_payload, Duration::from_secs(2), ack_callback)
 //!     .expect("Server unreachable");
 //! ```
 //!
-//! The main entry point for using this crate is the `SocketBuilder` which provides
+//! The main entry point for using this crate is the [`SocketBuilder`] which provides
 //! a way to easily configure a socket in the needed way. When the `connect` method
 //! is called on the builder, it returns a connected client which then could be used
 //! to emit messages to certain events. One client can only be connected to one namespace.
@@ -40,13 +51,12 @@
 //!
 //! ## Current features
 //!
-//! This implementation support most of the features of the socket.io protocol. In general
-//! the full engine-io protocol is implemented, and concerning the socket.io part only binary
-//! events and binary acks are not yet implemented. This implementation generally tries to
-//! make use of websockets as often as possible. This means most times only the opening request
-//! uses http and as soon as the server mentions that he is able to use websockets, an upgrade
-//! is performed. But if this upgrade is not successful or the server does not mention an upgrade
-//! possibilty, http-long polling is used (as specified in the protocol specs).
+//! This implementation now supports all of the features of the socket.io protocol mentioned
+//! [here](https://github.com/socketio/socket.io-protocol).
+//! It generally tries to make use of websockets as often as possible. This means most times
+//! only the opening request uses http and as soon as the server mentions that he is able to use
+//! websockets, an upgrade  is performed. But if this upgrade is not successful or the server
+//! does not mention an upgrade possibility, http-long polling is used (as specified in the protocol specs).
 //!
 //! Here's an overview of possible use-cases:
 //!
@@ -60,6 +70,7 @@
 //! - send JSON data to the server (via `serde_json` which provides safe
 //! handling).
 //! - send JSON data to the server and receive an `ack`.
+//! - send and handle Binary data.
 //!
 #![allow(clippy::rc_buffer)]
 #![warn(clippy::complexity)]
@@ -87,6 +98,7 @@ pub mod socketio;
 pub mod error;
 
 use error::Error;
+pub use socketio::{event::Event, payload::Payload};
 
 use crate::error::Result;
 use std::{sync::Arc, time::Duration};
@@ -117,19 +129,28 @@ impl SocketBuilder {
     /// will be used.
     /// # Example
     /// ```rust
-    /// use rust_socketio::SocketBuilder;
+    /// use rust_socketio::{SocketBuilder, Payload};
     /// use serde_json::json;
+    ///
+    ///
+    /// let callback = |payload: Payload| {
+    ///            match payload {
+    ///                Payload::String(str) => println!("Received: {}", str),
+    ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///            }
+    /// };
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
-    ///     .on("test", |str| println!("Received: {}", str))
+    ///     .on("test", callback)
     ///     .connect()
     ///     .expect("error while connecting");
     ///
     /// // use the socket
-    /// let payload = json!({"token": 123});
-    /// let result = socket.emit("foo", &payload.to_string());
+    /// let json_payload = json!({"token": 123});
+    ///
+    /// let result = socket.emit("foo", json_payload);
     ///
     /// assert!(result.is_ok());
     /// ```
@@ -155,20 +176,26 @@ impl SocketBuilder {
     /// event defined by a string, e.g. `onPayment` or `foo`.
     /// # Example
     /// ```rust
-    /// use rust_socketio::SocketBuilder;
+    /// use rust_socketio::{SocketBuilder, Payload};
+    ///
+    /// let callback = |payload: Payload| {
+    ///            match payload {
+    ///                Payload::String(str) => println!("Received: {}", str),
+    ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///            }
+    /// };
     ///
     /// let socket = SocketBuilder::new("http://localhost:4200")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
-    ///     .on("test", |str| println!("Received: {}", str))
-    ///     .on("error", |err| eprintln!("Error: {}", err))
+    ///     .on("test", callback)
+    ///     .on("error", |err| eprintln!("Error: {:#?}", err))
     ///     .connect();
-    ///
     ///
     /// ```
     pub fn on<F>(mut self, event: &str, callback: F) -> Self
     where
-        F: FnMut(String) + 'static + Sync + Send,
+        F: FnMut(Payload) + 'static + Sync + Send,
     {
         // unwrapping here is safe as this only returns an error
         // when the client is already connected, which is
@@ -182,19 +209,21 @@ impl SocketBuilder {
     /// value if something goes wrong during connection.
     /// # Example
     /// ```rust
-    /// use rust_socketio::SocketBuilder;
+    /// use rust_socketio::{SocketBuilder, Payload};
     /// use serde_json::json;
+    ///
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
-    ///     .on("test", |str| println!("Received: {}", str))
+    ///     .on("error", |err| println!("Socket error!: {:#?}", err))
     ///     .connect()
     ///     .expect("connection failed");
     ///
     /// // use the socket
-    /// let payload = json!({"token": 123});
-    /// let result = socket.emit("foo", &payload.to_string());
+    /// let json_payload = json!({"token": 123});
+    ///
+    /// let result = socket.emit("foo", json_payload);
     ///
     /// assert!(result.is_ok());
     /// ```
@@ -220,7 +249,7 @@ impl Socket {
     /// after a call to the `connect` method.
     pub(crate) fn on<F>(&mut self, event: &str, callback: F) -> Result<()>
     where
-        F: FnMut(String) + 'static + Sync + Send,
+        F: FnMut(Payload) + 'static + Sync + Send,
     {
         self.transport.on(event.into(), callback)
     }
@@ -240,71 +269,81 @@ impl Socket {
     ///
     /// # Example
     /// ```
-    /// use rust_socketio::SocketBuilder;
+    /// use rust_socketio::{SocketBuilder, Payload};
     /// use serde_json::json;
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200")
-    ///     .on("test", |str| println!("Received: {}", str))
+    ///     .on("test", |payload: Payload| println!("Received: {:#?}", payload))
     ///     .connect()
     ///     .expect("connection failed");
     ///
-    /// let payload = json!({"token": 123});
-    /// let result = socket.emit("foo", &payload.to_string());
+    /// let json_payload = json!({"token": 123});
+    ///
+    /// let result = socket.emit("foo", json_payload);
     ///
     /// assert!(result.is_ok());
     /// ```
     #[inline]
-    pub fn emit(&mut self, event: &str, data: &str) -> Result<()> {
-        self.transport.emit(event.into(), data)
+    pub fn emit<E, D>(&mut self, event: E, data: D) -> Result<()>
+    where
+        E: Into<Event>,
+        D: Into<Payload>,
+    {
+        self.transport.emit(event.into(), data.into())
     }
 
     /// Sends a message to the server but `alloc`s an `ack` to check whether the
     /// server responded in a given timespan. This message takes an event, which
     /// could either be one of the common events like "message" or "error" or a
     /// custom event like "foo", as well as a data parameter. But be careful,
-    /// the string needs to be valid JSON. It's even recommended to use a
-    /// library like serde_json to serialize the data properly. It also requires
-    /// a timeout `Duration` in which the client needs to answer. This method
-    /// returns an `Arc<RwLock<Ack>>`. The `Ack` type holds information about
-    /// the `ack` system call, such whether the `ack` got acked fast enough and
-    /// potential data. It is safe to unwrap the data after the `ack` got acked
-    /// from the server. This uses an `RwLock` to reach shared mutability, which
-    /// is needed as the server sets the data on the ack later.
+    /// in case you send a [`Payload::String`], the string needs to be valid JSON.
+    /// It's even recommended to use a library like serde_json to serialize the data properly.
+    /// It also requires a timeout `Duration` in which the client needs to answer.
+    /// If the ack is accked in the correct timespan, the specified callback is
+    /// called. The callback consumes a [`Payload`] which represents the data send
+    /// by the server.
     ///
     /// # Example
     /// ```
-    /// use rust_socketio::SocketBuilder;
+    /// use rust_socketio::{SocketBuilder, Payload};
     /// use serde_json::json;
     /// use std::time::Duration;
     /// use std::thread::sleep;
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200")
-    ///     .on("foo", |str| println!("Received: {}", str))
+    ///     .on("foo", |payload: Payload| println!("Received: {:#?}", payload))
     ///     .connect()
     ///     .expect("connection failed");
     ///
     ///
-    /// let payload = json!({"token": 123});
-    /// let ack_callback = |message| { println!("{}", message) };
     ///
-    /// socket.emit_with_ack("foo", &payload.to_string(),
-    /// Duration::from_secs(2), ack_callback).unwrap();
+    /// let ack_callback = |message: Payload| {
+    ///     match message {
+    ///         Payload::String(str) => println!("{}", str),
+    ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
+    ///    }    
+    /// };
+    ///
+    /// let payload = json!({"token": 123});
+    /// socket.emit_with_ack("foo", payload, Duration::from_secs(2), ack_callback).unwrap();
     ///
     /// sleep(Duration::from_secs(2));
     /// ```
     #[inline]
-    pub fn emit_with_ack<F>(
+    pub fn emit_with_ack<F, E, D>(
         &mut self,
-        event: &str,
-        data: &str,
+        event: E,
+        data: D,
         timeout: Duration,
         callback: F,
     ) -> Result<()>
     where
-        F: FnMut(String) + 'static + Send + Sync,
+        F: FnMut(Payload) + 'static + Send + Sync,
+        E: Into<Event>,
+        D: Into<Payload>,
     {
         self.transport
-            .emit_with_ack(event.into(), data, timeout, callback)
+            .emit_with_ack(event.into(), data.into(), timeout, callback)
     }
 
     /// Sets the namespace attribute on a client (used by the builder class)
@@ -326,29 +365,44 @@ mod test {
     fn it_works() {
         let mut socket = Socket::new(SERVER_URL, None);
 
-        let result = socket.on("test", |msg| println!("{}", msg));
+        let result = socket.on("test", |msg| match msg {
+            Payload::String(str) => println!("Received string: {}", str),
+            Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
+        });
         assert!(result.is_ok());
 
         let result = socket.connect();
         assert!(result.is_ok());
 
         let payload = json!({"token": 123});
-        let result = socket.emit("test", &payload.to_string());
+        let result = socket.emit("test", Payload::String(payload.to_string()));
 
         assert!(result.is_ok());
 
         let mut socket_clone = socket.clone();
-        let ack_callback = move |message: String| {
-            let result = socket_clone.emit("test", &json!({"got ack": true}).to_string());
+        let ack_callback = move |message: Payload| {
+            let result = socket_clone.emit(
+                "test",
+                Payload::String(json!({"got ack": true}).to_string()),
+            );
             assert!(result.is_ok());
 
             println!("Yehaa! My ack got acked?");
-            println!("Ack data: {}", message);
+            match message {
+                Payload::Binary(bin) => {
+                    println!("Received binary Ack");
+                    println!("Data: {:#?}", bin);
+                }
+                Payload::String(str) => {
+                    println!("Received string Ack");
+                    println!("Ack data: {}", str);
+                }
+            }
         };
 
         let ack = socket.emit_with_ack(
             "test",
-            &payload.to_string(),
+            Payload::String(payload.to_string()),
             Duration::from_secs(2),
             ack_callback,
         );
@@ -359,17 +413,30 @@ mod test {
 
     #[test]
     fn test_builder() {
-        let socket_builder = SocketBuilder::new(SERVER_URL).set_namespace("/admin");
-
-        assert!(socket_builder.is_ok());
+        let socket_builder = SocketBuilder::new(SERVER_URL);
 
         let socket = socket_builder
-            .unwrap()
-            .on("error", |err| eprintln!("Error!!: {}", err))
-            .on("test", |str| println!("Received: {}", str))
-            .on("message", |msg| println!("Received: {}", msg))
+            .on("error", |err| eprintln!("Error!!: {:#?}", err))
+            .on("test", |str| println!("Received: {:#?}", str))
+            .on("message", |msg| println!("Received: {:#?}", msg))
             .connect();
 
         assert!(socket.is_ok());
+
+        let mut socket = socket.unwrap();
+        assert!(socket.emit("message", json!("Hello World")).is_ok());
+
+        assert!(socket.emit("binary", vec![46, 88]).is_ok());
+
+        let ack_cb = |payload| {
+            println!("Yehaa the ack got acked");
+            println!("With data: {:#?}", payload);
+        };
+
+        assert!(socket
+            .emit_with_ack("binary", json!("pls ack"), Duration::from_secs(1), ack_cb,)
+            .is_ok());
+
+        sleep(Duration::from_secs(2));
     }
 }

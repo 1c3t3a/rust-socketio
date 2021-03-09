@@ -17,9 +17,9 @@ pub enum PacketId {
 
 /// A packet which gets sent or received during in the `socket.io` protocol.
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Packet<'a> {
+pub struct Packet {
     pub packet_type: PacketId,
-    pub nsp: &'a str,
+    pub nsp: String,
     pub data: Option<String>,
     pub binary_data: Option<Vec<u8>>,
     pub id: Option<i32>,
@@ -41,11 +41,11 @@ pub const fn u8_to_packet_id(b: u8) -> Result<PacketId> {
     }
 }
 
-impl<'a> Packet<'a> {
+impl Packet {
     /// Creates an instance.
     pub const fn new(
         packet_type: PacketId,
-        nsp: &'a str,
+        nsp: String,
         data: Option<String>,
         binary_data: Option<Vec<u8>>,
         id: Option<i32>,
@@ -62,6 +62,8 @@ impl<'a> Packet<'a> {
     }
 
     /// Method for encoding from a `Packet` to a `u8` byte stream.
+    /// The binary payload of a packet is not put at the end of the
+    /// stream as it gets handled and send by it's own logic via the socket.
     pub fn encode(&self) -> Bytes {
         // first the packet type
         let mut string = (self.packet_type as u8).to_string();
@@ -88,7 +90,7 @@ impl<'a> Packet<'a> {
         }
 
         let mut buffer = string.into_bytes();
-        if let Some(bin_data) = self.binary_data.as_ref() {
+        if self.binary_data.as_ref().is_some() {
             // check if an event type is present
             let placeholder = if let Some(event_type) = self.data.as_ref() {
                 format!(
@@ -105,7 +107,6 @@ impl<'a> Packet<'a> {
 
             // build the buffers
             buffer.extend(placeholder.into_bytes());
-            buffer.extend(bin_data);
         } else if let Some(data) = self.data.as_ref() {
             buffer.extend(data.to_string().into_bytes());
         }
@@ -114,7 +115,13 @@ impl<'a> Packet<'a> {
     }
 
     /// Decodes a packet given a `Bytes` type.
-    pub fn decode_bytes(payload: &'a Bytes) -> Result<Self> {
+    /// The binary payload of a packet is not put at the end of the
+    /// stream as it gets handled and send by it's own logic via the socket.
+    /// Therefore this method does not return the correct value for the
+    /// binary data, instead the socket is responsible for handling
+    /// this member. This is done because the attachement is usually
+    /// send in another packet.
+    pub fn decode_bytes<'a>(payload: &'a Bytes) -> Result<Self> {
         let mut i = 0;
         let packet_id = u8_to_packet_id(*payload.first().ok_or(Error::EmptyPacket)?)?;
 
@@ -173,7 +180,6 @@ impl<'a> Packet<'a> {
             None
         };
 
-        let mut binary_data = None;
         let data = if payload.get(i + 1).is_some() {
             let start = if id.is_some() { i } else { i + 1 };
 
@@ -209,15 +215,6 @@ impl<'a> Packet<'a> {
 
             match packet_id {
                 PacketId::BinaryAck | PacketId::BinaryEvent => {
-                    binary_data = Some(
-                        payload
-                            .iter()
-                            .skip(end)
-                            .take(payload.len() - end)
-                            .copied()
-                            .collect(),
-                    );
-
                     let re_close = Regex::new(r",]$|]$").unwrap();
                     let mut str = json_data
                         .to_string()
@@ -242,9 +239,9 @@ impl<'a> Packet<'a> {
 
         Ok(Packet::new(
             packet_id,
-            nsp,
+            nsp.to_owned(),
             data,
-            binary_data,
+            None,
             id,
             attachements,
         ))
@@ -266,7 +263,7 @@ mod test {
         assert_eq!(
             Packet::new(
                 PacketId::Connect,
-                "/",
+                "/".to_owned(),
                 Some(String::from("{\"token\":\"123\"}")),
                 None,
                 None,
@@ -282,7 +279,7 @@ mod test {
         assert_eq!(
             Packet::new(
                 PacketId::Connect,
-                "/admin",
+                "/admin".to_owned(),
                 Some(String::from("{\"token\":\"123\"}")),
                 None,
                 None,
@@ -296,7 +293,14 @@ mod test {
         assert!(packet.is_ok());
 
         assert_eq!(
-            Packet::new(PacketId::Disconnect, "/admin", None, None, None, None,),
+            Packet::new(
+                PacketId::Disconnect,
+                "/admin".to_owned(),
+                None,
+                None,
+                None,
+                None,
+            ),
             packet.unwrap()
         );
 
@@ -307,7 +311,7 @@ mod test {
         assert_eq!(
             Packet::new(
                 PacketId::Event,
-                "/",
+                "/".to_owned(),
                 Some(String::from("[\"hello\",1]")),
                 None,
                 None,
@@ -323,7 +327,7 @@ mod test {
         assert_eq!(
             Packet::new(
                 PacketId::Event,
-                "/admin",
+                "/admin".to_owned(),
                 Some(String::from("[\"project:delete\",123]")),
                 None,
                 Some(456),
@@ -339,7 +343,7 @@ mod test {
         assert_eq!(
             Packet::new(
                 PacketId::Ack,
-                "/admin",
+                "/admin".to_owned(),
                 Some(String::from("[]")),
                 None,
                 Some(456),
@@ -355,7 +359,7 @@ mod test {
         assert_eq!(
             Packet::new(
                 PacketId::ConnectError,
-                "/admin",
+                "/admin".to_owned(),
                 Some(String::from("{\"message\":\"Not authorized\"}")),
                 None,
                 None,
@@ -364,17 +368,16 @@ mod test {
             packet.unwrap()
         );
 
-        let payload =
-            Bytes::from_static(b"51-[\"hello\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03");
+        let payload = Bytes::from_static(b"51-[\"hello\",{\"_placeholder\":true,\"num\":0}]");
         let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
             Packet::new(
                 PacketId::BinaryEvent,
-                "/",
+                "/".to_owned(),
                 Some(String::from("\"hello\"")),
-                Some(vec![1, 2, 3]),
+                None,
                 None,
                 Some(1),
             ),
@@ -382,7 +385,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(
-            b"51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]\x01\x02\x03",
+            b"51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]",
         );
         let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
@@ -390,26 +393,25 @@ mod test {
         assert_eq!(
             Packet::new(
                 PacketId::BinaryEvent,
-                "/admin",
+                "/admin".to_owned(),
                 Some(String::from("\"project:delete\"")),
-                Some(vec![1, 2, 3]),
+                None,
                 Some(456),
                 Some(1),
             ),
             packet.unwrap()
         );
 
-        let payload =
-            Bytes::from_static(b"61-/admin,456[{\"_placeholder\":true,\"num\":0}]\x03\x02\x01");
+        let payload = Bytes::from_static(b"61-/admin,456[{\"_placeholder\":true,\"num\":0}]");
         let packet = Packet::decode_bytes(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
             Packet::new(
                 PacketId::BinaryAck,
-                "/admin",
+                "/admin".to_owned(),
                 None,
-                Some(vec![3, 2, 1]),
+                None,
                 Some(456),
                 Some(1),
             ),
@@ -423,7 +425,7 @@ mod test {
     fn test_encode() {
         let packet = Packet::new(
             PacketId::Connect,
-            "/",
+            "/".to_owned(),
             Some(String::from("{\"token\":\"123\"}")),
             None,
             None,
@@ -437,7 +439,7 @@ mod test {
 
         let packet = Packet::new(
             PacketId::Connect,
-            "/admin",
+            "/admin".to_owned(),
             Some(String::from("{\"token\":\"123\"}")),
             None,
             None,
@@ -449,13 +451,20 @@ mod test {
             "0/admin,{\"token\":\"123\"}".to_string().into_bytes()
         );
 
-        let packet = Packet::new(PacketId::Disconnect, "/admin", None, None, None, None);
+        let packet = Packet::new(
+            PacketId::Disconnect,
+            "/admin".to_owned(),
+            None,
+            None,
+            None,
+            None,
+        );
 
         assert_eq!(packet.encode(), "1/admin,".to_string().into_bytes());
 
         let packet = Packet::new(
             PacketId::Event,
-            "/",
+            "/".to_owned(),
             Some(String::from("[\"hello\",1]")),
             None,
             None,
@@ -466,7 +475,7 @@ mod test {
 
         let packet = Packet::new(
             PacketId::Event,
-            "/admin",
+            "/admin".to_owned(),
             Some(String::from("[\"project:delete\",123]")),
             None,
             Some(456),
@@ -482,7 +491,7 @@ mod test {
 
         let packet = Packet::new(
             PacketId::Ack,
-            "/admin",
+            "/admin".to_owned(),
             Some(String::from("[]")),
             None,
             Some(456),
@@ -493,7 +502,7 @@ mod test {
 
         let packet = Packet::new(
             PacketId::ConnectError,
-            "/admin",
+            "/admin".to_owned(),
             Some(String::from("{\"message\":\"Not authorized\"}")),
             None,
             None,
@@ -509,47 +518,50 @@ mod test {
 
         let packet = Packet::new(
             PacketId::BinaryEvent,
-            "/",
+            "/".to_owned(),
             Some(String::from("\"hello\"")),
             Some(vec![1, 2, 3]),
             None,
             Some(1),
         );
 
-        let mut string_part = "51-[\"hello\",{\"_placeholder\":true,\"num\":0}]"
-            .to_string()
-            .into_bytes();
-        string_part.extend(vec![1, 2, 3]);
-        assert_eq!(packet.encode(), string_part);
+        assert_eq!(
+            packet.encode(),
+            "51-[\"hello\",{\"_placeholder\":true,\"num\":0}]"
+                .to_string()
+                .into_bytes()
+        );
 
         let packet = Packet::new(
             PacketId::BinaryEvent,
-            "/admin",
+            "/admin".to_owned(),
             Some(String::from("\"project:delete\"")),
             Some(vec![1, 2, 3]),
             Some(456),
             Some(1),
         );
 
-        let mut string_part = "51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]"
-            .to_string()
-            .into_bytes();
-        string_part.extend(vec![1, 2, 3]);
-        assert_eq!(packet.encode(), string_part);
+        assert_eq!(
+            packet.encode(),
+            "51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]"
+                .to_string()
+                .into_bytes()
+        );
 
         let packet = Packet::new(
             PacketId::BinaryAck,
-            "/admin",
+            "/admin".to_owned(),
             None,
             Some(vec![3, 2, 1]),
             Some(456),
             Some(1),
         );
 
-        let mut string_part = "61-/admin,456[{\"_placeholder\":true,\"num\":0}]"
-            .to_string()
-            .into_bytes();
-        string_part.extend(vec![3, 2, 1]);
-        assert_eq!(packet.encode(), string_part);
+        assert_eq!(
+            packet.encode(),
+            "61-/admin,456[{\"_placeholder\":true,\"num\":0}]"
+                .to_string()
+                .into_bytes()
+        );
     }
 }
