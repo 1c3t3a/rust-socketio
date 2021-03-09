@@ -1,3 +1,5 @@
+use bytes::Bytes;
+
 /// A type which represents a `payload` in the `socket.io` context.
 /// A payload could either be of the type `Payload::Binary`, which holds
 /// a [`std::vec::Vec<u8>`] that represents the payload or of the type
@@ -36,5 +38,11 @@ impl From<Vec<u8>> for Payload {
 impl From<&[u8]> for Payload {
     fn from(val: &[u8]) -> Self {
         Self::Binary(val.to_owned())
+    }
+}
+
+impl From<Bytes> for Payload {
+    fn from(bytes: Bytes) -> Self {
+        Self::Binary(bytes.to_vec())
     }
 }
