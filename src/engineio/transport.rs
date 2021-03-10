@@ -1,6 +1,7 @@
 use crate::engineio::packet::{decode_payload, encode_payload, Packet, PacketId};
 use crate::error::{Error, Result};
 use adler32::adler32;
+use bytes::Bytes;
 use reqwest::{blocking::Client, Url};
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
@@ -245,7 +246,7 @@ impl TransportClient {
             sender.send_dataframe(&WsDataFrame::new(
                 true,
                 websocket::dataframe::Opcode::Text,
-                encode_payload(vec![probe_packet]),
+                encode_payload(vec![probe_packet]).to_vec(),
             ))?;
 
             // expect to receive a probe packet
@@ -260,7 +261,7 @@ impl TransportClient {
             sender.send_dataframe(&WsDataFrame::new(
                 true,
                 websocket::dataframe::Opcode::Text,
-                encode_payload(vec![upgrade_packet]),
+                encode_payload(vec![upgrade_packet]).to_vec(),
             ))?;
 
             // upgrade the transport layer
@@ -305,7 +306,7 @@ impl TransportClient {
                     prefix.extend(base64::encode(data).as_bytes());
                     prefix
                 } else {
-                    data
+                    data.to_vec()
                 };
 
                 let client = client.lock()?;
@@ -334,7 +335,7 @@ impl TransportClient {
                 } else {
                     websocket::dataframe::Opcode::Text
                 };
-                let dataframe = WsDataFrame::new(true, opcode, data);
+                let dataframe = WsDataFrame::new(true, opcode, data.to_vec());
                 writer.send_dataframe(&dataframe).unwrap();
 
                 Ok(())
@@ -404,7 +405,7 @@ impl TransportClient {
                 return Ok(());
             }
 
-            let packets = decode_payload(data)?;
+            let packets = decode_payload(Bytes::from(data))?;
 
             for packet in packets {
                 {
@@ -420,7 +421,7 @@ impl TransportClient {
                     PacketId::Message => {
                         let on_data = self.on_data.read()?;
                         if let Some(function) = on_data.as_ref() {
-                            spawn_scoped!(function(packet.data));
+                            spawn_scoped!(function(packet.data.to_vec()));
                         }
                         drop(on_data);
                     }
