@@ -381,7 +381,7 @@ impl TransportClient {
                     let address =
                         Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
                     drop(host);
-                    
+
                     client.get(address).send()?.bytes()?
                 }
                 TransportType::Websocket(receiver, _) => {

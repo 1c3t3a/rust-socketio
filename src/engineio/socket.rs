@@ -1,10 +1,10 @@
 #![allow(unused)]
 use std::thread;
 
-use bytes::Bytes;
 use super::packet::{Packet, PacketId};
 use crate::engineio::transport::TransportClient;
 use crate::error::{Error, Result};
+use bytes::Bytes;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, RwLock,
@@ -186,9 +186,13 @@ mod test {
             ))
             .is_ok());
 
-        assert!(socket.emit(Packet::new(PacketId::Pong, Bytes::new())).is_ok());
+        assert!(socket
+            .emit(Packet::new(PacketId::Pong, Bytes::new()))
+            .is_ok());
 
-        assert!(socket.emit(Packet::new(PacketId::Ping, Bytes::new())).is_ok());
+        assert!(socket
+            .emit(Packet::new(PacketId::Ping, Bytes::new()))
+            .is_ok());
 
         sleep(Duration::from_secs(26));
 
