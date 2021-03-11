@@ -9,16 +9,19 @@ An implementation of a socket.io client written in the Rust programming language
 ## Example usage
 
 ``` rust
-use rust_socketio::{SocketBuilder, Payload};
+use rust_socketio::{SocketBuilder, Payload, Socket};
 use serde_json::json;
 use std::time::Duration;
 
 // define a callback which is called when a payload is received
-let callback = |payload: Payload| {
+// this callback gets the payload as well as an instance of the
+// socket to communicate with the server
+let callback = |payload: Payload, mut socket: Socket| {
        match payload {
            Payload::String(str) => println!("Received: {}", str),
            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
        }
+       socket.emit("test", json!({"got ack": true})).expect("Server unreachable")
 };
 
 // get a socket that is connected to the admin namespace
@@ -26,28 +29,26 @@ let mut socket = SocketBuilder::new("http://localhost:4200")
      .set_namespace("/admin")
      .expect("illegal namespace")
      .on("test", callback)
-     .on("error", |err| eprintln!("Error: {:#?}", err))
+     .on("error", |err, _| eprintln!("Error: {:#?}", err))
      .connect()
      .expect("Connection failed");
 
 // emit to the "foo" event
 let json_payload = json!({"token": 123});
-let payload = Payload::String(json_payload.to_string());
-socket.emit("foo", payload).expect("Server unreachable");
+socket.emit("foo", json_payload).expect("Server unreachable");
 
 // define a callback, that's executed when the ack got acked
-let ack_callback = |message: Payload| {
+let ack_callback = |message: Payload, _| {
     println!("Yehaa! My ack got acked?");
     println!("Ack data: {:#?}", message);
 };
 
 let json_payload = json!({"myAckData": 123});
-let payload = Payload::String(json_payload.to_string());
-
 // emit with an ack
 let ack = socket
-    .emit_with_ack("test", payload, Duration::from_secs(2), ack_callback)
+    .emit_with_ack("test", json_payload, Duration::from_secs(2), ack_callback)
     .expect("Server unreachable");
+
 ```
 
 The main entry point for using this crate is the `SocketBuilder` which provides a way to easily configure a socket in the needed way. When the `connect` method is called on the builder, it returns a connected client which then could be used to emit messages to certain events. One client can only be connected to one namespace. If you need to listen to the messages in different namespaces you need to allocate multiple sockets.
