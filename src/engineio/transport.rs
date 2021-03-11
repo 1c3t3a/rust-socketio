@@ -184,7 +184,7 @@ impl TransportClient {
                         *self.last_ping.lock()? = Instant::now();
 
                         // emit a pong packet to keep trigger the ping cycle on the server
-                        self.emit(Packet::new(PacketId::Pong, Vec::new()), false)?;
+                        self.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
 
                         return Ok(());
                     }
@@ -242,7 +242,7 @@ impl TransportClient {
             let (mut receiver, mut sender) = client.split()?;
 
             // send the probe packet
-            let probe_packet = Packet::new(PacketId::Ping, b"probe".to_vec());
+            let probe_packet = Packet::new(PacketId::Ping, Bytes::from_static(b"probe"));
             sender.send_dataframe(&WsDataFrame::new(
                 true,
                 websocket::dataframe::Opcode::Text,
@@ -256,7 +256,7 @@ impl TransportClient {
                 return Err(Error::HandshakeError("Error".to_owned()));
             }
 
-            let upgrade_packet = Packet::new(PacketId::Upgrade, Vec::new());
+            let upgrade_packet = Packet::new(PacketId::Upgrade, Bytes::new());
             // finally send the upgrade request
             sender.send_dataframe(&WsDataFrame::new(
                 true,
@@ -381,23 +381,24 @@ impl TransportClient {
                     let address =
                         Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
                     drop(host);
-
-                    // TODO: check if to_vec is inefficient here
-                    client.get(address).send()?.bytes()?.to_vec()
+                    
+                    client.get(address).send()?.bytes()?
                 }
                 TransportType::Websocket(receiver, _) => {
                     let mut receiver = receiver.lock()?;
 
                     // if this is a binary payload, we mark it as a message
                     let received_df = receiver.recv_dataframe()?;
-                    match received_df.opcode {
+                    let received_data = match received_df.opcode {
                         websocket::dataframe::Opcode::Binary => {
                             let mut message = vec![b'4'];
                             message.extend(received_df.take_payload());
                             message
                         }
                         _ => received_df.take_payload(),
-                    }
+                    };
+
+                    Bytes::from(received_data)
                 }
             };
 
@@ -405,7 +406,7 @@ impl TransportClient {
                 return Ok(());
             }
 
-            let packets = decode_payload(Bytes::from(data))?;
+            let packets = decode_payload(data)?;
 
             for packet in packets {
                 {
@@ -440,11 +441,11 @@ impl TransportClient {
                         unreachable!("Won't happen as we open the connection beforehand");
                     }
                     PacketId::Upgrade => {
-                        todo!("Upgrade the connection, but only if possible");
+                        // this is already checked during the handshake, so just do nothing here
                     }
                     PacketId::Ping => {
                         last_ping = Instant::now();
-                        self.emit(Packet::new(PacketId::Pong, Vec::new()), false)?;
+                        self.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
                     }
                     PacketId::Pong => {
                         // this will never happen as the pong packet is
@@ -586,7 +587,7 @@ mod test {
 
         assert!(socket
             .emit(
-                Packet::new(PacketId::Message, "HelloWorld".to_owned().into_bytes()),
+                Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
                 false,
             )
             .is_ok());
@@ -601,7 +602,7 @@ mod test {
         // closes the connection
         assert!(socket
             .emit(
-                Packet::new(PacketId::Message, "CLOSE".to_owned().into_bytes()),
+                Packet::new(PacketId::Message, Bytes::from_static(b"CLOSE")),
                 false,
             )
             .is_ok());

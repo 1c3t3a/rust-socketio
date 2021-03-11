@@ -43,16 +43,13 @@ const fn u8_to_packet_id(b: u8) -> Result<PacketId> {
 
 impl Packet {
     /// Creates a new `Packet`.
-    pub fn new(packet_id: PacketId, data: Vec<u8>) -> Self {
-        let bytes = Bytes::from(data);
+    pub fn new(packet_id: PacketId, data: Bytes) -> Self {
+        let bytes = data;
         Packet {
             packet_id,
             data: bytes,
         }
     }
-
-    // TODO: replace the Vec<u8> by a u8 array as this might be
-    // inefficient
 
     /// Decodes a single `Packet` from an `u8` byte stream.
     fn decode_packet(bytes: Bytes) -> Result<Self> {
@@ -159,7 +156,7 @@ mod tests {
 
     #[test]
     fn test_is_reflexive() {
-        let data = Bytes::from("1Hello World");
+        let data = Bytes::from_static(b"1Hello World");
         let packet = Packet::decode_packet(data).unwrap();
 
         assert_eq!(packet.packet_id, PacketId::Close);
@@ -172,7 +169,7 @@ mod tests {
     #[test]
     fn test_binary_packet() {
         // SGVsbG8= is the encoded string for 'Hello'
-        let data = Bytes::from("bSGVsbG8=");
+        let data = Bytes::from_static(b"bSGVsbG8=");
         let packet = Packet::decode_packet(data).unwrap();
 
         assert_eq!(packet.packet_id, PacketId::Message);
@@ -184,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_decode_payload() {
-        let data = Bytes::from("1Hello\x1e1HelloWorld");
+        let data = Bytes::from_static(b"1Hello\x1e1HelloWorld");
         let packets = decode_payload(data).unwrap();
 
         assert_eq!(packets[0].packet_id, PacketId::Close);
@@ -198,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_binary_payload() {
-        let data = Bytes::from("bSGVsbG8=\x1ebSGVsbG9Xb3JsZA==\x1ebSGVsbG8=");
+        let data = Bytes::from_static(b"bSGVsbG8=\x1ebSGVsbG9Xb3JsZA==\x1ebSGVsbG8=");
         let packets = decode_payload(data).unwrap();
 
         assert!(packets.len() == 3);
