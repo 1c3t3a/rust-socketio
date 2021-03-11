@@ -104,7 +104,7 @@ impl TransportClient {
         }
 
         // the packet, encoded as an engine.io message packet
-        let engine_packet = EnginePacket::new(EnginePacketId::Message, packet.encode().to_vec());
+        let engine_packet = EnginePacket::new(EnginePacketId::Message, packet.encode());
 
         self.engine_socket.lock()?.emit(engine_packet)
     }
@@ -113,7 +113,7 @@ impl TransportClient {
     /// should only be called if a `BinaryEvent` or `BinaryAck` was
     /// send to the server mentioning this attachement in it's
     /// `attachements` field.
-    fn send_binary_attachement(&self, attachement: Vec<u8>) -> Result<()> {
+    fn send_binary_attachement(&self, attachement: Bytes) -> Result<()> {
         if !self.engineio_connected.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
         }
@@ -142,7 +142,8 @@ impl TransportClient {
             self.send(&socket_packet)?;
 
             // then send the attachement
-            self.send_binary_attachement(binary_payload.to_owned())
+            // TODO: Change this whem Payload takes `Bytes` as well
+            self.send_binary_attachement(Bytes::copy_from_slice(binary_payload))
         }
     }
 

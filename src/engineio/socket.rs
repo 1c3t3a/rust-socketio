@@ -4,6 +4,7 @@ use std::thread;
 use super::packet::{Packet, PacketId};
 use crate::engineio::transport::TransportClient;
 use crate::error::{Error, Result};
+use bytes::Bytes;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, RwLock,
@@ -60,7 +61,7 @@ impl EngineSocket {
     }
 
     /// Sends a socketio binary attachement to the server.
-    pub fn emit_binary_attachement(&mut self, attachement: Vec<u8>) -> Result<()> {
+    pub fn emit_binary_attachement(&mut self, attachement: Bytes) -> Result<()> {
         if !self.serving.load(Ordering::Relaxed) {
             return Err(Error::ActionBeforeOpen);
         }
@@ -174,27 +175,31 @@ mod test {
         assert!(socket
             .emit(Packet::new(
                 PacketId::Message,
-                "Hello World".to_string().into_bytes(),
+                Bytes::from_static(b"Hello World"),
             ))
             .is_ok());
 
         assert!(socket
             .emit(Packet::new(
                 PacketId::Message,
-                "Hello World2".to_string().into_bytes(),
+                Bytes::from_static(b"Hello World2"),
             ))
             .is_ok());
 
-        assert!(socket.emit(Packet::new(PacketId::Pong, Vec::new())).is_ok());
+        assert!(socket
+            .emit(Packet::new(PacketId::Pong, Bytes::new()))
+            .is_ok());
 
-        assert!(socket.emit(Packet::new(PacketId::Ping, Vec::new())).is_ok());
+        assert!(socket
+            .emit(Packet::new(PacketId::Ping, Bytes::new()))
+            .is_ok());
 
         sleep(Duration::from_secs(26));
 
         assert!(socket
             .emit(Packet::new(
                 PacketId::Message,
-                "Hello World3".to_string().into_bytes(),
+                Bytes::from_static(b"Hello World3"),
             ))
             .is_ok());
     }

@@ -4,7 +4,7 @@ build:
 	@cargo build --verbose
 
 test-fast:
-	@cargo test --verbose --package rust_socketio --lib -- socketio::packet::test engineio::packet::test
+	@cargo test --verbose --package rust_socketio --lib -- engineio::packet && cargo test --verbose --package rust_socketio --lib -- socketio::packet
 
 test-all:
 	@cargo test --verbose 

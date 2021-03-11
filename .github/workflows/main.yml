@@ -18,7 +18,7 @@ jobs:
       - name: Build
         run: cargo build --verbose
       - name: Run tests
-        run: cargo test --verbose --package rust_socketio --lib -- socketio::packet::test socketio::engineio::packet
+        run: cargo test --verbose --package rust_socketio --lib -- engineio::packet && cargo test --verbose --package rust_socketio --lib -- socketio::packet
       - name: Linting
         run: cargo clippy --verbose
       - name: Check formatting
