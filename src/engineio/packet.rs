@@ -120,9 +120,13 @@ pub fn decode_payload(payload: Bytes) -> Result<Vec<Packet>> {
     for i in 0..payload.len() {
         if *payload.get(i).unwrap() as char == SEPERATOR {
             vec.push(Packet::decode_packet(payload.slice(last_index..i))?);
-            last_index = i;
+            last_index = i + 1;
         }
     }
+    // push the last packet as well
+    vec.push(Packet::decode_packet(
+        payload.slice(last_index..payload.len()),
+    )?);
 
     Ok(vec)
 }
@@ -139,7 +143,7 @@ pub fn encode_payload(packets: Vec<Packet>) -> Bytes {
     }
 
     // remove the last seperator
-    let _ = buf.split_off(buf.len() - 2);
+    let _ = buf.split_off(buf.len() - 1);
     buf.freeze()
 }
 
@@ -194,15 +198,18 @@ mod tests {
 
     #[test]
     fn test_binary_payload() {
-        let data = Bytes::from("bSGVsbG8=\x1ebSGVsbG9Xb3JsZA==");
+        let data = Bytes::from("bSGVsbG8=\x1ebSGVsbG9Xb3JsZA==\x1ebSGVsbG8=");
         let packets = decode_payload(data).unwrap();
 
+        assert!(packets.len() == 3);
         assert_eq!(packets[0].packet_id, PacketId::Message);
         assert_eq!(packets[0].data, ("Hello".to_owned().into_bytes()));
         assert_eq!(packets[1].packet_id, PacketId::Message);
         assert_eq!(packets[1].data, ("HelloWorld".to_owned().into_bytes()));
+        assert_eq!(packets[2].packet_id, PacketId::Message);
+        assert_eq!(packets[2].data, ("Hello".to_owned().into_bytes()));
 
-        let data = "4Hello\x1e4HelloWorld".to_owned().into_bytes();
+        let data = "4Hello\x1e4HelloWorld\x1e4Hello".to_owned().into_bytes();
         assert_eq!(encode_payload(packets), data);
     }
 }

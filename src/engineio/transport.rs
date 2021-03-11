@@ -401,7 +401,7 @@ impl TransportClient {
                 }
             };
 
-            if data.is_empty() {
+            if dbg!(&data).is_empty() {
                 return Ok(());
             }
 
@@ -586,7 +586,7 @@ mod test {
 
         assert!(socket
             .emit(
-                Packet::new(PacketId::Message, "HelloWorld".to_owned().into_bytes(),),
+                Packet::new(PacketId::Message, "HelloWorld".to_owned().into_bytes()),
                 false,
             )
             .is_ok());
@@ -601,12 +601,11 @@ mod test {
         // closes the connection
         assert!(socket
             .emit(
-                Packet::new(PacketId::Message, "CLOSE".to_owned().into_bytes(),),
+                Packet::new(PacketId::Message, "CLOSE".to_owned().into_bytes()),
                 false,
             )
             .is_ok());
 
-        // assert!(socket.poll_cycle().is_ok());
-        socket.poll_cycle().unwrap();
+        assert!(socket.poll_cycle().is_ok());
     }
 }
