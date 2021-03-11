@@ -1,17 +1,17 @@
 use crate::engineio::packet::{decode_payload, encode_payload, Packet, PacketId};
 use crate::error::{Error, Result};
 use adler32::adler32;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use reqwest::{blocking::Client, Url};
 use serde::{Deserialize, Serialize};
-use std::time::SystemTime;
+use std::{borrow::Cow, time::SystemTime};
 use std::{fmt::Debug, sync::atomic::Ordering};
 use std::{
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
 use websocket::{
-    dataframe::DataFrame as WsDataFrame, receiver::Reader, sync::Writer, ws::dataframe::DataFrame,
+    dataframe::Opcode, receiver::Reader, sync::Writer, ws::dataframe::DataFrame, Message,
 };
 use websocket::{sync::stream::TcpStream, ClientBuilder};
 
@@ -34,7 +34,7 @@ pub struct TransportClient {
     pub on_error: Callback<String>,
     pub on_open: Callback<()>,
     pub on_close: Callback<()>,
-    pub on_data: Callback<Vec<u8>>,
+    pub on_data: Callback<Bytes>,
     pub on_packet: Callback<Packet>,
     connected: Arc<AtomicBool>,
     last_ping: Arc<Mutex<Instant>>,
@@ -110,7 +110,7 @@ impl TransportClient {
     /// Registers an `on_data` callback.
     pub fn set_on_data<F>(&mut self, function: F) -> Result<()>
     where
-        F: Fn(Vec<u8>) + 'static + Sync + Send,
+        F: Fn(Bytes) + 'static + Sync + Send,
     {
         let mut on_data = self.on_data.write()?;
         *on_data = Some(Box::new(function));
@@ -241,28 +241,20 @@ impl TransportClient {
 
             let (mut receiver, mut sender) = client.split()?;
 
-            // send the probe packet
-            let probe_packet = Packet::new(PacketId::Ping, Bytes::from_static(b"probe"));
-            sender.send_dataframe(&WsDataFrame::new(
-                true,
-                websocket::dataframe::Opcode::Text,
-                encode_payload(vec![probe_packet]).to_vec(),
-            ))?;
+            // send the probe packet, the text `2probe` represents a ping packet with
+            // the content `probe`
+            sender.send_message(&Message::text(Cow::Borrowed("2probe")))?;
 
             // expect to receive a probe packet
-            let message = receiver.recv_dataframe()?;
+            let message = receiver.recv_message()?;
             if message.take_payload() != b"3probe" {
                 eprintln!("Error while handshaking ws");
                 return Err(Error::HandshakeError("Error".to_owned()));
             }
 
-            let upgrade_packet = Packet::new(PacketId::Upgrade, Bytes::new());
-            // finally send the upgrade request
-            sender.send_dataframe(&WsDataFrame::new(
-                true,
-                websocket::dataframe::Opcode::Text,
-                encode_payload(vec![upgrade_packet]).to_vec(),
-            ))?;
+            // finally send the upgrade request. the payload `5` stands for an upgrade
+            // packet without any payload
+            sender.send_message(&Message::text(Cow::Borrowed("5")))?;
 
             // upgrade the transport layer
             self.transport = Arc::new(TransportType::Websocket(
@@ -302,11 +294,16 @@ impl TransportClient {
             TransportType::Polling(client) => {
                 let data_to_send = if is_binary_att {
                     // the binary attachement gets `base64` encoded
-                    let mut prefix = vec![b'b'];
-                    prefix.extend(base64::encode(data).as_bytes());
-                    prefix
+                    let mut packet_bytes = BytesMut::with_capacity(data.len() + 1);
+                    packet_bytes.put_u8(b'b');
+
+                    let data_buffer: &mut [u8] = &mut [];
+                    base64::encode_config_slice(data, base64::STANDARD, data_buffer);
+                    packet_bytes.put(&*data_buffer);
+
+                    packet_bytes.freeze()
                 } else {
-                    data.to_vec()
+                    data
                 };
 
                 let client = client.lock()?;
@@ -330,13 +327,12 @@ impl TransportClient {
             TransportType::Websocket(_, writer) => {
                 let mut writer = writer.lock()?;
 
-                let opcode = if is_binary_att {
-                    websocket::dataframe::Opcode::Binary
+                let message = if is_binary_att {
+                    Message::binary(Cow::Borrowed(data.as_ref()))
                 } else {
-                    websocket::dataframe::Opcode::Text
+                    Message::text(Cow::Borrowed(std::str::from_utf8(data.as_ref())?))
                 };
-                let dataframe = WsDataFrame::new(true, opcode, data.to_vec());
-                writer.send_dataframe(&dataframe).unwrap();
+                writer.send_message(&message).unwrap();
 
                 Ok(())
             }
@@ -389,20 +385,20 @@ impl TransportClient {
 
                     // if this is a binary payload, we mark it as a message
                     let received_df = receiver.recv_dataframe()?;
-                    let received_data = match received_df.opcode {
-                        websocket::dataframe::Opcode::Binary => {
-                            let mut message = vec![b'4'];
-                            message.extend(received_df.take_payload());
-                            message
-                        }
-                        _ => received_df.take_payload(),
-                    };
+                    match received_df.opcode {
+                        Opcode::Binary => {
+                            let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
+                            message.put_u8(b'4');
+                            message.put(received_df.take_payload().as_ref());
 
-                    Bytes::from(received_data)
+                            message.freeze()
+                        }
+                        _ => Bytes::from(received_df.take_payload()),
+                    }
                 }
             };
 
-            if dbg!(&data).is_empty() {
+            if data.is_empty() {
                 return Ok(());
             }
 
@@ -422,7 +418,7 @@ impl TransportClient {
                     PacketId::Message => {
                         let on_data = self.on_data.read()?;
                         if let Some(function) = on_data.as_ref() {
-                            spawn_scoped!(function(packet.data.to_vec()));
+                            spawn_scoped!(function(packet.data));
                         }
                         drop(on_data);
                     }
@@ -558,7 +554,7 @@ impl Debug for TransportClient {
                 "None"
             },
             if self.on_data.read().unwrap().is_some() {
-                "Fn(Vec<u8>)"
+                "Fn(Bytes)"
             } else {
                 "None"
             },

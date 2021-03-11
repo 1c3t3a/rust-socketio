@@ -139,15 +139,12 @@ impl TransportClient {
         if is_string_packet {
             self.send(&socket_packet)
         } else {
-            // unwrapping here is safe as this is a binary payload
-            let binary_payload = socket_packet.binary_data.as_ref().unwrap();
-
             // first send the raw packet announcing the attachement
             self.send(&socket_packet)?;
 
             // then send the attachement
-            // TODO: Change this whem Payload takes `Bytes` as well
-            self.send_binary_attachement(Bytes::copy_from_slice(binary_payload))
+            // unwrapping here is safe as this is a binary payload
+            self.send_binary_attachement(socket_packet.binary_data.unwrap())
         }
     }
 
@@ -229,7 +226,7 @@ impl TransportClient {
     /// This method is later registered as the callback for the `on_data` event of the
     /// engineio client.
     #[inline]
-    fn handle_new_message(socket_bytes: &[u8], clone_self: &TransportClient) {
+    fn handle_new_message(socket_bytes: Bytes, clone_self: &TransportClient) {  
         let mut is_finalized_packet = false;
         // either this is a complete packet or the rest of a binary packet (as attachements are
         // sent in a seperate packet).
@@ -237,13 +234,13 @@ impl TransportClient {
             // this must be an attachement, so parse it
             let mut unfinished_packet = clone_self.unfinished_packet.write().unwrap();
             let mut finalized_packet = unfinished_packet.take().unwrap();
-            finalized_packet.binary_data = Some(socket_bytes.to_vec());
+            finalized_packet.binary_data = Some(socket_bytes);
 
             is_finalized_packet = true;
             Ok(finalized_packet)
         } else {
             // this is a normal packet, so decode it
-            SocketPacket::decode_bytes(&Bytes::copy_from_slice(socket_bytes))
+            SocketPacket::decode_bytes(&socket_bytes)
         };
 
         if let Ok(socket_packet) = decoded_packet {
@@ -323,23 +320,23 @@ impl TransportClient {
                     to_be_removed.push(index);
 
                     if ack.time_started.elapsed() < ack.timeout {
-                        if let Some(payload) = socket_packet.clone().data {
+                        if let Some(ref payload) = socket_packet.data {
                             spawn_scoped!({
                                 let mut function = ack.callback.write().unwrap();
                                 let socket = Socket {
                                     transport: clone_self.clone(),
                                 };
-                                function(Payload::String(payload), socket);
+                                function(Payload::String(payload.to_owned()), socket);
                                 drop(function);
                             });
                         }
-                        if let Some(payload) = socket_packet.clone().binary_data {
+                        if let Some(ref payload) = socket_packet.binary_data {
                             spawn_scoped!({
                                 let mut function = ack.callback.write().unwrap();
                                 let socket = Socket {
                                     transport: clone_self.clone(),
                                 };
-                                function(Payload::Binary(payload), socket);
+                                function(Payload::Binary(payload.to_owned()), socket);
                                 drop(function);
                             });
                         }
@@ -408,7 +405,7 @@ impl TransportClient {
         let clone_self = self.clone();
         self.engine_socket
             .lock()?
-            .on_data(move |data| Self::handle_new_message(&data, &clone_self))
+            .on_data(move |data| Self::handle_new_message(data, &clone_self))
     }
 
     /// Handles a binary event.

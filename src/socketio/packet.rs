@@ -21,7 +21,7 @@ pub struct Packet {
     pub packet_type: PacketId,
     pub nsp: String,
     pub data: Option<String>,
-    pub binary_data: Option<Vec<u8>>,
+    pub binary_data: Option<Bytes>,
     pub id: Option<i32>,
     pub attachements: Option<u8>,
 }
@@ -47,7 +47,7 @@ impl Packet {
         packet_type: PacketId,
         nsp: String,
         data: Option<String>,
-        binary_data: Option<Vec<u8>>,
+        binary_data: Option<Bytes>,
         id: Option<i32>,
         attachements: Option<u8>,
     ) -> Self {
@@ -520,7 +520,7 @@ mod test {
             PacketId::BinaryEvent,
             "/".to_owned(),
             Some(String::from("\"hello\"")),
-            Some(vec![1, 2, 3]),
+            Some(Bytes::from_static(&[1, 2, 3])),
             None,
             Some(1),
         );
@@ -536,7 +536,7 @@ mod test {
             PacketId::BinaryEvent,
             "/admin".to_owned(),
             Some(String::from("\"project:delete\"")),
-            Some(vec![1, 2, 3]),
+            Some(Bytes::from_static(&[1, 2, 3])),
             Some(456),
             Some(1),
         );
@@ -552,7 +552,7 @@ mod test {
             PacketId::BinaryAck,
             "/admin".to_owned(),
             None,
-            Some(vec![3, 2, 1]),
+            Some(Bytes::from_static(&[3, 2, 1])),
             Some(456),
             Some(1),
         );

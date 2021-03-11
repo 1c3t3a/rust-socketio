@@ -91,9 +91,8 @@ impl Packet {
         result.freeze()
     }
 
-    // TODO: Observed some strange behavior while doing this with socket.io
+    // Observed some strange behavior while doing this with socket.io
     // packets, works with engine.io packets.
-
     /// Encodes a `Packet` with the payload as `base64`.
     #[allow(dead_code)]
     #[inline]
@@ -160,9 +159,9 @@ mod tests {
         let packet = Packet::decode_packet(data).unwrap();
 
         assert_eq!(packet.packet_id, PacketId::Close);
-        assert_eq!(packet.data, "Hello World".to_owned().into_bytes());
+        assert_eq!(packet.data, Bytes::from_static(b"Hello World"));
 
-        let data: Vec<u8> = "1Hello World".to_owned().into_bytes();
+        let data = Bytes::from_static(b"1Hello World");
         assert_eq!(Packet::encode_packet(packet), data);
     }
 
@@ -173,9 +172,9 @@ mod tests {
         let packet = Packet::decode_packet(data).unwrap();
 
         assert_eq!(packet.packet_id, PacketId::Message);
-        assert_eq!(packet.data, "Hello".to_owned().into_bytes());
+        assert_eq!(packet.data, Bytes::from_static(b"Hello"));
 
-        let data = "bSGVsbG8=".to_owned().into_bytes();
+        let data = Bytes::from_static(b"bSGVsbG8=");
         assert_eq!(Packet::encode_base64(packet), data);
     }
 
@@ -185,9 +184,9 @@ mod tests {
         let packets = decode_payload(data).unwrap();
 
         assert_eq!(packets[0].packet_id, PacketId::Close);
-        assert_eq!(packets[0].data, ("Hello".to_owned().into_bytes()));
+        assert_eq!(packets[0].data, Bytes::from_static(b"Hello"));
         assert_eq!(packets[1].packet_id, PacketId::Close);
-        assert_eq!(packets[1].data, ("HelloWorld".to_owned().into_bytes()));
+        assert_eq!(packets[1].data, Bytes::from_static(b"HelloWorld"));
 
         let data = "1Hello\x1e1HelloWorld".to_owned().into_bytes();
         assert_eq!(encode_payload(packets), data);
@@ -200,13 +199,13 @@ mod tests {
 
         assert!(packets.len() == 3);
         assert_eq!(packets[0].packet_id, PacketId::Message);
-        assert_eq!(packets[0].data, ("Hello".to_owned().into_bytes()));
+        assert_eq!(packets[0].data, Bytes::from_static(b"Hello"));
         assert_eq!(packets[1].packet_id, PacketId::Message);
-        assert_eq!(packets[1].data, ("HelloWorld".to_owned().into_bytes()));
+        assert_eq!(packets[1].data, Bytes::from_static(b"HelloWorld"));
         assert_eq!(packets[2].packet_id, PacketId::Message);
-        assert_eq!(packets[2].data, ("Hello".to_owned().into_bytes()));
+        assert_eq!(packets[2].data, Bytes::from_static(b"Hello"));
 
-        let data = "4Hello\x1e4HelloWorld\x1e4Hello".to_owned().into_bytes();
+        let data = Bytes::from_static(b"4Hello\x1e4HelloWorld\x1e4Hello");
         assert_eq!(encode_payload(packets), data);
     }
 }
