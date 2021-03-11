@@ -145,8 +145,18 @@ impl TransportClient {
 
         match &mut self.transport.as_ref() {
             TransportType::Polling(client) => {
-                if let Ok(full_address) = Url::parse(&(address.to_owned().into() + &query_path)) {
+                if let Ok(mut full_address) = Url::parse(&(address.to_owned().into() + &query_path))
+                {
                     self.host_address = Arc::new(Mutex::new(Some(address.into())));
+
+                    // change the url scheme here if necessary, unwrapping here is
+                    // safe as both http and https are valid schemes for sure
+                    match full_address.scheme() {
+                        "ws" => full_address.set_scheme("http").unwrap(),
+                        "wss" => full_address.set_scheme("https").unwrap(),
+                        "http" | "https" => (),
+                        _ => return Err(Error::InvalidUrl(full_address.to_string())),
+                    }
 
                     let response = client.lock()?.get(full_address).send()?.text()?;
 

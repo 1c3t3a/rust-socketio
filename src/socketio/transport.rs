@@ -226,7 +226,7 @@ impl TransportClient {
     /// This method is later registered as the callback for the `on_data` event of the
     /// engineio client.
     #[inline]
-    fn handle_new_message(socket_bytes: Bytes, clone_self: &TransportClient) {  
+    fn handle_new_message(socket_bytes: Bytes, clone_self: &TransportClient) {
         let mut is_finalized_packet = false;
         // either this is a complete packet or the rest of a binary packet (as attachements are
         // sent in a seperate packet).

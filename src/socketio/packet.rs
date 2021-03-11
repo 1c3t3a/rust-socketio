@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use byte::{ctx::Str, BytesExt};
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use regex::Regex;
 
 /// An enumeration of the different `Packet` types in the `socket.io` protocol.
@@ -89,7 +89,8 @@ impl Packet {
             string.push_str(&id.to_string());
         }
 
-        let mut buffer = string.into_bytes();
+        let mut buffer = BytesMut::new();
+        buffer.put(string.as_ref());
         if self.binary_data.as_ref().is_some() {
             // check if an event type is present
             let placeholder = if let Some(event_type) = self.data.as_ref() {
@@ -106,12 +107,12 @@ impl Packet {
             };
 
             // build the buffers
-            buffer.extend(placeholder.into_bytes());
+            buffer.put(placeholder.as_ref());
         } else if let Some(data) = self.data.as_ref() {
-            buffer.extend(data.to_string().into_bytes());
+            buffer.put(data.as_ref());
         }
 
-        Bytes::copy_from_slice(buffer.as_slice())
+        buffer.freeze()
     }
 
     /// Decodes a packet given a `Bytes` type.
