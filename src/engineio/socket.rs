@@ -109,7 +109,7 @@ impl EngineSocket {
     /// Registers the `on_data` callback.
     pub fn on_data<F>(&mut self, function: F) -> Result<()>
     where
-        F: Fn(Vec<u8>) + 'static + Sync + Send,
+        F: Fn(Bytes) + 'static + Sync + Send,
     {
         if self.serving.load(Ordering::Relaxed) {
             return Err(Error::IllegalActionAfterOpen);

@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use byte::{ctx::Str, BytesExt};
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use regex::Regex;
 
 /// An enumeration of the different `Packet` types in the `socket.io` protocol.
@@ -21,7 +21,7 @@ pub struct Packet {
     pub packet_type: PacketId,
     pub nsp: String,
     pub data: Option<String>,
-    pub binary_data: Option<Vec<u8>>,
+    pub binary_data: Option<Bytes>,
     pub id: Option<i32>,
     pub attachements: Option<u8>,
 }
@@ -47,7 +47,7 @@ impl Packet {
         packet_type: PacketId,
         nsp: String,
         data: Option<String>,
-        binary_data: Option<Vec<u8>>,
+        binary_data: Option<Bytes>,
         id: Option<i32>,
         attachements: Option<u8>,
     ) -> Self {
@@ -89,7 +89,8 @@ impl Packet {
             string.push_str(&id.to_string());
         }
 
-        let mut buffer = string.into_bytes();
+        let mut buffer = BytesMut::new();
+        buffer.put(string.as_ref());
         if self.binary_data.as_ref().is_some() {
             // check if an event type is present
             let placeholder = if let Some(event_type) = self.data.as_ref() {
@@ -106,12 +107,12 @@ impl Packet {
             };
 
             // build the buffers
-            buffer.extend(placeholder.into_bytes());
+            buffer.put(placeholder.as_ref());
         } else if let Some(data) = self.data.as_ref() {
-            buffer.extend(data.to_string().into_bytes());
+            buffer.put(data.as_ref());
         }
 
-        Bytes::copy_from_slice(buffer.as_slice())
+        buffer.freeze()
     }
 
     /// Decodes a packet given a `Bytes` type.
@@ -520,7 +521,7 @@ mod test {
             PacketId::BinaryEvent,
             "/".to_owned(),
             Some(String::from("\"hello\"")),
-            Some(vec![1, 2, 3]),
+            Some(Bytes::from_static(&[1, 2, 3])),
             None,
             Some(1),
         );
@@ -536,7 +537,7 @@ mod test {
             PacketId::BinaryEvent,
             "/admin".to_owned(),
             Some(String::from("\"project:delete\"")),
-            Some(vec![1, 2, 3]),
+            Some(Bytes::from_static(&[1, 2, 3])),
             Some(456),
             Some(1),
         );
@@ -552,7 +553,7 @@ mod test {
             PacketId::BinaryAck,
             "/admin".to_owned(),
             None,
-            Some(vec![3, 2, 1]),
+            Some(Bytes::from_static(&[3, 2, 1])),
             Some(456),
             Some(1),
         );

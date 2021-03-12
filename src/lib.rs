@@ -364,6 +364,7 @@ mod test {
     use std::thread::sleep;
 
     use super::*;
+    use bytes::Bytes;
     use serde_json::json;
     const SERVER_URL: &str = "http://localhost:4200";
 
@@ -431,7 +432,7 @@ mod test {
         let mut socket = socket.unwrap();
         assert!(socket.emit("message", json!("Hello World")).is_ok());
 
-        assert!(socket.emit("binary", vec![46, 88]).is_ok());
+        assert!(socket.emit("binary", Bytes::from_static(&[46, 88])).is_ok());
 
         let ack_cb = |payload, _| {
             println!("Yehaa the ack got acked");
