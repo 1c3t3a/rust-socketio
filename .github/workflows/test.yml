@@ -1,6 +1,10 @@
 name: Test
 
-on: [push]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,7 +30,7 @@ jobs:
 
       - name: Build docker container
         run: |
-          cd test && docker build -t test_suite:latest .
+          cd ci && docker build -t test_suite:latest .
           docker run -d -p 4200:4200 -p 4201:4201 test_suite:latest
 
       - name: Run testsuite
