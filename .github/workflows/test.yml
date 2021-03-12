@@ -1,0 +1,23 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup docker
+        run: |
+          - cd test && docker build -t test_suite:latest
+          - docker run -d -p 4200:4200 -p 4201:4201
+      - name: Linting
+        run: cargo test --verbose 
