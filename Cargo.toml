@@ -1,12 +1,12 @@
 [package]
 name = "rust_socketio"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Bastian Kersting <bastian@cmbt.de>"]
 edition = "2018"
 description = "An implementation of a socketio client written in rust."
 readme = "README.md"
 repository = "https://github.com/1c3t3a/rust-socketio"
-keywords = ["socketio", "engineio", "network", "socket.io", "client"]
+keywords = ["socketio", "engineio", "network", "protocol", "client"]
 categories = ["network-programming", "web-programming", "web-programming::websocket"]
 license = "MIT"
 
