@@ -1,0 +1,11 @@
+{
+  "name": "rust-socketio-test",
+  "version": "1.0.0",
+  "description": "A test environment for a socketio client",
+  "author": "Bastian Kersting",
+  "license": "MIT",
+  "dependencies": {
+    "socket.io": "4.0.0",
+    "engine.io": "5.0.0"
+  }
+}

@@ -2,5 +2,5 @@
 Cargo.lock
 .vscode
 .idea
-example/node_modules
-example/package-lock.json
+ci/node_modules
+ci/package-lock.json

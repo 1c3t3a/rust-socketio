@@ -1,0 +1,37 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+
+      - name: Setup rust environment  
+        uses: actions-rs/toolchain@v1
+        with:
+             profile: minimal
+             toolchain: stable
+             override: true
+
+      - name: Setup docker
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Build docker container
+        run: |
+          cd ci && docker build -t test_suite:latest .
+          docker run -d -p 4200:4200 -p 4201:4201 test_suite:latest
+
+      - name: Run testsuite
+        run: cargo test --verbose 
