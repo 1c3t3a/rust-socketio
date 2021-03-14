@@ -56,8 +56,3 @@ _2021.01.05_
     * send json-data to the server (recommended to use serde_json as it provides safe handling of json data).
     * send json-data to the server and receive an ack with a possible message.
 
-### Releases
-
-[0.2.0]: #/releases/tag/v0.2.0
-[0.1.1]: #/releases/tag/v0.1.1
-[0.1.0]: #/releases/tag/v0.1.0
