@@ -20,7 +20,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 _nothing new to show for… yet!_
 
-## [0.2.0] - _Fully implemented the socker.io protocol 🎉_
+## <a name="020">[0.2.0] - _Fully implemented the socker.io protocol 🎉_ </a>
 
 _2021.03.13_
 
@@ -35,7 +35,7 @@ _2021.03.13_
 * Added a new `Payload` type to manage the binary and string payload.
 
 
-## [0.1.1] - _Update to tokio 1.0_
+## <a name="011">[0.1.1] - _Update to tokio 1.0_</a>
 
 _2021.01.10_
 
@@ -44,7 +44,7 @@ _2021.01.10_
 * Bumped `tokio` to version `1.0.*`, and therefore reqwest to `0.11.*`.
 * Removed all `unsafe` code.
 
-## [0.1.0] - _First release of rust-socketio 🎉_
+## <a name="010">[0.1.0] - _First release of rust-socketio 🎉_</a>
 
 _2021.01.05_
 
