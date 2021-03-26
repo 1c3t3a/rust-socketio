@@ -30,6 +30,14 @@ impl EngineSocket {
     /// Binds the socket to a certain `address`. Attention! This doesn't allow
     /// to configure callbacks afterwards.
     pub fn bind<T: Into<String>>(&self, address: T) -> Result<()> {
+        if self
+            .transport_client
+            .read()?
+            .connected
+            .load(Ordering::Relaxed)
+        {
+            return Err(Error::IllegalActionAfterOpen);
+        }
         self.transport_client.write()?.open(address.into())?;
 
         let cl = Arc::clone(&self.transport_client);
@@ -208,15 +216,19 @@ mod test {
     fn test_illegal_actions() {
         let mut sut = EngineSocket::new(true);
 
-        assert!(sut.emit(Packet::new(PacketId::Close, Bytes::from_static(b""))).is_err());
-        assert!(sut.emit_binary_attachement(Bytes::from_static(b"")).is_err());
+        assert!(sut
+            .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")))
+            .is_err());
+        assert!(sut
+            .emit_binary_attachement(Bytes::from_static(b""))
+            .is_err());
 
         assert!(sut.bind(SERVER_URL).is_ok());
 
-        assert!(sut.on_open(|_|{}).is_err());
-        assert!(sut.on_close(|_|{}).is_err());
-        assert!(sut.on_packet(|_|{}).is_err());
-        assert!(sut.on_data(|_|{}).is_err());
-        assert!(sut.on_error(|_|{}).is_err());
+        assert!(sut.on_open(|_| {}).is_err());
+        assert!(sut.on_close(|_| {}).is_err());
+        assert!(sut.on_packet(|_| {}).is_err());
+        assert!(sut.on_data(|_| {}).is_err());
+        assert!(sut.on_error(|_| {}).is_err());
     }
 }

@@ -414,8 +414,10 @@ mod test {
     #[test]
     fn test_builder() {
         // expect an illegal namespace
-        assert!(SocketBuilder::new(SERVER_URL).set_namespace("illegal").is_err());
-        
+        assert!(SocketBuilder::new(SERVER_URL)
+            .set_namespace("illegal")
+            .is_err());
+
         // test socket build logic
         let socket_builder = SocketBuilder::new(SERVER_URL);
 

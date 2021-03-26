@@ -211,7 +211,6 @@ mod tests {
 
     #[test]
     fn test_packet_id_conversion_and_incompl_packet() {
-
         let sut = Packet::decode_packet(Bytes::from_static(b"4"));
         assert!(sut.is_err());
         let _sut = sut.unwrap_err();

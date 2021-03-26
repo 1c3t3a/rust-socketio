@@ -36,7 +36,7 @@ pub struct TransportClient {
     pub on_close: Callback<()>,
     pub on_data: Callback<Bytes>,
     pub on_packet: Callback<Packet>,
-    connected: Arc<AtomicBool>,
+    pub connected: Arc<AtomicBool>,
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     host_address: Arc<Mutex<Option<String>>>,
@@ -135,11 +135,6 @@ impl TransportClient {
     /// we try to upgrade the connection. Afterwards a first Pong packet is sent
     /// to the server to trigger the Ping-cycle.
     pub fn open<T: Into<String> + Clone>(&mut self, address: T) -> Result<()> {
-        // TODO: Check if Relaxed is appropiate -> change all occurences if not
-        if self.connected.load(Ordering::Relaxed) {
-            return Ok(());
-        }
-
         // build the query path, random_t is used to prevent browser caching
         let query_path = self.get_query_path()?;
 
@@ -652,13 +647,19 @@ mod test {
         let illegal_url = "this is illegal";
 
         let _error = sut.open(illegal_url).expect_err("Error");
-        assert!(matches!(Error::InvalidUrl(String::from("this is illegal")), _error));
+        assert!(matches!(
+            Error::InvalidUrl(String::from("this is illegal")),
+            _error
+        ));
 
         let mut sut = TransportClient::new(false);
         let invalid_protocol = "file://localhost:4200";
 
         let _error = sut.open(invalid_protocol).expect_err("Error");
-        assert!(matches!(Error::InvalidUrl(String::from("file://localhost:4200")), _error));
+        assert!(matches!(
+            Error::InvalidUrl(String::from("file://localhost:4200")),
+            _error
+        ));
     }
 
     #[test]
@@ -667,4 +668,3 @@ mod test {
         assert!(sut.poll_cycle().is_err());
     }
 }
- 

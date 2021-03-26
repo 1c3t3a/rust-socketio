@@ -550,8 +550,17 @@ mod test {
     fn test_error_cases() {
         let sut = TransportClient::new("http://localhost:123", None);
 
-        let packet = SocketPacket::new(SocketPacketId::Connect, "/".to_owned(), None, None, None, None);
+        let packet = SocketPacket::new(
+            SocketPacketId::Connect,
+            "/".to_owned(),
+            None,
+            None,
+            None,
+            None,
+        );
         assert!(sut.send(&packet).is_err());
-        assert!(sut.send_binary_attachement(Bytes::from_static(b"Hallo")).is_err());
+        assert!(sut
+            .send_binary_attachement(Bytes::from_static(b"Hallo"))
+            .is_err());
     }
 }
