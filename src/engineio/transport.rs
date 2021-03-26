@@ -258,7 +258,6 @@ impl TransportClient {
             // expect to receive a probe packet
             let message = receiver.recv_message()?;
             if message.take_payload() != b"3probe" {
-                eprintln!("Error while handshaking ws");
                 return Err(Error::HandshakeError("Error".to_owned()));
             }
 
@@ -584,12 +583,13 @@ mod test {
 
     use super::*;
     /// The `engine.io` server for testing runs on port 4201
-    const SERVER_URL: &str = "http://localhost:4201";
+    const SERVER_URL_WS: &str = "http://localhost:4201";
+    const SERVER_URL_POLLING: &str = "http://localhost:4202";
 
     #[test]
-    fn test_connection() {
+    fn test_connection_websockets() {
         let mut socket = TransportClient::new(true);
-        assert!(socket.open(SERVER_URL).is_ok());
+        assert!(socket.open(SERVER_URL_WS).is_ok());
 
         assert!(socket
             .emit(
@@ -615,4 +615,56 @@ mod test {
 
         assert!(socket.poll_cycle().is_ok());
     }
+
+    #[test]
+    fn test_connection_polling() {
+        let mut socket = TransportClient::new(true);
+        assert!(socket.open(SERVER_URL_POLLING).is_ok());
+
+        assert!(socket
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
+                false,
+            )
+            .is_ok());
+
+        socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
+            println!(
+                "Received: {:?}",
+                std::str::from_utf8(&data).expect("Error while decoding utf-8")
+            );
+        }))));
+
+        // closes the connection
+        assert!(socket
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"CLOSE")),
+                false,
+            )
+            .is_ok());
+
+        assert!(socket.poll_cycle().is_ok());
+    }
+
+    #[test]
+    fn test_open_invariants() {
+        let mut sut = TransportClient::new(false);
+        let illegal_url = "this is illegal";
+
+        let _error = sut.open(illegal_url).expect_err("Error");
+        assert!(matches!(Error::InvalidUrl(String::from("this is illegal")), _error));
+
+        let mut sut = TransportClient::new(false);
+        let invalid_protocol = "file://localhost:4200";
+
+        let _error = sut.open(invalid_protocol).expect_err("Error");
+        assert!(matches!(Error::InvalidUrl(String::from("file://localhost:4200")), _error));
+    }
+
+    #[test]
+    fn test_illegal_actions() {
+        let mut sut = TransportClient::new(true);
+        assert!(sut.poll_cycle().is_err());
+    }
 }
+ 
