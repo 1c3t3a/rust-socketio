@@ -161,12 +161,6 @@ mod test {
             .is_ok());
 
         assert!(socket
-            .on_close(|_| {
-                println!("Close event!");
-            })
-            .is_ok());
-
-        assert!(socket
             .on_packet(|packet| {
                 println!("Received packet: {:?}", packet);
             })

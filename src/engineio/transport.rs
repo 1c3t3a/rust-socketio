@@ -607,6 +607,13 @@ mod test {
             )
             .is_ok());
 
+        assert!(socket
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
+                true
+            )
+            .is_ok());
+
         assert!(socket.poll_cycle().is_ok());
     }
 
@@ -631,7 +638,9 @@ mod test {
         ));
 
         let sut = TransportClient::new(false);
-        let _error = sut.emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false).expect_err("error");
+        let _error = sut
+            .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
+            .expect_err("error");
         assert!(matches!(Error::ActionBeforeOpen, _error));
     }
 
