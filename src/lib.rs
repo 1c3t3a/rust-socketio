@@ -394,15 +394,9 @@ mod test {
             assert!(result.is_ok());
 
             println!("Yehaa! My ack got acked?");
-            match message {
-                Payload::Binary(bin) => {
-                    println!("Received binary Ack");
-                    println!("Data: {:#?}", bin);
-                }
-                Payload::String(str) => {
-                    println!("Received string Ack");
-                    println!("Ack data: {}", str);
-                }
+            if let Payload::String(str) = message {
+                println!("Received string Ack");
+                println!("Ack data: {}", str);
             }
         };
 
@@ -422,6 +416,8 @@ mod test {
         let socket_builder = SocketBuilder::new(SERVER_URL);
 
         let socket = socket_builder
+            .set_namespace("/")
+            .expect("Error!")
             .on("error", |err, _| eprintln!("Error!!: {:#?}", err))
             .on("test", |str, _| println!("Received: {:#?}", str))
             .on("message", |msg, _| println!("Received: {:#?}", msg))

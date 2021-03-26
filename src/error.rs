@@ -61,3 +61,21 @@ impl From<ParseIntError> for Error {
         Self::InvalidPacket
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Mutex, PoisonError};
+
+    use super::*;
+
+    /// This just tests the own implementationa and relies on `thiserror` for the others.
+    #[test]
+    fn test_error_conversion() {
+        let mutex = Mutex::new(0);
+        let _poison_error = Error::from(PoisonError::new(mutex.lock()));
+        assert!(matches!(Error::PoisonedLockError, _poison_error));
+
+        let _parse_int_error = Error::from("no int".parse::<i32>().expect_err("unreachable"));
+        assert!(matches!(Error::InvalidPacket, _parse_int_error));
+    }
+}
