@@ -198,10 +198,6 @@ mod test {
             .emit(Packet::new(PacketId::Pong, Bytes::new()))
             .is_ok());
 
-        assert!(socket
-            .emit(Packet::new(PacketId::Ping, Bytes::new()))
-            .is_ok());
-
         sleep(Duration::from_secs(26));
 
         assert!(socket

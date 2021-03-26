@@ -578,43 +578,12 @@ mod test {
 
     use super::*;
     /// The `engine.io` server for testing runs on port 4201
-    const SERVER_URL_WS: &str = "http://localhost:4201";
-    const SERVER_URL_POLLING: &str = "http://localhost:4202";
-
-    #[test]
-    fn test_connection_websockets() {
-        let mut socket = TransportClient::new(true);
-        assert!(socket.open(SERVER_URL_WS).is_ok());
-
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
-                false,
-            )
-            .is_ok());
-
-        socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
-            println!(
-                "Received: {:?}",
-                std::str::from_utf8(&data).expect("Error while decoding utf-8")
-            );
-        }))));
-
-        // closes the connection
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"CLOSE")),
-                false,
-            )
-            .is_ok());
-
-        assert!(socket.poll_cycle().is_ok());
-    }
+    const SERVER_URL: &str = "http://localhost:4201";
 
     #[test]
     fn test_connection_polling() {
         let mut socket = TransportClient::new(true);
-        assert!(socket.open(SERVER_URL_POLLING).is_ok());
+        assert!(socket.open(SERVER_URL).is_ok());
 
         assert!(socket
             .emit(
@@ -653,13 +622,17 @@ mod test {
         ));
 
         let mut sut = TransportClient::new(false);
-        let invalid_protocol = "file://localhost:4200";
+        let invalid_protocol = "file:///tmp/foo";
 
         let _error = sut.open(invalid_protocol).expect_err("Error");
         assert!(matches!(
             Error::InvalidUrl(String::from("file://localhost:4200")),
             _error
         ));
+
+        let sut = TransportClient::new(false);
+        let _error = sut.emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false).expect_err("error");
+        assert!(matches!(Error::ActionBeforeOpen, _error));
     }
 
     #[test]
