@@ -203,4 +203,20 @@ mod test {
             ))
             .is_ok());
     }
+
+    #[test]
+    fn test_illegal_actions() {
+        let mut sut = EngineSocket::new(true);
+
+        assert!(sut.emit(Packet::new(PacketId::Close, Bytes::from_static(b""))).is_err());
+        assert!(sut.emit_binary_attachement(Bytes::from_static(b"")).is_err());
+
+        assert!(sut.bind(SERVER_URL).is_ok());
+
+        assert!(sut.on_open(|_|{}).is_err());
+        assert!(sut.on_close(|_|{}).is_err());
+        assert!(sut.on_packet(|_|{}).is_err());
+        assert!(sut.on_data(|_|{}).is_err());
+        assert!(sut.on_error(|_|{}).is_err());
+    }
 }
