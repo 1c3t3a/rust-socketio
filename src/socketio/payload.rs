@@ -46,3 +46,32 @@ impl From<Bytes> for Payload {
         Self::Binary(bytes)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_from() {
+        let sut = Payload::from("foo");
+
+        assert_eq!(Payload::String(String::from("foo")), sut);
+
+        let sut = Payload::from(String::from("foo"));
+        assert_eq!(Payload::String(String::from("foo")), sut);
+
+        let sut = Payload::from(json!("foo"));
+        assert_eq!(Payload::String(String::from("\"foo\"")), sut);
+
+        let sut = Payload::from(vec![1,2,3]);
+        assert_eq!(Payload::Binary(Bytes::from_static(&[1, 2, 3])), sut);
+
+        let sut = Payload::from(&[1_u8, 2_u8, 3_u8][..]);
+        assert_eq!(Payload::Binary(Bytes::from_static(&[1, 2, 3])), sut);
+
+        let sut = Payload::from(Bytes::from_static(&[1, 2, 3]));
+        assert_eq!(Payload::Binary(Bytes::from_static(&[1, 2, 3])), sut);
+    }
+}
