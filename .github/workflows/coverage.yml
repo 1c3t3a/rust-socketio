@@ -1,4 +1,8 @@
-on: [push]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 name: generate coverage
 
@@ -6,7 +10,6 @@ jobs:
   check:
     name: Setup Rust project
     runs-on: ubuntu-latest
-    # if: ${{ github.event.Test.conclusion == 'success' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2

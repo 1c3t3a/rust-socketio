@@ -31,7 +31,7 @@ jobs:
       - name: Build docker container
         run: |
           cd ci && docker build -t test_suite:latest .
-          docker run -d -p 4200:4200 -p 4201:4201 -p 4202:4202 test_suite:latest
+          docker run -d -p 4200:4200 -p 4201:4201 test_suite:latest
 
       - name: Run testsuite
         run: cargo test --verbose 

@@ -526,17 +526,11 @@ mod test {
             })
             .is_ok());
 
-        assert!(socket
-            .on("Error".into(), |_, _| {})
-            .is_ok());
+        assert!(socket.on("Error".into(), |_, _| {}).is_ok());
 
-        assert!(socket
-            .on("Connect".into(), |_, _| {})
-            .is_ok());
+        assert!(socket.on("Connect".into(), |_, _| {}).is_ok());
 
-        assert!(socket
-            .on("Close".into(), |_, _| {})
-            .is_ok());
+        assert!(socket.on("Close".into(), |_, _| {}).is_ok());
 
         assert!(socket.connect().is_ok());
 
