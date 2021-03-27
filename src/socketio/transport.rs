@@ -526,19 +526,19 @@ mod test {
             })
             .is_ok());
 
+        assert!(socket.on("Error".into(), |_, _| {}).is_ok());
+
+        assert!(socket.on("Connect".into(), |_, _| {}).is_ok());
+
+        assert!(socket.on("Close".into(), |_, _| {}).is_ok());
+
         assert!(socket.connect().is_ok());
 
         let ack_callback = |message: Payload, _| {
             println!("Yehaa! My ack got acked?");
-            match message {
-                Payload::String(str) => {
-                    println!("Received string ack");
-                    println!("Ack data: {}", str);
-                }
-                Payload::Binary(bin) => {
-                    println!("Received binary ack");
-                    println!("Ack data: {:#?}", bin);
-                }
+            if let Payload::String(str) = message {
+                println!("Received string ack");
+                println!("Ack data: {}", str);
             }
         };
 
@@ -550,5 +550,23 @@ mod test {
                 ack_callback
             )
             .is_ok());
+    }
+
+    #[test]
+    fn test_error_cases() {
+        let sut = TransportClient::new("http://localhost:123", None);
+
+        let packet = SocketPacket::new(
+            SocketPacketId::Connect,
+            "/".to_owned(),
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(sut.send(&packet).is_err());
+        assert!(sut
+            .send_binary_attachement(Bytes::from_static(b"Hallo"))
+            .is_err());
     }
 }

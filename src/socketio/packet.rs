@@ -69,12 +69,9 @@ impl Packet {
         let mut string = (self.packet_type as u8).to_string();
 
         // eventually a number of attachements, followed by '-'
-        match self.packet_type {
-            PacketId::BinaryAck | PacketId::BinaryEvent => {
-                string.push_str(&self.attachements.as_ref().unwrap().to_string());
-                string.push('-');
-            }
-            _ => (),
+        if let PacketId::BinaryAck | PacketId::BinaryEvent = self.packet_type {
+            string.push_str(&self.attachements.as_ref().unwrap().to_string());
+            string.push('-');
         }
 
         // if the namespace is different from the default one append it as well,
@@ -564,5 +561,11 @@ mod test {
                 .to_string()
                 .into_bytes()
         );
+    }
+
+    #[test]
+    fn test_illegal_packet_id() {
+        let _sut = u8_to_packet_id(42).expect_err("error!");
+        assert!(matches!(Error::InvalidPacketId(42), _sut))
     }
 }

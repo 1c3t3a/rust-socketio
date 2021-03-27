@@ -208,4 +208,44 @@ mod tests {
         let data = Bytes::from_static(b"4Hello\x1e4HelloWorld\x1e4Hello");
         assert_eq!(encode_payload(packets), data);
     }
+
+    #[test]
+    fn test_packet_id_conversion_and_incompl_packet() {
+        let sut = Packet::decode_packet(Bytes::from_static(b"4"));
+        assert!(sut.is_err());
+        let _sut = sut.unwrap_err();
+        assert!(matches!(Error::IncompletePacket, _sut));
+
+        let sut = u8_to_packet_id(b'0');
+        assert!(sut.is_ok());
+        assert_eq!(sut.unwrap(), PacketId::Open);
+
+        let sut = u8_to_packet_id(b'1');
+        assert!(sut.is_ok());
+        assert_eq!(sut.unwrap(), PacketId::Close);
+
+        let sut = u8_to_packet_id(b'2');
+        assert!(sut.is_ok());
+        assert_eq!(sut.unwrap(), PacketId::Ping);
+
+        let sut = u8_to_packet_id(b'3');
+        assert!(sut.is_ok());
+        assert_eq!(sut.unwrap(), PacketId::Pong);
+
+        let sut = u8_to_packet_id(b'4');
+        assert!(sut.is_ok());
+        assert_eq!(sut.unwrap(), PacketId::Message);
+
+        let sut = u8_to_packet_id(b'5');
+        assert!(sut.is_ok());
+        assert_eq!(sut.unwrap(), PacketId::Upgrade);
+
+        let sut = u8_to_packet_id(b'6');
+        assert!(sut.is_ok());
+        assert_eq!(sut.unwrap(), PacketId::Noop);
+
+        let sut = u8_to_packet_id(42);
+        assert!(sut.is_err());
+        assert!(matches!(sut.unwrap_err(), Error::InvalidPacketId(42)));
+    }
 }

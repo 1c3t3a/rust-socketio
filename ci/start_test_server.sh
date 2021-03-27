@@ -18,7 +18,7 @@ echo "Successfully started socket.io instance"
 while sleep 60; do
   ps aux |grep socket |grep -q -v grep
   PROCESS_1_STATUS=$?
-  ps aux |grep engine |grep -q -v grep
+  ps aux |grep engine-io.js |grep -q -v grep
   PROCESS_2_STATUS=$?
   # If the greps above find anything, they exit with 0 status
   # If they are not both 0, then something is wrong

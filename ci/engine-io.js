@@ -2,8 +2,11 @@
  * This is an example server, used to test the current code.
  */
 const engine = require('engine.io');
+const http = require('http').createServer().listen(4201);
 // the engine.io client runs on port 4201
-const server = engine.listen(4201);
+const server = engine.attach(http, {
+    allowUpgrades: false
+});
 
 console.log("Started")
 server.on('connection', socket => {
@@ -28,7 +31,7 @@ server.on('connection', socket => {
         console.log(message.toString());
     });
 
-    socket.on('close', () => { 
+    socket.on('close', () => {
         console.log("Close");
     });
 

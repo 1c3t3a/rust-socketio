@@ -394,15 +394,9 @@ mod test {
             assert!(result.is_ok());
 
             println!("Yehaa! My ack got acked?");
-            match message {
-                Payload::Binary(bin) => {
-                    println!("Received binary Ack");
-                    println!("Data: {:#?}", bin);
-                }
-                Payload::String(str) => {
-                    println!("Received string Ack");
-                    println!("Ack data: {}", str);
-                }
+            if let Payload::String(str) = message {
+                println!("Received string Ack");
+                println!("Ack data: {}", str);
             }
         };
 
@@ -419,12 +413,18 @@ mod test {
 
     #[test]
     fn test_builder() {
+        // expect an illegal namespace
+        assert!(SocketBuilder::new(SERVER_URL)
+            .set_namespace("illegal")
+            .is_err());
+
+        // test socket build logic
         let socket_builder = SocketBuilder::new(SERVER_URL);
 
         let socket = socket_builder
-            .on("error", |err, _| eprintln!("Error!!: {:#?}", err))
+            .set_namespace("/")
+            .expect("Error!")
             .on("test", |str, _| println!("Received: {:#?}", str))
-            .on("message", |msg, _| println!("Received: {:#?}", msg))
             .connect();
 
         assert!(socket.is_ok());

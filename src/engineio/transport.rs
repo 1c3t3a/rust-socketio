@@ -36,7 +36,7 @@ pub struct TransportClient {
     pub on_close: Callback<()>,
     pub on_data: Callback<Bytes>,
     pub on_packet: Callback<Packet>,
-    connected: Arc<AtomicBool>,
+    pub connected: Arc<AtomicBool>,
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     host_address: Arc<Mutex<Option<String>>>,
@@ -135,11 +135,6 @@ impl TransportClient {
     /// we try to upgrade the connection. Afterwards a first Pong packet is sent
     /// to the server to trigger the Ping-cycle.
     pub fn open<T: Into<String> + Clone>(&mut self, address: T) -> Result<()> {
-        // TODO: Check if Relaxed is appropiate -> change all occurences if not
-        if self.connected.load(Ordering::Relaxed) {
-            return Ok(());
-        }
-
         // build the query path, random_t is used to prevent browser caching
         let query_path = self.get_query_path()?;
 
@@ -258,7 +253,6 @@ impl TransportClient {
             // expect to receive a probe packet
             let message = receiver.recv_message()?;
             if message.take_payload() != b"3probe" {
-                eprintln!("Error while handshaking ws");
                 return Err(Error::HandshakeError("Error".to_owned()));
             }
 
@@ -307,9 +301,8 @@ impl TransportClient {
                     let mut packet_bytes = BytesMut::with_capacity(data.len() + 1);
                     packet_bytes.put_u8(b'b');
 
-                    let data_buffer: &mut [u8] = &mut [];
-                    base64::encode_config_slice(data, base64::STANDARD, data_buffer);
-                    packet_bytes.put(&*data_buffer);
+                    let encoded_data = base64::encode(data);
+                    packet_bytes.put(encoded_data.as_bytes());
 
                     packet_bytes.freeze()
                 } else {
@@ -587,7 +580,7 @@ mod test {
     const SERVER_URL: &str = "http://localhost:4201";
 
     #[test]
-    fn test_connection() {
+    fn test_connection_polling() {
         let mut socket = TransportClient::new(true);
         assert!(socket.open(SERVER_URL).is_ok());
 
@@ -613,6 +606,46 @@ mod test {
             )
             .is_ok());
 
+        assert!(socket
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
+                true
+            )
+            .is_ok());
+
         assert!(socket.poll_cycle().is_ok());
+    }
+
+    #[test]
+    fn test_open_invariants() {
+        let mut sut = TransportClient::new(false);
+        let illegal_url = "this is illegal";
+
+        let _error = sut.open(illegal_url).expect_err("Error");
+        assert!(matches!(
+            Error::InvalidUrl(String::from("this is illegal")),
+            _error
+        ));
+
+        let mut sut = TransportClient::new(false);
+        let invalid_protocol = "file:///tmp/foo";
+
+        let _error = sut.open(invalid_protocol).expect_err("Error");
+        assert!(matches!(
+            Error::InvalidUrl(String::from("file://localhost:4200")),
+            _error
+        ));
+
+        let sut = TransportClient::new(false);
+        let _error = sut
+            .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
+            .expect_err("error");
+        assert!(matches!(Error::ActionBeforeOpen, _error));
+    }
+
+    #[test]
+    fn test_illegal_actions() {
+        let mut sut = TransportClient::new(true);
+        assert!(sut.poll_cycle().is_err());
     }
 }

@@ -1,0 +1,52 @@
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+name: generate coverage
+
+jobs:
+  check:
+    name: Setup Rust project
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Setup rust environment  
+        uses: actions-rs/toolchain@v1
+        with:
+             profile: minimal
+             toolchain: stable
+             override: true
+
+      - name: Setup docker
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Build docker container
+        run: |
+          cd ci && docker build -t test_suite:latest .
+          docker run -d --name test_suite -p 4200:4200 -p 4201:4201 test_suite:latest
+
+      - name: Run cargo-tarpaulin
+        uses: actions-rs/tarpaulin@v0.1
+        with:
+          version: '0.15.0'
+
+      - name: Upload to codecov.io
+        uses: codecov/codecov-action@v1.0.2
+        with:
+          token: ${{secrets.CODECOV_TOKEN}}
+
+      - name: Collect docker logs
+        if: always()
+        run: docker logs test_suite > my_logs.txt 2>&1
+        
+      - name: Upload docker logs  
+        uses: actions/upload-artifact@v2
+        if: always()
+        with:
+          name: docker logs
+          path: my_logs.txt
