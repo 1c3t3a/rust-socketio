@@ -1,6 +1,7 @@
 [![Latest Version](https://img.shields.io/crates/v/rust_socketio)](https://crates.io/crates/rust_socketio)
 [![Build and code style](https://github.com/1c3t3a/rust-socketio/actions/workflows/build.yml/badge.svg)](https://github.com/1c3t3a/rust-socketio/actions/workflows/build.yml)
 [![Test](https://github.com/1c3t3a/rust-socketio/actions/workflows/test.yml/badge.svg)](https://github.com/1c3t3a/rust-socketio/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/1c3t3a/rust-socketio/branch/main/graph/badge.svg?token=GUF406K0KL)](https://codecov.io/gh/1c3t3a/rust-socketio)
 
 # Rust-socketio-client
 
