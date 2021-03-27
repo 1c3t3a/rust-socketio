@@ -301,9 +301,8 @@ impl TransportClient {
                     let mut packet_bytes = BytesMut::with_capacity(data.len() + 1);
                     packet_bytes.put_u8(b'b');
 
-                    let data_buffer: &mut [u8] = &mut [];
-                    base64::encode_config_slice(data, base64::STANDARD, data_buffer);
-                    packet_bytes.put(&*data_buffer);
+                    let encoded_data = base64::encode(data);
+                    packet_bytes.put(encoded_data.as_bytes());
 
                     packet_bytes.freeze()
                 } else {
