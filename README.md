@@ -5,7 +5,7 @@
 
 # Rust-socketio-client
 
-An implementation of a socket.io client written in the Rust programming language. This implementation currently supports revision 5 of the socket.io protocol and therefore revision 4 of the engine.io protocol. If you have any connection issues with this client, make sure the server uses at least revision 4 of the engine.io protocol.
+An implementation of a socket.io client written in the rust programming language. This implementation currently supports revision 5 of the socket.io protocol and therefore revision 4 of the engine.io protocol. If you have any connection issues with this client, make sure the server uses at least revision 4 of the engine.io protocol.
 
 ## Example usage
 
@@ -62,7 +62,7 @@ Documentation of this crate can be found up on [docs.rs](https://docs.rs/rust_so
 
 This implementation now supports all of the features of the socket.io protocol mentioned [here](https://github.com/socketio/socket.io-protocol).
 It generally tries to make use of websockets as often as possible. This means most times
-only the opening request uses http and as soon as the server mentions that he is able to use
+only the opening request uses http and as soon as the server mentions that he is able to upgrade to
 websockets, an upgrade  is performed. But if this upgrade is not successful or the server
 does not mention an upgrade possibility, http-long polling is used (as specified in the protocol specs).
 Here's an overview of possible use-cases:
