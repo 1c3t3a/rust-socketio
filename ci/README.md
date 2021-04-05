@@ -34,3 +34,7 @@ docker run -d --name test_suite -p 4200:4200 -p 4201:4201 test_suite:latest
 The docker container runs a shell script that starts the two servers in the background and checks if the processes are still alive.
 
 As soon as the servers are running, you can start the test via `make pipeline`, which will execute every tests that's run in the whole pipeline.
+
+# Polling vs. Websockets
+
+The underlying engine.io protocol provides two mechanisms for transporting: polling and websockets. In order to test both in the pipeline, the two servers are configured differently. The socket.io test suite always upgrades to websockets as fast as possible while the engine.io suite just uses long-polling. This assures that both the websocket connection code and the long-polling code gets tested (as seen on codecov.io). Keep that in mind while expanding the tests.
