@@ -95,6 +95,9 @@ impl TransportClient {
             None,
         );
 
+        // store the connected value as true, if the connection process fails
+        // later, the value will be updated
+        self.connected.store(true, Ordering::Release);
         self.send(&open_packet)
     }
 
@@ -524,7 +527,7 @@ mod test {
 
         assert!(socket.on("Close".into(), |_, _| {}).is_ok());
 
-        assert!(socket.connect().is_ok());
+        socket.connect().unwrap();
 
         let ack_callback = |message: Payload, _| {
             println!("Yehaa! My ack got acked?");

@@ -157,7 +157,7 @@ impl TransportClient {
 
                     // the response contains the handshake data
                     if let Ok(conn_data) = serde_json::from_str::<HandshakeData>(&response[1..]) {
-                        self.connected.store(false, Ordering::Release);
+                        self.connected.store(true, Ordering::Release);
 
                         // check if we could upgrade to websockets
                         let websocket_upgrade = conn_data
