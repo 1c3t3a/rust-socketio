@@ -168,9 +168,7 @@ impl TransportClient {
                         // if we have an upgrade option, send the corresponding request, if this doesn't work
                         // for some reason, proceed via polling
                         if websocket_upgrade {
-                            if let Err(error) = self.upgrade_connection(&conn_data.sid) {
-                                eprintln!("upgrading to websockets was not successful because of [{}], proceeding via polling", error);
-                            }
+                            let _ = self.upgrade_connection(&conn_data.sid);
                         }
 
                         // set the connection data
