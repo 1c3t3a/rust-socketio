@@ -48,12 +48,14 @@ impl EngineSocket {
             loop {
                 match s.poll_cycle() {
                     Ok(_) => break,
-                    e @ Err(Error::HttpError(_)) | e @ Err(Error::ReqwestError(_)) => panic!("{}", e.unwrap_err()),
+                    e @ Err(Error::HttpError(_)) | e @ Err(Error::ReqwestError(_)) => {
+                        panic!("{}", e.unwrap_err())
+                    }
                     _ => (),
                 }
             }
         });
-        
+
         Ok(())
     }
 
@@ -136,7 +138,11 @@ impl EngineSocket {
     }
 
     pub(crate) fn is_connected(&self) -> Result<bool> {
-        Ok(self.transport_client.read()?.connected.load(Ordering::Acquire)) 
+        Ok(self
+            .transport_client
+            .read()?
+            .connected
+            .load(Ordering::Acquire))
     }
 }
 
