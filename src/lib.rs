@@ -305,7 +305,7 @@ impl Socket {
     /// in case you send a [`Payload::String`], the string needs to be valid JSON.
     /// It's even recommended to use a library like serde_json to serialize the data properly.
     /// It also requires a timeout `Duration` in which the client needs to answer.
-    /// If the ack is accked in the correct timespan, the specified callback is
+    /// If the ack is acked in the correct timespan, the specified callback is
     /// called. The callback consumes a [`Payload`] which represents the data send
     /// by the server.
     ///

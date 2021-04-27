@@ -165,11 +165,11 @@ impl TransportClient {
                             .iter()
                             .any(|upgrade| upgrade.to_lowercase() == *"websocket");
 
-                        // if we have an upgrade option, send the corresponding request, if this doesnt work
+                        // if we have an upgrade option, send the corresponding request, if this doesn't work
                         // for some reason, proceed via polling
                         if websocket_upgrade {
                             if let Err(error) = self.upgrade_connection(&conn_data.sid) {
-                                eprintln!("upgrading to websockets was not succesfull because of [{}], proceeding via polling", error);
+                                eprintln!("upgrading to websockets was not successful because of [{}], proceeding via polling", error);
                             }
                         }
 
@@ -211,19 +211,19 @@ impl TransportClient {
     /// specs, this needs the following preconditions:
     /// - the handshake must have already happened
     /// - the handshake `upgrade` field needs to contain the value `websocket`.
-    /// If those precondionts are valid, it is save to call the method. The protocol then
+    /// If those preconditions are valid, it is save to call the method. The protocol then
     /// requires the following procedure:
     /// - the client starts to connect to the server via websocket, mentioning the related `sid` received
     ///   in the handshake.
     /// - to test out the connection, the client sends a `ping` packet with the payload `probe`.
     /// - if the server receives this correctly, it responses by sending a `pong` packet with the payload `probe`.
     /// - if the client receives that both sides can be sure that the upgrade is save and the client requests
-    ///   the final updgrade by sending another `update` packet over `websocket`.
+    ///   the final upgrade by sending another `update` packet over `websocket`.
     /// If this procedure is alright, the new transport is established.
     fn upgrade_connection(&mut self, new_sid: &str) -> Result<()> {
         let host_address = self.host_address.lock()?;
         if let Some(address) = &*host_address {
-            // unwrapping here is infact save as we only set this url if it gets orderly parsed
+            // unwrapping here is in fact save as we only set this url if it gets orderly parsed
             let mut address = Url::parse(&address).unwrap();
 
             if self.engine_io_mode.load(Ordering::Relaxed) {
@@ -261,10 +261,12 @@ impl TransportClient {
             sender.send_message(&Message::text(Cow::Borrowed("5")))?;
 
             // upgrade the transport layer
-            self.transport = Arc::new(TransportType::Websocket(
+            // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection
+            // procedure
+            *Arc::get_mut(&mut self.transport).unwrap() = TransportType::Websocket(
                 Arc::new(Mutex::new(receiver)),
                 Arc::new(Mutex::new(sender)),
-            ));
+            );
 
             return Ok(());
         }
@@ -272,7 +274,7 @@ impl TransportClient {
     }
 
     /// Sends a packet to the server. This optionally handles sending of a
-    /// socketio binary attachement via the boolean attribute `is_binary_att`.
+    /// socketio binary attachment via the boolean attribute `is_binary_att`.
     pub fn emit(&self, packet: Packet, is_binary_att: bool) -> Result<()> {
         if !self.connected.load(Ordering::Acquire) {
             let error = Error::ActionBeforeOpen;
@@ -287,7 +289,7 @@ impl TransportClient {
         drop(host);
 
         // send a post request with the encoded payload as body
-        // if this is a binary attachement, then send the raw bytes
+        // if this is a binary attachment, then send the raw bytes
         let data = if is_binary_att {
             packet.data
         } else {
@@ -297,7 +299,7 @@ impl TransportClient {
         match &self.transport.as_ref() {
             TransportType::Polling(client) => {
                 let data_to_send = if is_binary_att {
-                    // the binary attachement gets `base64` encoded
+                    // the binary attachment gets `base64` encoded
                     let mut packet_bytes = BytesMut::with_capacity(data.len() + 1);
                     packet_bytes.put_u8(b'b');
 
@@ -371,7 +373,7 @@ impl TransportClient {
 
         while self.connected.load(Ordering::Acquire) {
             let data = match &self.transport.as_ref() {
-                // we wont't use the shared client as this blocks the resource
+                // we won't use the shared client as this blocks the resource
                 // in the long polling requests
                 TransportType::Polling(_) => {
                     let query_path = self.get_query_path()?;
