@@ -8,7 +8,6 @@ use crate::{
     Socket,
 };
 use bytes::Bytes;
-use if_chain::if_chain;
 use rand::{thread_rng, Rng};
 use std::{
     fmt::Debug,
@@ -406,10 +405,7 @@ impl TransportClient {
 
     /// Handles a binary event.
     #[inline]
-    fn handle_binary_event(
-        socket_packet: SocketPacket,
-        clone_self: &TransportClient,
-    ) {
+    fn handle_binary_event(socket_packet: SocketPacket, clone_self: &TransportClient) {
         let event = if let Some(string_data) = socket_packet.data {
             string_data.replace("\"", "").into()
         } else {
@@ -435,38 +431,37 @@ impl TransportClient {
     fn handle_event(socket_packet: SocketPacket, clone_self: &TransportClient) {
         // unwrap the potential data
         if let Some(data) = socket_packet.data {
-            if_chain! {
-                    // the string must be a valid json array with the event at index 0 and the
-                    // payload at index 1. if no event is specified, the message callback is used
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&data);
-                    if let serde_json::Value::Array(contents) = value;
-                    then {
-                        // check which callback to use and call it with the data if it's present
-                        if data.len() > 1 {
-                            if let serde_json::Value::String(event) = &contents[0] {
-                                if let Some(function) = clone_self.get_event_callback(&Event::Custom(event.to_owned())) {
-                                    spawn_scoped!({
-                                        let mut lock = function.1.write().unwrap();
-                                        let socket = Socket {
-                                            transport: clone_self.clone(),
-                                        };
-                                        lock(Payload::String(contents[1].to_string()), socket);
-                                        drop(lock);
-                                    });
-                                }
-                            }
-                        } else if let Some(function) = clone_self.get_event_callback(&Event::Message) {
+            // the string must be a valid json array with the event at index 0 and the
+            // payload at index 1. if no event is specified, the message callback is used
+            if let Ok(serde_json::Value::Array(contents)) =
+                serde_json::from_str::<serde_json::Value>(&data)
+            {
+                // check which callback to use and call it with the data if it's present
+                if data.len() > 1 {
+                    if let serde_json::Value::String(event) = &contents[0] {
+                        if let Some(function) =
+                            clone_self.get_event_callback(&Event::Custom(event.to_owned()))
+                        {
                             spawn_scoped!({
                                 let mut lock = function.1.write().unwrap();
                                 let socket = Socket {
                                     transport: clone_self.clone(),
                                 };
-                                lock(Payload::String(contents[0].to_string()), socket);
+                                lock(Payload::String(contents[1].to_string()), socket);
                                 drop(lock);
                             });
                         }
                     }
-
+                } else if let Some(function) = clone_self.get_event_callback(&Event::Message) {
+                    spawn_scoped!({
+                        let mut lock = function.1.write().unwrap();
+                        let socket = Socket {
+                            transport: clone_self.clone(),
+                        };
+                        lock(Payload::String(contents[0].to_string()), socket);
+                        drop(lock);
+                    });
+                }
             }
         }
     }
