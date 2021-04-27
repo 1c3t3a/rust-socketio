@@ -1,6 +1,6 @@
 [package]
 name = "rust_socketio"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Bastian Kersting <bastian@cmbt.de>"]
 edition = "2018"
 description = "An implementation of a socketio client written in rust."

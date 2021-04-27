@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.2.1`](#021) - _2021.04.27_
 * [`0.2.0`](#020) – _2021.03.13_
 * [`0.1.1`](#011) – _2021.01.10_
 * [`0.1.0`](#010) – _2021.01.05_
@@ -19,6 +20,16 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## _[Unreleased]_
 
 _nothing new to show for… yet!_
+
+## <a name="021">[0.2.1] - _Bugfixes_ </a>
+
+_2021.04.27_
+
+### Changes
+
+* Corrected memory odering issues which might have become an issue on certain platforms.
+* Added this CHANGELOG to keep track of all changes.
+* Small stylistic changes to the codebase in general.
 
 ## <a name="020">[0.2.0] - _Fully implemented the socker.io protocol 🎉_ </a>
 
