@@ -15,7 +15,6 @@ use std::sync::{
 #[derive(Clone, Debug)]
 pub struct EngineSocket {
     transport_client: Arc<RwLock<TransportClient>>,
-    serving: Arc<AtomicBool>,
 }
 
 impl EngineSocket {
@@ -23,7 +22,6 @@ impl EngineSocket {
     pub fn new(engine_io_mode: bool) -> Self {
         EngineSocket {
             transport_client: Arc::new(RwLock::new(TransportClient::new(engine_io_mode))),
-            serving: Arc::new(AtomicBool::default()),
         }
     }
 
@@ -34,7 +32,7 @@ impl EngineSocket {
             .transport_client
             .read()?
             .connected
-            .load(Ordering::Relaxed)
+            .load(Ordering::Acquire)
         {
             return Err(Error::IllegalActionAfterOpen);
         }
@@ -50,19 +48,20 @@ impl EngineSocket {
             loop {
                 match s.poll_cycle() {
                     Ok(_) => break,
-                    e @ Err(Error::HttpError(_)) | e @ Err(Error::ReqwestError(_)) => panic!(e),
+                    e @ Err(Error::HttpError(_)) | e @ Err(Error::ReqwestError(_)) => {
+                        panic!("{}", e.unwrap_err())
+                    }
                     _ => (),
                 }
             }
         });
-        self.serving.swap(true, Ordering::SeqCst);
 
         Ok(())
     }
 
     /// Sends a packet to the server.
     pub fn emit(&mut self, packet: Packet) -> Result<()> {
-        if !self.serving.load(Ordering::Relaxed) {
+        if !self.is_connected()? {
             return Err(Error::ActionBeforeOpen);
         }
         self.transport_client.read()?.emit(packet, false)
@@ -70,7 +69,7 @@ impl EngineSocket {
 
     /// Sends a socketio binary attachement to the server.
     pub fn emit_binary_attachement(&mut self, attachement: Bytes) -> Result<()> {
-        if !self.serving.load(Ordering::Relaxed) {
+        if !self.is_connected()? {
             return Err(Error::ActionBeforeOpen);
         }
         let packet = Packet::new(PacketId::Message, attachement);
@@ -83,7 +82,7 @@ impl EngineSocket {
     where
         F: Fn(()) + 'static + Sync + Send,
     {
-        if self.serving.load(Ordering::Relaxed) {
+        if self.is_connected()? {
             return Err(Error::IllegalActionAfterOpen);
         }
         self.transport_client.write()?.set_on_open(function);
@@ -95,7 +94,7 @@ impl EngineSocket {
     where
         F: Fn(()) + 'static + Sync + Send,
     {
-        if self.serving.load(Ordering::Relaxed) {
+        if self.is_connected()? {
             return Err(Error::IllegalActionAfterOpen);
         }
         self.transport_client.write()?.set_on_close(function);
@@ -107,7 +106,7 @@ impl EngineSocket {
     where
         F: Fn(Packet) + 'static + Sync + Send,
     {
-        if self.serving.load(Ordering::Relaxed) {
+        if self.is_connected()? {
             return Err(Error::IllegalActionAfterOpen);
         }
         self.transport_client.write()?.set_on_packet(function);
@@ -119,7 +118,7 @@ impl EngineSocket {
     where
         F: Fn(Bytes) + 'static + Sync + Send,
     {
-        if self.serving.load(Ordering::Relaxed) {
+        if self.is_connected()? {
             return Err(Error::IllegalActionAfterOpen);
         }
         self.transport_client.write()?.set_on_data(function);
@@ -131,11 +130,20 @@ impl EngineSocket {
     where
         F: Fn(String) + 'static + Sync + Send + Send,
     {
-        if self.serving.load(Ordering::Relaxed) {
+        if self.is_connected()? {
             return Err(Error::IllegalActionAfterOpen);
         }
         self.transport_client.write()?.set_on_error(function);
         Ok(())
+    }
+
+    // Check if the underlying transport client is connected.
+    pub(crate) fn is_connected(&self) -> Result<bool> {
+        Ok(self
+            .transport_client
+            .read()?
+            .connected
+            .load(Ordering::Acquire))
     }
 }
 

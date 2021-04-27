@@ -8,7 +8,6 @@ use crate::{
     Socket,
 };
 use bytes::Bytes;
-use if_chain::if_chain;
 use rand::{thread_rng, Rng};
 use std::{
     fmt::Debug,
@@ -42,7 +41,6 @@ pub struct TransportClient {
     engine_socket: Arc<Mutex<EngineSocket>>,
     host: Arc<String>,
     connected: Arc<AtomicBool>,
-    engineio_connected: Arc<AtomicBool>,
     on: Arc<Vec<EventCallback>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
     // used to detect unfinished binary events as, as the attachements
@@ -59,7 +57,6 @@ impl TransportClient {
             engine_socket: Arc::new(Mutex::new(EngineSocket::new(false))),
             host: Arc::new(address.into()),
             connected: Arc::new(AtomicBool::default()),
-            engineio_connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
             unfinished_packet: Arc::new(RwLock::new(None)),
@@ -98,12 +95,15 @@ impl TransportClient {
             None,
         );
 
+        // store the connected value as true, if the connection process fails
+        // later, the value will be updated
+        self.connected.store(true, Ordering::Release);
         self.send(&open_packet)
     }
 
     /// Sends a `socket.io` packet to the server using the `engine.io` client.
     pub fn send(&self, packet: &SocketPacket) -> Result<()> {
-        if !self.engineio_connected.load(Ordering::Relaxed) {
+        if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
             return Err(Error::ActionBeforeOpen);
         }
 
@@ -118,7 +118,7 @@ impl TransportClient {
     /// send to the server mentioning this attachement in it's
     /// `attachements` field.
     fn send_binary_attachement(&self, attachement: Bytes) -> Result<()> {
-        if !self.engineio_connected.load(Ordering::Relaxed) {
+        if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
             return Err(Error::ActionBeforeOpen);
         }
 
@@ -251,10 +251,10 @@ impl TransportClient {
 
             match socket_packet.packet_type {
                 SocketPacketId::Connect => {
-                    clone_self.connected.swap(true, Ordering::Relaxed);
+                    clone_self.connected.store(true, Ordering::Release);
                 }
                 SocketPacketId::ConnectError => {
-                    clone_self.connected.swap(false, Ordering::Relaxed);
+                    clone_self.connected.store(false, Ordering::Release);
                     if let Some(function) = clone_self.get_event_callback(&Event::Error) {
                         spawn_scoped!({
                             let mut lock = function.1.write().unwrap();
@@ -275,10 +275,10 @@ impl TransportClient {
                     }
                 }
                 SocketPacketId::Disconnect => {
-                    clone_self.connected.swap(false, Ordering::Relaxed);
+                    clone_self.connected.store(false, Ordering::Release);
                 }
                 SocketPacketId::Event => {
-                    TransportClient::handle_event(socket_packet, clone_self).unwrap();
+                    TransportClient::handle_event(socket_packet, clone_self);
                 }
                 SocketPacketId::Ack => {
                     Self::handle_ack(socket_packet, clone_self);
@@ -287,7 +287,7 @@ impl TransportClient {
                     // in case of a binary event, check if this is the attachement or not and
                     // then either handle the event or set the open packet
                     if is_finalized_packet {
-                        Self::handle_binary_event(socket_packet, clone_self).unwrap();
+                        Self::handle_binary_event(socket_packet, clone_self);
                     } else {
                         *clone_self.unfinished_packet.write().unwrap() = Some(socket_packet);
                     }
@@ -366,7 +366,6 @@ impl TransportClient {
 
         let clone_self = self.clone();
         let open_callback = move |_| {
-            clone_self.engineio_connected.swap(true, Ordering::Relaxed);
             if let Some(function) = clone_self.get_event_callback(&Event::Connect) {
                 let mut lock = function.1.write().unwrap();
                 let socket = Socket {
@@ -382,7 +381,6 @@ impl TransportClient {
 
         let clone_self = self.clone();
         let close_callback = move |_| {
-            clone_self.engineio_connected.swap(false, Ordering::Relaxed);
             if let Some(function) = clone_self.get_event_callback(&Event::Close) {
                 let mut lock = function.1.write().unwrap();
                 let socket = Socket {
@@ -410,10 +408,7 @@ impl TransportClient {
 
     /// Handles a binary event.
     #[inline]
-    fn handle_binary_event(
-        socket_packet: SocketPacket,
-        clone_self: &TransportClient,
-    ) -> Result<()> {
+    fn handle_binary_event(socket_packet: SocketPacket, clone_self: &TransportClient) {
         let event = if let Some(string_data) = socket_packet.data {
             string_data.replace("\"", "").into()
         } else {
@@ -432,55 +427,56 @@ impl TransportClient {
                 });
             }
         }
-        Ok(())
     }
 
     /// A method for handling the Event Socket Packets.
     // this could only be called with an event
-    fn handle_event(socket_packet: SocketPacket, clone_self: &TransportClient) -> Result<()> {
+    fn handle_event(socket_packet: SocketPacket, clone_self: &TransportClient) {
         // unwrap the potential data
         if let Some(data) = socket_packet.data {
-            if_chain! {
-                    // the string must be a valid json array with the event at index 0 and the
-                    // payload at index 1. if no event is specified, the message callback is used
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&data);
-                    if let serde_json::Value::Array(contents) = value;
-                    then {
-                        // check which callback to use and call it with the data if it's present
-                        if data.len() > 1 {
-                            if let serde_json::Value::String(event) = &contents[0] {
-                                if let Some(function) = clone_self.get_event_callback(&Event::Custom(event.to_owned())) {
-                                    spawn_scoped!({
-                                        let mut lock = function.1.write().unwrap();
-                                        let socket = Socket {
-                                            transport: clone_self.clone(),
-                                        };
-                                        lock(Payload::String(contents[1].to_string()), socket);
-                                        drop(lock);
-                                    });
-                                }
-                            }
-                        } else if let Some(function) = clone_self.get_event_callback(&Event::Message) {
+            // the string must be a valid json array with the event at index 0 and the
+            // payload at index 1. if no event is specified, the message callback is used
+            if let Ok(serde_json::Value::Array(contents)) =
+                serde_json::from_str::<serde_json::Value>(&data)
+            {
+                // check which callback to use and call it with the data if it's present
+                if data.len() > 1 {
+                    if let serde_json::Value::String(event) = &contents[0] {
+                        if let Some(function) =
+                            clone_self.get_event_callback(&Event::Custom(event.to_owned()))
+                        {
                             spawn_scoped!({
                                 let mut lock = function.1.write().unwrap();
                                 let socket = Socket {
                                     transport: clone_self.clone(),
                                 };
-                                lock(Payload::String(contents[0].to_string()), socket);
+                                lock(Payload::String(contents[1].to_string()), socket);
                                 drop(lock);
                             });
                         }
                     }
-
+                } else if let Some(function) = clone_self.get_event_callback(&Event::Message) {
+                    spawn_scoped!({
+                        let mut lock = function.1.write().unwrap();
+                        let socket = Socket {
+                            transport: clone_self.clone(),
+                        };
+                        lock(Payload::String(contents[0].to_string()), socket);
+                        drop(lock);
+                    });
+                }
             }
         }
-        Ok(())
     }
 
     /// A convenient method for finding a callback for a certain event.
     #[inline]
     fn get_event_callback(&self, event: &Event) -> Option<&(Event, Callback<Payload>)> {
         self.on.iter().find(|item| item.0 == *event)
+    }
+
+    fn is_engineio_connected(&self) -> Result<bool> {
+        self.engine_socket.lock()?.is_connected()
     }
 }
 
@@ -495,11 +491,10 @@ impl Debug for Ack {
 
 impl Debug for TransportClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("TransportClient(engine_socket: {:?}, host: {:?}, connected: {:?}, engineio_connected: {:?}, on: <defined callbacks>, outstanding_acks: {:?}, nsp: {:?})",
+        f.write_fmt(format_args!("TransportClient(engine_socket: {:?}, host: {:?}, connected: {:?}, on: <defined callbacks>, outstanding_acks: {:?}, nsp: {:?})",
             self.engine_socket,
             self.host,
             self.connected,
-            self.engineio_connected,
             self.outstanding_acks,
             self.nsp,
         ))
@@ -532,7 +527,7 @@ mod test {
 
         assert!(socket.on("Close".into(), |_, _| {}).is_ok());
 
-        assert!(socket.connect().is_ok());
+        socket.connect().unwrap();
 
         let ack_callback = |message: Payload, _| {
             println!("Yehaa! My ack got acked?");

@@ -157,7 +157,7 @@ impl TransportClient {
 
                     // the response contains the handshake data
                     if let Ok(conn_data) = serde_json::from_str::<HandshakeData>(&response[1..]) {
-                        *Arc::get_mut(&mut self.connected).unwrap() = AtomicBool::from(true);
+                        self.connected.store(true, Ordering::Release);
 
                         // check if we could upgrade to websockets
                         let websocket_upgrade = conn_data
@@ -274,7 +274,7 @@ impl TransportClient {
     /// Sends a packet to the server. This optionally handles sending of a
     /// socketio binary attachement via the boolean attribute `is_binary_att`.
     pub fn emit(&self, packet: Packet, is_binary_att: bool) -> Result<()> {
-        if !self.connected.load(Ordering::Relaxed) {
+        if !self.connected.load(Ordering::Acquire) {
             let error = Error::ActionBeforeOpen;
             self.call_error_callback(format!("{}", error))?;
             return Err(error);
@@ -346,7 +346,7 @@ impl TransportClient {
     /// connected. This should run separately at all time to ensure proper
     /// response handling from the server.
     pub fn poll_cycle(&mut self) -> Result<()> {
-        if !self.connected.load(Ordering::Relaxed) {
+        if !self.connected.load(Ordering::Acquire) {
             let error = Error::ActionBeforeOpen;
             self.call_error_callback(format!("{}", error))?;
             return Err(error);
@@ -369,7 +369,7 @@ impl TransportClient {
                     .ping_interval,
         );
 
-        while self.connected.load(Ordering::Relaxed) {
+        while self.connected.load(Ordering::Acquire) {
             let data = match &self.transport.as_ref() {
                 // we wont't use the shared client as this blocks the resource
                 // in the long polling requests
@@ -433,8 +433,7 @@ impl TransportClient {
                         }
                         drop(on_close);
                         // set current state to not connected and stop polling
-                        self.connected
-                            .compare_and_swap(true, false, Ordering::Acquire);
+                        self.connected.store(false, Ordering::Release);
                     }
                     PacketId::Open => {
                         unreachable!("Won't happen as we open the connection beforehand");
@@ -458,8 +457,7 @@ impl TransportClient {
             if server_timeout < last_ping.elapsed() {
                 // the server is unreachable
                 // set current state to not connected and stop polling
-                self.connected
-                    .compare_and_swap(true, false, Ordering::Acquire);
+                self.connected.store(false, Ordering::Release);
             }
         }
         Ok(())
@@ -504,7 +502,7 @@ impl TransportClient {
         );
 
         // append a session id if the socket is connected
-        if self.connected.load(Ordering::Relaxed) {
+        if self.connected.load(Ordering::Acquire) {
             path.push_str(&format!(
                 "&sid={}",
                 Arc::as_ref(&self.connection_data)
