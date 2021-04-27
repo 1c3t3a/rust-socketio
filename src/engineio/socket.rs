@@ -137,6 +137,7 @@ impl EngineSocket {
         Ok(())
     }
 
+    // Check if the underlying transport client is connected.
     pub(crate) fn is_connected(&self) -> Result<bool> {
         Ok(self
             .transport_client
