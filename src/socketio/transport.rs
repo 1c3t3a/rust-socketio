@@ -43,8 +43,8 @@ pub struct TransportClient {
     connected: Arc<AtomicBool>,
     on: Arc<Vec<EventCallback>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
-    // used to detect unfinished binary events as, as the attachements
-    // gets send in a seperate packet
+    // used to detect unfinished binary events as, as the attachments
+    // gets send in a separate packet
     unfinished_packet: Arc<RwLock<Option<SocketPacket>>>,
     // namespace, for multiplexing messages
     pub(crate) nsp: Arc<Option<String>>,
@@ -113,18 +113,18 @@ impl TransportClient {
         self.engine_socket.lock()?.emit(engine_packet)
     }
 
-    /// Sends a single binary attachement to the server. This method
+    /// Sends a single binary attachment to the server. This method
     /// should only be called if a `BinaryEvent` or `BinaryAck` was
-    /// send to the server mentioning this attachement in it's
-    /// `attachements` field.
-    fn send_binary_attachement(&self, attachement: Bytes) -> Result<()> {
+    /// send to the server mentioning this attachment in it's
+    /// `attachments` field.
+    fn send_binary_attachment(&self, attachment: Bytes) -> Result<()> {
         if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
             return Err(Error::ActionBeforeOpen);
         }
 
         self.engine_socket
             .lock()?
-            .emit_binary_attachment(attachement)
+            .emit_binary_attachment(attachment)
     }
 
     /// Emits to certain event with given data. The data needs to be JSON,
@@ -139,12 +139,12 @@ impl TransportClient {
         if is_string_packet {
             self.send(&socket_packet)
         } else {
-            // first send the raw packet announcing the attachement
+            // first send the raw packet announcing the attachment
             self.send(&socket_packet)?;
 
-            // then send the attachement
+            // then send the attachment
             // unwrapping here is safe as this is a binary payload
-            self.send_binary_attachement(socket_packet.binary_data.unwrap())
+            self.send_binary_attachment(socket_packet.binary_data.unwrap())
         }
     }
 
@@ -228,8 +228,8 @@ impl TransportClient {
     #[inline]
     fn handle_new_message(socket_bytes: Bytes, clone_self: &TransportClient) {
         let mut is_finalized_packet = false;
-        // either this is a complete packet or the rest of a binary packet (as attachements are
-        // sent in a seperate packet).
+        // either this is a complete packet or the rest of a binary packet (as attachments are
+        // sent in a separate packet).
         let decoded_packet = if clone_self.unfinished_packet.read().unwrap().is_some() {
             // this must be an attachement, so parse it
             let mut unfinished_packet = clone_self.unfinished_packet.write().unwrap();
@@ -561,7 +561,7 @@ mod test {
         );
         assert!(sut.send(&packet).is_err());
         assert!(sut
-            .send_binary_attachement(Bytes::from_static(b"Hallo"))
+            .send_binary_attachment(Bytes::from_static(b"Hallo"))
             .is_err());
     }
 }

@@ -15,9 +15,9 @@ pub enum Error {
     IncompletePacket,
     #[error("Got an invalid packet which did not follow the protocol format")]
     InvalidPacket,
-    #[error("An error occured while decoding the utf-8 text: {0}")]
+    #[error("An error occurred while decoding the utf-8 text: {0}")]
     Utf8Error(#[from] str::Utf8Error),
-    #[error("An error occured while encoding/decoding base64: {0}")]
+    #[error("An error occurred while encoding/decoding base64: {0}")]
     Base64Error(#[from] DecodeError),
     #[error("Invalid Url: {0}")]
     InvalidUrl(String),
@@ -68,7 +68,7 @@ mod tests {
 
     use super::*;
 
-    /// This just tests the own implementationa and relies on `thiserror` for the others.
+    /// This just tests the own implementations and relies on `thiserror` for the others.
     #[test]
     fn test_error_conversion() {
         let mutex = Mutex::new(0);
