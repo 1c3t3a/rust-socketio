@@ -1,0 +1,13 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+        paths: 
+          - "src"
+        branches: 
+          - main
+        if_ci_failed: ignore
+        informational: false
+        only_pulls: false
