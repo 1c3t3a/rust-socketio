@@ -23,7 +23,7 @@ pub struct Packet {
     pub data: Option<String>,
     pub binary_data: Option<Bytes>,
     pub id: Option<i32>,
-    pub attachements: Option<u8>,
+    pub attachments: Option<u8>,
 }
 
 /// Converts a `u8` into a `PacketId`.
@@ -49,7 +49,7 @@ impl Packet {
         data: Option<String>,
         binary_data: Option<Bytes>,
         id: Option<i32>,
-        attachements: Option<u8>,
+        attachments: Option<u8>,
     ) -> Self {
         Packet {
             packet_type,
@@ -57,7 +57,7 @@ impl Packet {
             data,
             binary_data,
             id,
-            attachements,
+            attachments,
         }
     }
 
@@ -68,9 +68,9 @@ impl Packet {
         // first the packet type
         let mut string = (self.packet_type as u8).to_string();
 
-        // eventually a number of attachements, followed by '-'
+        // eventually a number of attachments, followed by '-'
         if let PacketId::BinaryAck | PacketId::BinaryEvent = self.packet_type {
-            string.push_str(&self.attachements.as_ref().unwrap().to_string());
+            string.push_str(&self.attachments.as_ref().unwrap().to_string());
             string.push('-');
         }
 
@@ -94,12 +94,12 @@ impl Packet {
                 format!(
                     "[{},{{\"_placeholder\":true,\"num\":{}}}]",
                     event_type,
-                    self.attachements.unwrap() - 1,
+                    self.attachments.unwrap() - 1,
                 )
             } else {
                 format!(
                     "[{{\"_placeholder\":true,\"num\":{}}}]",
-                    self.attachements.unwrap() - 1,
+                    self.attachments.unwrap() - 1,
                 )
             };
 
@@ -117,13 +117,13 @@ impl Packet {
     /// stream as it gets handled and send by it's own logic via the socket.
     /// Therefore this method does not return the correct value for the
     /// binary data, instead the socket is responsible for handling
-    /// this member. This is done because the attachement is usually
+    /// this member. This is done because the attachment is usually
     /// send in another packet.
     pub fn decode_bytes<'a>(payload: &'a Bytes) -> Result<Self> {
         let mut i = 0;
         let packet_id = u8_to_packet_id(*payload.first().ok_or(Error::EmptyPacket)?)?;
 
-        let attachements = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
+        let attachments = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
             let start = i + 1;
 
             while payload.get(i).ok_or(Error::IncompletePacket)? != &b'-' && i < payload.len() {
@@ -241,7 +241,7 @@ impl Packet {
             data,
             None,
             id,
-            attachements,
+            attachments,
         ))
     }
 }

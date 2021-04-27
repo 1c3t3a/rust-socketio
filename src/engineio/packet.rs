@@ -24,7 +24,7 @@ pub struct Packet {
 }
 
 // see https://en.wikipedia.org/wiki/Delimiter#ASCII_delimited_text
-const SEPERATOR: char = '\x1e';
+const SEPARATOR: char = '\x1e';
 
 /// Converts a byte into the corresponding `PacketId`.
 #[inline]
@@ -108,13 +108,13 @@ impl Packet {
 }
 
 /// Decodes a `payload` which in the `engine.io` context means a chain of normal
-/// packets separated by a certain SEPERATOR, in this case the delimiter `\x30`.
+/// packets separated by a certain SEPARATOR, in this case the delimiter `\x30`.
 pub fn decode_payload(payload: Bytes) -> Result<Vec<Packet>> {
     let mut vec = Vec::new();
     let mut last_index = 0;
 
     for i in 0..payload.len() {
-        if *payload.get(i).unwrap() as char == SEPERATOR {
+        if *payload.get(i).unwrap() as char == SEPARATOR {
             vec.push(Packet::decode_packet(payload.slice(last_index..i))?);
             last_index = i + 1;
         }
@@ -128,17 +128,17 @@ pub fn decode_payload(payload: Bytes) -> Result<Vec<Packet>> {
 }
 
 /// Encodes a payload. Payload in the `engine.io` context means a chain of
-/// normal `packets` separated by a SEPERATOR, in this case the delimiter
+/// normal `packets` separated by a SEPARATOR, in this case the delimiter
 /// `\x30`.
 pub fn encode_payload(packets: Vec<Packet>) -> Bytes {
     let mut buf = BytesMut::new();
     for packet in packets {
         // at the moment no base64 encoding is used
         buf.extend(Packet::encode_packet(packet));
-        buf.put_u8(SEPERATOR as u8);
+        buf.put_u8(SEPARATOR as u8);
     }
 
-    // remove the last seperator
+    // remove the last separator
     let _ = buf.split_off(buf.len() - 1);
     buf.freeze()
 }
