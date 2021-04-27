@@ -67,12 +67,12 @@ impl EngineSocket {
         self.transport_client.read()?.emit(packet, false)
     }
 
-    /// Sends a socketio binary attachement to the server.
-    pub fn emit_binary_attachement(&mut self, attachement: Bytes) -> Result<()> {
+    /// Sends a socketio binary attachment to the server.
+    pub fn emit_binary_attachment(&mut self, attachment: Bytes) -> Result<()> {
         if !self.is_connected()? {
             return Err(Error::ActionBeforeOpen);
         }
-        let packet = Packet::new(PacketId::Message, attachement);
+        let packet = Packet::new(PacketId::Message, attachment);
 
         self.transport_client.read()?.emit(packet, true)
     }
@@ -217,9 +217,7 @@ mod test {
         assert!(sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")))
             .is_err());
-        assert!(sut
-            .emit_binary_attachement(Bytes::from_static(b""))
-            .is_err());
+        assert!(sut.emit_binary_attachment(Bytes::from_static(b"")).is_err());
 
         assert!(sut.bind(SERVER_URL).is_ok());
 

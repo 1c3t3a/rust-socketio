@@ -124,7 +124,7 @@ impl TransportClient {
 
         self.engine_socket
             .lock()?
-            .emit_binary_attachement(attachement)
+            .emit_binary_attachment(attachement)
     }
 
     /// Emits to certain event with given data. The data needs to be JSON,
