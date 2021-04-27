@@ -217,9 +217,7 @@ mod test {
         assert!(sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")))
             .is_err());
-        assert!(sut
-            .emit_binary_attachment(Bytes::from_static(b""))
-            .is_err());
+        assert!(sut.emit_binary_attachment(Bytes::from_static(b"")).is_err());
 
         assert!(sut.bind(SERVER_URL).is_ok());
 
