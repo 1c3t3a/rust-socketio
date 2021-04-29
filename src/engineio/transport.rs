@@ -2,6 +2,7 @@ use crate::engineio::packet::{decode_payload, encode_payload, Packet, PacketId};
 use crate::error::{Error, Result};
 use adler32::adler32;
 use bytes::{BufMut, Bytes, BytesMut};
+use native_tls::TlsConnector;
 use reqwest::{blocking::Client, Url};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, time::SystemTime};
@@ -11,15 +12,20 @@ use std::{
     time::{Duration, Instant},
 };
 use websocket::{
+    client::sync::Client as WsClient,
+    sync::stream::{TcpStream, TlsStream},
+    ClientBuilder,
+};
+use websocket::{
     dataframe::Opcode, receiver::Reader, sync::Writer, ws::dataframe::DataFrame, Message,
 };
-use websocket::{sync::stream::TcpStream, ClientBuilder};
 
 /// The different types of transport used for transmitting a payload.
 #[derive(Clone)]
 enum TransportType {
     Polling(Arc<Mutex<Client>>),
     Websocket(Arc<Mutex<Reader<TcpStream>>>, Arc<Mutex<Writer<TcpStream>>>),
+    SecureWebsocket(Arc<Mutex<WsClient<TlsStream<TcpStream>>>>),
 }
 
 /// Type of a `Callback` function. (Normal closures can be passed in here).
@@ -40,6 +46,7 @@ pub struct TransportClient {
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     host_address: Arc<Mutex<Option<String>>>,
+    tls_config: Arc<Option<TlsConnector>>,
     connection_data: Arc<RwLock<Option<HandshakeData>>>,
     engine_io_mode: Arc<AtomicBool>,
 }
@@ -69,6 +76,7 @@ impl TransportClient {
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
             host_address: Arc::new(Mutex::new(None)),
+            tls_config: Arc::new(None),
             connection_data: Arc::new(RwLock::new(None)),
             engine_io_mode: Arc::new(AtomicBool::from(engine_io_mode)),
         }
@@ -223,6 +231,7 @@ impl TransportClient {
         if let Some(address) = &*host_address {
             // unwrapping here is in fact save as we only set this url if it gets orderly parsed
             let mut address = Url::parse(&address).unwrap();
+            drop(host_address);
 
             if self.engine_io_mode.load(Ordering::Relaxed) {
                 address.set_path(&(address.path().to_owned() + "engine.io/"));
@@ -238,37 +247,72 @@ impl TransportClient {
                 .append_pair("sid", new_sid)
                 .finish();
 
-            // connect to the server via websockets
-            let client = ClientBuilder::new(full_address.as_ref())?.connect_insecure()?;
-            client.set_nonblocking(false)?;
-
-            let (mut receiver, mut sender) = client.split()?;
-
-            // send the probe packet, the text `2probe` represents a ping packet with
-            // the content `probe`
-            sender.send_message(&Message::text(Cow::Borrowed("2probe")))?;
-
-            // expect to receive a probe packet
-            let message = receiver.recv_message()?;
-            if message.take_payload() != b"3probe" {
-                return Err(Error::HandshakeError("Error".to_owned()));
+            match full_address.scheme() {
+                "https" => {
+                    self.perform_upgrade_secure(&full_address)?;
+                }
+                "http" => {
+                    self.perform_upgrade_insecure(&full_address)?;
+                }
+                _ => return Err(Error::InvalidUrl(full_address.to_string())),
             }
-
-            // finally send the upgrade request. the payload `5` stands for an upgrade
-            // packet without any payload
-            sender.send_message(&Message::text(Cow::Borrowed("5")))?;
-
-            // upgrade the transport layer
-            // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection
-            // procedure
-            *Arc::get_mut(&mut self.transport).unwrap() = TransportType::Websocket(
-                Arc::new(Mutex::new(receiver)),
-                Arc::new(Mutex::new(sender)),
-            );
 
             return Ok(());
         }
         Err(Error::HandshakeError("Error - invalid url".to_owned()))
+    }
+
+    fn perform_upgrade_secure(&mut self, address: &Url) -> Result<()> {
+        let tls_config = (*self.tls_config).clone();
+        let mut client = ClientBuilder::new(address.as_ref())?.connect_secure(tls_config)?;
+
+        client.set_nonblocking(false)?;
+
+        client.send_message(&Message::text(Cow::Borrowed("2probe")))?;
+
+        let message = client.recv_message()?;
+        if message.take_payload() != b"3probe" {
+            return Err(Error::HandshakeError("Error".to_owned()));
+        }
+
+        // finally send the upgrade request. the payload `5` stands for an upgrade
+        // packet without any payload
+        client.send_message(&Message::text(Cow::Borrowed("5")))?;
+
+        *Arc::get_mut(&mut self.transport).unwrap() =
+            TransportType::SecureWebsocket(Arc::new(Mutex::new(client)));
+
+        Ok(())
+    }
+
+    fn perform_upgrade_insecure(&mut self, addres: &Url) -> Result<()> {
+        // connect to the server via websockets
+        let client = ClientBuilder::new(addres.as_ref())?.connect_insecure()?;
+        client.set_nonblocking(false)?;
+
+        let (mut receiver, mut sender) = client.split()?;
+
+        // send the probe packet, the text `2probe` represents a ping packet with
+        // the content `probe`
+        sender.send_message(&Message::text(Cow::Borrowed("2probe")))?;
+
+        // expect to receive a probe packet
+        let message = receiver.recv_message()?;
+        if message.take_payload() != b"3probe" {
+            return Err(Error::HandshakeError("Error".to_owned()));
+        }
+
+        // finally send the upgrade request. the payload `5` stands for an upgrade
+        // packet without any payload
+        sender.send_message(&Message::text(Cow::Borrowed("5")))?;
+
+        // upgrade the transport layer
+        // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection
+        // procedure
+        *Arc::get_mut(&mut self.transport).unwrap() =
+            TransportType::Websocket(Arc::new(Mutex::new(receiver)), Arc::new(Mutex::new(sender)));
+
+        Ok(())
     }
 
     /// Sends a packet to the server. This optionally handles sending of a
@@ -335,7 +379,20 @@ impl TransportClient {
                 } else {
                     Message::text(Cow::Borrowed(std::str::from_utf8(data.as_ref())?))
                 };
-                writer.send_message(&message).unwrap();
+                writer.send_message(&message)?;
+
+                Ok(())
+            }
+            TransportType::SecureWebsocket(client) => {
+                let mut client = client.lock()?;
+
+                let message = if is_binary_att {
+                    Message::binary(Cow::Borrowed(data.as_ref()))
+                } else {
+                    Message::text(Cow::Borrowed(std::str::from_utf8(data.as_ref())?))
+                };
+
+                client.send_message(&message)?;
 
                 Ok(())
             }
@@ -388,6 +445,22 @@ impl TransportClient {
 
                     // if this is a binary payload, we mark it as a message
                     let received_df = receiver.recv_dataframe()?;
+                    match received_df.opcode {
+                        Opcode::Binary => {
+                            let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
+                            message.put_u8(b'4');
+                            message.put(received_df.take_payload().as_ref());
+
+                            message.freeze()
+                        }
+                        _ => Bytes::from(received_df.take_payload()),
+                    }
+                }
+                TransportType::SecureWebsocket(client) => {
+                    let mut client = client.lock()?;
+
+                    // if this is a binary payload, we mark it as a message
+                    let received_df = client.recv_dataframe()?;
                     match received_df.opcode {
                         Opcode::Binary => {
                             let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
@@ -496,7 +569,7 @@ impl TransportClient {
             },
             match self.transport.as_ref() {
                 TransportType::Polling(_) => "polling",
-                TransportType::Websocket(_, _) => "websocket",
+                TransportType::Websocket(_, _) | TransportType::SecureWebsocket(_) => "websocket",
             },
             TransportClient::get_random_t(),
         );
@@ -523,7 +596,7 @@ impl Debug for TransportType {
             "TransportType({})",
             match self {
                 Self::Polling(_) => "Polling",
-                Self::Websocket(_, _) => "Websocket",
+                Self::Websocket(_, _) | Self::SecureWebsocket(_) => "Websocket",
             }
         ))
     }
