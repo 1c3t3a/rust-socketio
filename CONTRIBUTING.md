@@ -31,5 +31,5 @@ in the [LICENSE](LICENSE) file.
 
 ## Misc
 - We are looking at adopting the [conventional commits 1.0](https://www.conventionalcommits.org/en/v1.0.0/) standard.
-    - This woould make it easier for us to use tools like [jilu](https://crates.io/crates/jilu) to create change logs.
+    - This would make it easier for us to use tools like [jilu](https://crates.io/crates/jilu) to create change logs.
     - Read [keep a changelog](https://keepachangelog.com/en/1.0.0/) for more information.
