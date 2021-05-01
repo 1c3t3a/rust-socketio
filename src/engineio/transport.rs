@@ -3,7 +3,10 @@ use crate::error::{Error, Result};
 use adler32::adler32;
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
-use reqwest::{blocking::Client, Url};
+use reqwest::{
+    blocking::{Client, ClientBuilder},
+    Url,
+};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, time::SystemTime};
 use std::{fmt::Debug, sync::atomic::Ordering};
@@ -14,7 +17,7 @@ use std::{
 use websocket::{
     client::sync::Client as WsClient,
     sync::stream::{TcpStream, TlsStream},
-    ClientBuilder,
+    ClientBuilder as WsClientBuilder,
 };
 use websocket::{
     dataframe::Opcode, receiver::Reader, sync::Writer, ws::dataframe::DataFrame, Message,
@@ -64,9 +67,18 @@ struct HandshakeData {
 
 impl TransportClient {
     /// Creates an instance of `TransportClient`.
-    pub fn new(engine_io_mode: bool) -> Self {
+    pub fn new(engine_io_mode: bool, tls_config: Option<TlsConnector>) -> Self {
+        let client = if let Some(config) = tls_config.clone() {
+            ClientBuilder::new()
+                .use_preconfigured_tls(config)
+                .build()
+                .unwrap()
+        } else {
+            Client::new()
+        };
+
         TransportClient {
-            transport: Arc::new(TransportType::Polling(Arc::new(Mutex::new(Client::new())))),
+            transport: Arc::new(TransportType::Polling(Arc::new(Mutex::new(client)))),
             on_error: Arc::new(RwLock::new(None)),
             on_open: Arc::new(RwLock::new(None)),
             on_close: Arc::new(RwLock::new(None)),
@@ -76,7 +88,7 @@ impl TransportClient {
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
             host_address: Arc::new(Mutex::new(None)),
-            tls_config: Arc::new(None),
+            tls_config: Arc::new(tls_config),
             connection_data: Arc::new(RwLock::new(None)),
             engine_io_mode: Arc::new(AtomicBool::from(engine_io_mode)),
         }
@@ -264,7 +276,7 @@ impl TransportClient {
 
     fn perform_upgrade_secure(&mut self, address: &Url) -> Result<()> {
         let tls_config = (*self.tls_config).clone();
-        let mut client = ClientBuilder::new(address.as_ref())?.connect_secure(tls_config)?;
+        let mut client = WsClientBuilder::new(address.as_ref())?.connect_secure(tls_config)?;
 
         client.set_nonblocking(false)?;
 
@@ -287,7 +299,7 @@ impl TransportClient {
 
     fn perform_upgrade_insecure(&mut self, addres: &Url) -> Result<()> {
         // connect to the server via websockets
-        let client = ClientBuilder::new(addres.as_ref())?.connect_insecure()?;
+        let client = WsClientBuilder::new(addres.as_ref())?.connect_insecure()?;
         client.set_nonblocking(false)?;
 
         let (mut receiver, mut sender) = client.split()?;
@@ -649,11 +661,59 @@ mod test {
     use super::*;
     /// The `engine.io` server for testing runs on port 4201
     const SERVER_URL: &str = "http://localhost:4201";
+    const SERVER_URL_SECURE: &str = "https://localhost:4202";
 
     #[test]
     fn test_connection_polling() {
-        let mut socket = TransportClient::new(true);
-        assert!(socket.open(SERVER_URL).is_ok());
+        let mut socket = TransportClient::new(true, None);
+
+        socket.open(SERVER_URL).unwrap();
+
+        assert!(socket
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
+                false,
+            )
+            .is_ok());
+
+        socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
+            println!(
+                "Received: {:?}",
+                std::str::from_utf8(&data).expect("Error while decoding utf-8")
+            );
+        }))));
+
+        // closes the connection
+        assert!(socket
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"CLOSE")),
+                false,
+            )
+            .is_ok());
+
+        assert!(socket
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
+                true
+            )
+            .is_ok());
+
+        assert!(socket.poll_cycle().is_ok());
+    }
+
+    #[test]
+    fn test_connection_secure_ws_http() {
+        let mut socket = TransportClient::new(
+            true,
+            Some(
+                TlsConnector::builder()
+                    .danger_accept_invalid_certs(true)
+                    .build()
+                    .unwrap(),
+            ),
+        );
+
+        socket.open(SERVER_URL_SECURE).unwrap();
 
         assert!(socket
             .emit(
@@ -689,7 +749,7 @@ mod test {
 
     #[test]
     fn test_open_invariants() {
-        let mut sut = TransportClient::new(false);
+        let mut sut = TransportClient::new(false, None);
         let illegal_url = "this is illegal";
 
         let _error = sut.open(illegal_url).expect_err("Error");
@@ -698,7 +758,7 @@ mod test {
             _error
         ));
 
-        let mut sut = TransportClient::new(false);
+        let mut sut = TransportClient::new(false, None);
         let invalid_protocol = "file:///tmp/foo";
 
         let _error = sut.open(invalid_protocol).expect_err("Error");
@@ -707,7 +767,7 @@ mod test {
             _error
         ));
 
-        let sut = TransportClient::new(false);
+        let sut = TransportClient::new(false, None);
         let _error = sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
             .expect_err("error");
@@ -716,7 +776,7 @@ mod test {
 
     #[test]
     fn test_illegal_actions() {
-        let mut sut = TransportClient::new(true);
+        let mut sut = TransportClient::new(true, None);
         assert!(sut.poll_cycle().is_err());
     }
 }

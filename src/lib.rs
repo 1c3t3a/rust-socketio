@@ -101,6 +101,7 @@ pub mod socketio;
 pub mod error;
 
 use error::Error;
+use native_tls::TlsConnector;
 pub use socketio::{event::Event, payload::Payload};
 
 use crate::error::Result;
@@ -159,7 +160,7 @@ impl SocketBuilder {
     /// ```
     pub fn new<T: Into<String>>(address: T) -> Self {
         Self {
-            socket: Socket::new(address, Some("/")),
+            socket: Socket::new(address, Some("/"), None),
         }
     }
 
@@ -241,9 +242,9 @@ impl Socket {
     /// namespace. If `None` is passed in as namespace, the default namespace
     /// `"/"` is taken.
     /// ```
-    pub(crate) fn new<T: Into<String>>(address: T, namespace: Option<&str>) -> Self {
+    pub(crate) fn new<T: Into<String>>(address: T, namespace: Option<&str>, tls_config: Option<TlsConnector>) -> Self {
         Socket {
-            transport: TransportClient::new(address, namespace.map(String::from)),
+            transport: TransportClient::new(address, namespace.map(String::from), tls_config),
         }
     }
 
@@ -370,7 +371,7 @@ mod test {
 
     #[test]
     fn it_works() {
-        let mut socket = Socket::new(SERVER_URL, None);
+        let mut socket = Socket::new(SERVER_URL, None, None);
 
         let result = socket.on("test", |msg, _| match msg {
             Payload::String(str) => println!("Received string: {}", str),

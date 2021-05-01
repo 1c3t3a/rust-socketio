@@ -8,6 +8,7 @@ use crate::{
     Socket,
 };
 use bytes::Bytes;
+use native_tls::TlsConnector;
 use rand::{thread_rng, Rng};
 use std::{
     fmt::Debug,
@@ -52,9 +53,9 @@ pub struct TransportClient {
 
 impl TransportClient {
     /// Creates an instance of `TransportClient`.
-    pub fn new<T: Into<String>>(address: T, nsp: Option<String>) -> Self {
+    pub fn new<T: Into<String>>(address: T, nsp: Option<String>, tls_config: Option<TlsConnector>) -> Self {
         TransportClient {
-            engine_socket: Arc::new(Mutex::new(EngineSocket::new(false))),
+            engine_socket: Arc::new(Mutex::new(EngineSocket::new(false, tls_config))),
             host: Arc::new(address.into()),
             connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
@@ -511,7 +512,7 @@ mod test {
 
     #[test]
     fn it_works() {
-        let mut socket = TransportClient::new(SERVER_URL, None);
+        let mut socket = TransportClient::new(SERVER_URL, None, None);
 
         assert!(socket
             .on("test".into(), |message, _| {
@@ -549,7 +550,7 @@ mod test {
 
     #[test]
     fn test_error_cases() {
-        let sut = TransportClient::new("http://localhost:123", None);
+        let sut = TransportClient::new("http://localhost:123", None, None);
 
         let packet = SocketPacket::new(
             SocketPacketId::Connect,
