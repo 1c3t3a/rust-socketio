@@ -53,7 +53,11 @@ pub struct TransportClient {
 
 impl TransportClient {
     /// Creates an instance of `TransportClient`.
-    pub fn new<T: Into<String>>(address: T, nsp: Option<String>, tls_config: Option<TlsConnector>) -> Self {
+    pub fn new<T: Into<String>>(
+        address: T,
+        nsp: Option<String>,
+        tls_config: Option<TlsConnector>,
+    ) -> Self {
         TransportClient {
             engine_socket: Arc::new(Mutex::new(EngineSocket::new(false, tls_config))),
             host: Arc::new(address.into()),
@@ -66,13 +70,13 @@ impl TransportClient {
     }
 
     /// Registers a new event with some callback function `F`.
-    pub fn on<F>(&mut self, event: Event, callback: F) -> Result<()>
+    pub fn on<F>(&mut self, event: Event, callback: Box<F>) -> Result<()>
     where
         F: FnMut(Payload, Socket) + 'static + Sync + Send,
     {
         Arc::get_mut(&mut self.on)
             .unwrap()
-            .push((event, RwLock::new(Box::new(callback))));
+            .push((event, RwLock::new(callback)));
         Ok(())
     }
 
@@ -515,18 +519,21 @@ mod test {
         let mut socket = TransportClient::new(SERVER_URL, None, None);
 
         assert!(socket
-            .on("test".into(), |message, _| {
-                if let Payload::String(st) = message {
-                    println!("{}", st)
-                }
-            })
+            .on(
+                "test".into(),
+                Box::new(|message, _| {
+                    if let Payload::String(st) = message {
+                        println!("{}", st)
+                    }
+                })
+            )
             .is_ok());
 
-        assert!(socket.on("Error".into(), |_, _| {}).is_ok());
+        assert!(socket.on("Error".into(), Box::new(|_, _| {})).is_ok());
 
-        assert!(socket.on("Connect".into(), |_, _| {}).is_ok());
+        assert!(socket.on("Connect".into(), Box::new(|_, _| {})).is_ok());
 
-        assert!(socket.on("Close".into(), |_, _| {}).is_ok());
+        assert!(socket.on("Close".into(), Box::new(|_, _| {})).is_ok());
 
         socket.connect().unwrap();
 

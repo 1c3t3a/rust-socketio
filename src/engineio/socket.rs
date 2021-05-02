@@ -22,7 +22,10 @@ impl EngineSocket {
     /// Creates an instance of `EngineSocket`.
     pub fn new(engine_io_mode: bool, tls_config: Option<TlsConnector>) -> Self {
         EngineSocket {
-            transport_client: Arc::new(RwLock::new(TransportClient::new(engine_io_mode, tls_config))),
+            transport_client: Arc::new(RwLock::new(TransportClient::new(
+                engine_io_mode,
+                tls_config,
+            ))),
         }
     }
 

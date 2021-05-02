@@ -105,7 +105,7 @@ use native_tls::TlsConnector;
 pub use socketio::{event::Event, payload::Payload};
 
 use crate::error::Result;
-use std::{sync::Arc, time::Duration};
+use std::{time::Duration, vec};
 
 use crate::socketio::transport::TransportClient;
 
@@ -118,12 +118,17 @@ pub struct Socket {
     transport: TransportClient,
 }
 
+type SocketCallback = dyn FnMut(Payload, Socket) + 'static + Sync + Send;
+
 /// A builder class for a `socket.io` socket. This handles setting up the client and
 /// configuring the callback, the namespace and metadata of the socket. If no
 /// namespace is specified, the default namespace `/` is taken. The `connect` method
 /// acts the `build` method and returns a connected [`Socket`].
 pub struct SocketBuilder {
-    socket: Socket,
+    address: String,
+    on: Option<Vec<(Event, Box<SocketCallback>)>>,
+    namespace: Option<String>,
+    tls_config: Option<TlsConnector>,
 }
 
 impl SocketBuilder {
@@ -160,7 +165,10 @@ impl SocketBuilder {
     /// ```
     pub fn new<T: Into<String>>(address: T) -> Self {
         Self {
-            socket: Socket::new(address, Some("/"), None),
+            address: address.into(),
+            on: None,
+            namespace: None,
+            tls_config: None,
         }
     }
 
@@ -171,7 +179,7 @@ impl SocketBuilder {
         if !nsp.starts_with('/') {
             return Err(Error::IllegalNamespace(nsp));
         }
-        self.socket.set_namespace(nsp);
+        self.namespace = Some(nsp);
         Ok(self)
     }
 
@@ -201,10 +209,35 @@ impl SocketBuilder {
     where
         F: FnMut(Payload, Socket) + 'static + Sync + Send,
     {
-        // unwrapping here is safe as this only returns an error
-        // when the client is already connected, which is
-        // impossible here
-        self.socket.on(event, callback).unwrap();
+        match self.on {
+            Some(ref mut vector) => vector.push((event.into(), Box::new(callback))),
+            None => self.on = Some(vec![(event.into(), Box::new(callback))]),
+        }
+        self
+    }
+
+    /// Uses a preconfigured TLS connector for secure cummunication. This configures
+    /// both the `polling` as well as the `websocket` transport type.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use native_tls::TlsConnector;
+    ///
+    /// let tls_connector =  TlsConnector::builder()
+    ///            .use_sni(true)
+    ///            .build()
+    ///            .expect("Found illegal configuration");
+    ///
+    /// let socket = SocketBuilder::new("http://localhost:4200")
+    ///     .set_namespace("/admin")
+    ///     .expect("illegal namespace")
+    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    ///     .set_tls_config(tls_connector)
+    ///     .connect();
+    ///
+    /// ```
+    pub fn set_tls_config(mut self, tls_config: TlsConnector) -> Self {
+        self.tls_config = Some(tls_config);
         self
     }
 
@@ -231,9 +264,15 @@ impl SocketBuilder {
     ///
     /// assert!(result.is_ok());
     /// ```
-    pub fn connect(mut self) -> Result<Socket> {
-        self.socket.connect()?;
-        Ok(self.socket)
+    pub fn connect(self) -> Result<Socket> {
+        let mut socket = Socket::new(self.address, self.namespace, self.tls_config);
+        if let Some(callbacks) = self.on {
+            for (event, callback) in callbacks {
+                socket.on(event, Box::new(callback)).unwrap();
+            }
+        }
+        socket.connect()?;
+        Ok(socket)
     }
 }
 
@@ -242,20 +281,24 @@ impl Socket {
     /// namespace. If `None` is passed in as namespace, the default namespace
     /// `"/"` is taken.
     /// ```
-    pub(crate) fn new<T: Into<String>>(address: T, namespace: Option<&str>, tls_config: Option<TlsConnector>) -> Self {
+    pub(crate) fn new<T: Into<String>>(
+        address: T,
+        namespace: Option<String>,
+        tls_config: Option<TlsConnector>,
+    ) -> Self {
         Socket {
-            transport: TransportClient::new(address, namespace.map(String::from), tls_config),
+            transport: TransportClient::new(address, namespace, tls_config),
         }
     }
 
     /// Registers a new callback for a certain event. This returns an
     /// `Error::IllegalActionAfterOpen` error if the callback is registered
     /// after a call to the `connect` method.
-    pub(crate) fn on<F>(&mut self, event: &str, callback: F) -> Result<()>
+    pub(crate) fn on<F>(&mut self, event: Event, callback: Box<F>) -> Result<()>
     where
         F: FnMut(Payload, Socket) + 'static + Sync + Send,
     {
-        self.transport.on(event.into(), callback)
+        self.transport.on(event, callback)
     }
 
     /// Connects the client to a server. Afterwards the `emit_*` methods can be
@@ -352,11 +395,6 @@ impl Socket {
         self.transport
             .emit_with_ack(event.into(), data.into(), timeout, callback)
     }
-
-    /// Sets the namespace attribute on a client (used by the builder class)
-    pub(crate) fn set_namespace<T: Into<String>>(&mut self, namespace: T) {
-        *Arc::get_mut(&mut self.transport.nsp).unwrap() = Some(namespace.into());
-    }
 }
 
 #[cfg(test)]
@@ -366,6 +404,7 @@ mod test {
 
     use super::*;
     use bytes::Bytes;
+    use native_tls::TlsConnector;
     use serde_json::json;
     const SERVER_URL: &str = "http://localhost:4200";
 
@@ -373,10 +412,13 @@ mod test {
     fn it_works() {
         let mut socket = Socket::new(SERVER_URL, None, None);
 
-        let result = socket.on("test", |msg, _| match msg {
-            Payload::String(str) => println!("Received string: {}", str),
-            Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
-        });
+        let result = socket.on(
+            "test".into(),
+            Box::new(|msg, _| match msg {
+                Payload::String(str) => println!("Received string: {}", str),
+                Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
+            }),
+        );
         assert!(result.is_ok());
 
         let result = socket.connect();
@@ -422,10 +464,16 @@ mod test {
         // test socket build logic
         let socket_builder = SocketBuilder::new(SERVER_URL);
 
+        let tls_connector = TlsConnector::builder()
+            .use_sni(true)
+            .build()
+            .expect("Found illegal configuration");
+
         let socket = socket_builder
             .set_namespace("/")
             .expect("Error!")
-            .on("test", |str, _| println!("Received: {:#?}", str))
+            .set_tls_config(tls_connector)
+            .on("test", Box::new(|str, _| println!("Received: {:#?}", str)))
             .connect();
 
         assert!(socket.is_ok());

@@ -274,6 +274,8 @@ impl TransportClient {
         Err(Error::HandshakeError("Error - invalid url".to_owned()))
     }
 
+    /// Performs the socketio upgrade handshake via `wss://`. A Description of the
+    /// upgrade request can be found above.
     fn perform_upgrade_secure(&mut self, address: &Url) -> Result<()> {
         let tls_config = (*self.tls_config).clone();
         let mut client = WsClientBuilder::new(address.as_ref())?.connect_secure(tls_config)?;
@@ -297,6 +299,8 @@ impl TransportClient {
         Ok(())
     }
 
+    /// Performs the socketio upgrade handshake in an via `ws://`. A Description of the
+    /// upgrade request can be found above.
     fn perform_upgrade_insecure(&mut self, addres: &Url) -> Result<()> {
         // connect to the server via websockets
         let client = WsClientBuilder::new(addres.as_ref())?.connect_insecure()?;
