@@ -277,13 +277,18 @@ impl TransportClient {
     /// Performs the socketio upgrade handshake via `wss://`. A Description of the
     /// upgrade request can be found above.
     fn perform_upgrade_secure(&mut self, address: &Url) -> Result<()> {
-        let tls_config = (*self.tls_config).clone();
+        // connect to the server via websockets
+        // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection procedure
+        let tls_config = Arc::get_mut(&mut self.tls_config).unwrap().take();
         let mut client = WsClientBuilder::new(address.as_ref())?.connect_secure(tls_config)?;
 
         client.set_nonblocking(false)?;
 
+        // send the probe packet, the text `2probe` represents a ping packet with
+        // the content `probe`
         client.send_message(&Message::text(Cow::Borrowed("2probe")))?;
 
+        // expect to receive a probe packet
         let message = client.recv_message()?;
         if message.take_payload() != b"3probe" {
             return Err(Error::HandshakeError("Error".to_owned()));
@@ -293,6 +298,9 @@ impl TransportClient {
         // packet without any payload
         client.send_message(&Message::text(Cow::Borrowed("5")))?;
 
+        // upgrade the transport layer
+        // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection
+        // procedure
         *Arc::get_mut(&mut self.transport).unwrap() =
             TransportType::SecureWebsocket(Arc::new(Mutex::new(client)));
 
