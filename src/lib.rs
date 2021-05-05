@@ -102,6 +102,7 @@ pub mod error;
 
 use error::Error;
 use native_tls::TlsConnector;
+pub use reqwest::header::{HeaderMap, HeaderValue, IntoHeaderName};
 pub use socketio::{event::Event, payload::Payload};
 
 use crate::error::Result;
@@ -129,6 +130,7 @@ pub struct SocketBuilder {
     on: Option<Vec<(Event, Box<SocketCallback>)>>,
     namespace: Option<String>,
     tls_config: Option<TlsConnector>,
+    opening_headers: Option<HeaderMap>,
 }
 
 impl SocketBuilder {
@@ -169,6 +171,7 @@ impl SocketBuilder {
             on: None,
             namespace: None,
             tls_config: None,
+            opening_headers: None,
         }
     }
 
@@ -241,6 +244,23 @@ impl SocketBuilder {
         self
     }
 
+    /// Sets custom http headers for the opening request. The headers will definetly be send with the open
+    /// request but not necessarly with every other request. When the transport type evaluates to `polling`
+    /// the headers get send with every request, when websockets are used, not.
+    pub fn set_opening_header<K: IntoHeaderName>(mut self, key: K, val: HeaderValue) -> Self {
+        match self.opening_headers {
+            Some(ref mut map) => {
+                map.insert(key, val);
+            }
+            None => {
+                let mut map = HeaderMap::new();
+                map.insert(key, val);
+                self.opening_headers = Some(map);
+            }
+        }
+        self
+    }
+
     /// Connects the socket to a certain endpoint. This returns a connected
     /// [`Socket`] instance. This method returns an [`std::result::Result::Err`]
     /// value if something goes wrong during connection.
@@ -265,7 +285,12 @@ impl SocketBuilder {
     /// assert!(result.is_ok());
     /// ```
     pub fn connect(self) -> Result<Socket> {
-        let mut socket = Socket::new(self.address, self.namespace, self.tls_config);
+        let mut socket = Socket::new(
+            self.address,
+            self.namespace,
+            self.tls_config,
+            self.opening_headers,
+        );
         if let Some(callbacks) = self.on {
             for (event, callback) in callbacks {
                 socket.on(event, Box::new(callback)).unwrap();
@@ -285,9 +310,10 @@ impl Socket {
         address: T,
         namespace: Option<String>,
         tls_config: Option<TlsConnector>,
+        opening_headers: Option<HeaderMap>,
     ) -> Self {
         Socket {
-            transport: TransportClient::new(address, namespace, tls_config),
+            transport: TransportClient::new(address, namespace, tls_config, opening_headers),
         }
     }
 
@@ -405,12 +431,13 @@ mod test {
     use super::*;
     use bytes::Bytes;
     use native_tls::TlsConnector;
+    use reqwest::header::HOST;
     use serde_json::json;
     const SERVER_URL: &str = "http://localhost:4200";
 
     #[test]
     fn it_works() {
-        let mut socket = Socket::new(SERVER_URL, None, None);
+        let mut socket = Socket::new(SERVER_URL, None, None, None);
 
         let result = socket.on(
             "test".into(),
@@ -473,6 +500,7 @@ mod test {
             .set_namespace("/")
             .expect("Error!")
             .set_tls_config(tls_connector)
+            .set_opening_header(HOST, "localhost".parse().unwrap())
             .on("test", Box::new(|str, _| println!("Received: {:#?}", str)))
             .connect();
 

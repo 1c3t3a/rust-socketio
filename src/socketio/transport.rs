@@ -10,6 +10,7 @@ use crate::{
 use bytes::Bytes;
 use native_tls::TlsConnector;
 use rand::{thread_rng, Rng};
+use reqwest::header::HeaderMap;
 use std::{
     fmt::Debug,
     sync::{atomic::Ordering, RwLock},
@@ -57,9 +58,14 @@ impl TransportClient {
         address: T,
         nsp: Option<String>,
         tls_config: Option<TlsConnector>,
+        opening_headers: Option<HeaderMap>,
     ) -> Self {
         TransportClient {
-            engine_socket: Arc::new(Mutex::new(EngineSocket::new(false, tls_config))),
+            engine_socket: Arc::new(Mutex::new(EngineSocket::new(
+                false,
+                tls_config,
+                opening_headers,
+            ))),
             host: Arc::new(address.into()),
             connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
@@ -516,7 +522,7 @@ mod test {
 
     #[test]
     fn it_works() {
-        let mut socket = TransportClient::new(SERVER_URL, None, None);
+        let mut socket = TransportClient::new(SERVER_URL, None, None, None);
 
         assert!(socket
             .on(
@@ -557,7 +563,7 @@ mod test {
 
     #[test]
     fn test_error_cases() {
-        let sut = TransportClient::new("http://localhost:123", None, None);
+        let sut = TransportClient::new("http://localhost:123", None, None, None);
 
         let packet = SocketPacket::new(
             SocketPacketId::Connect,

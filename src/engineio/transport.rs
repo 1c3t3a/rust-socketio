@@ -5,6 +5,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
 use reqwest::{
     blocking::{Client, ClientBuilder},
+    header::HeaderMap,
     Url,
 };
 use serde::{Deserialize, Serialize};
@@ -67,14 +68,23 @@ struct HandshakeData {
 
 impl TransportClient {
     /// Creates an instance of `TransportClient`.
-    pub fn new(engine_io_mode: bool, tls_config: Option<TlsConnector>) -> Self {
-        let client = if let Some(config) = tls_config.clone() {
-            ClientBuilder::new()
+    pub fn new(
+        engine_io_mode: bool,
+        tls_config: Option<TlsConnector>,
+        opening_headers: Option<HeaderMap>,
+    ) -> Self {
+        let client = match (tls_config.clone(), opening_headers) {
+            (Some(config), Some(map)) => ClientBuilder::new()
+                .use_preconfigured_tls(config)
+                .default_headers(map)
+                .build()
+                .unwrap(),
+            (Some(config), None) => ClientBuilder::new()
                 .use_preconfigured_tls(config)
                 .build()
-                .unwrap()
-        } else {
-            Client::new()
+                .unwrap(),
+            (None, Some(map)) => ClientBuilder::new().default_headers(map).build().unwrap(),
+            (None, None) => Client::new(),
         };
 
         TransportClient {
@@ -629,7 +639,7 @@ impl Debug for TransportType {
 impl Debug for TransportClient {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "TransportClient(transport: {:?}, on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, host_address: {:?}, connection_data: {:?}, engine_io_mode: {:?})",
+            "TransportClient(transport: {:?}, on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, host_address: {:?}, tls_config: {:?}, connection_data: {:?}, engine_io_mode: {:?})",
             self.transport,
             if self.on_error.read().unwrap().is_some() {
                 "Fn(String)"
@@ -660,6 +670,7 @@ impl Debug for TransportClient {
             self.last_ping,
             self.last_pong,
             self.host_address,
+            self.tls_config,
             self.connection_data,
             self.engine_io_mode,
         ))
@@ -668,6 +679,8 @@ impl Debug for TransportClient {
 
 #[cfg(test)]
 mod test {
+    use reqwest::header::HOST;
+
     use crate::engineio::packet::{Packet, PacketId};
 
     use super::*;
@@ -677,7 +690,7 @@ mod test {
 
     #[test]
     fn test_connection_polling() {
-        let mut socket = TransportClient::new(true, None);
+        let mut socket = TransportClient::new(true, None, None);
 
         socket.open(SERVER_URL).unwrap();
 
@@ -715,6 +728,8 @@ mod test {
 
     #[test]
     fn test_connection_secure_ws_http() {
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, "localhost".parse().unwrap());
         let mut socket = TransportClient::new(
             true,
             Some(
@@ -723,6 +738,7 @@ mod test {
                     .build()
                     .unwrap(),
             ),
+            Some(headers),
         );
 
         socket.open(SERVER_URL_SECURE).unwrap();
@@ -761,7 +777,7 @@ mod test {
 
     #[test]
     fn test_open_invariants() {
-        let mut sut = TransportClient::new(false, None);
+        let mut sut = TransportClient::new(false, None, None);
         let illegal_url = "this is illegal";
 
         let _error = sut.open(illegal_url).expect_err("Error");
@@ -770,7 +786,7 @@ mod test {
             _error
         ));
 
-        let mut sut = TransportClient::new(false, None);
+        let mut sut = TransportClient::new(false, None, None);
         let invalid_protocol = "file:///tmp/foo";
 
         let _error = sut.open(invalid_protocol).expect_err("Error");
@@ -779,7 +795,7 @@ mod test {
             _error
         ));
 
-        let sut = TransportClient::new(false, None);
+        let sut = TransportClient::new(false, None, None);
         let _error = sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
             .expect_err("error");
@@ -788,7 +804,7 @@ mod test {
 
     #[test]
     fn test_illegal_actions() {
-        let mut sut = TransportClient::new(true, None);
+        let mut sut = TransportClient::new(true, None, None);
         assert!(sut.poll_cycle().is_err());
     }
 }
