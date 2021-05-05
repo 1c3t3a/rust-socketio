@@ -431,7 +431,7 @@ mod test {
     use super::*;
     use bytes::Bytes;
     use native_tls::TlsConnector;
-    use reqwest::header::HOST;
+    use reqwest::header::{ACCEPT_ENCODING, HOST};
     use serde_json::json;
     const SERVER_URL: &str = "http://localhost:4200";
 
@@ -501,6 +501,7 @@ mod test {
             .expect("Error!")
             .set_tls_config(tls_connector)
             .set_opening_header(HOST, "localhost".parse().unwrap())
+            .set_opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
             .on("test", Box::new(|str, _| println!("Received: {:#?}", str)))
             .connect();
 

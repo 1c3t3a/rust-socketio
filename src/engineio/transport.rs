@@ -800,6 +800,23 @@ mod test {
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
             .expect_err("error");
         assert!(matches!(Error::ActionBeforeOpen, _error));
+
+        // test missing match arm in socket constructor
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, "localhost".parse().unwrap());
+
+        let _ = TransportClient::new(
+            true,
+            Some(
+                TlsConnector::builder()
+                    .danger_accept_invalid_certs(true)
+                    .build()
+                    .unwrap(),
+            ),
+            None,
+        );
+
+        let _ = TransportClient::new(true, None, Some(headers));
     }
 
     #[test]
