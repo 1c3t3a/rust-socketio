@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.2.2`](#022) - _2021.05.13
 * [`0.2.1`](#021) - _2021.04.27_
 * [`0.2.0`](#020) – _2021.03.13_
 * [`0.1.1`](#011) – _2021.01.10_
@@ -20,6 +21,16 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## _[Unreleased]_
 
 _nothing new to show for… yet!_
+
+## <a name="022">[0.2.2] - _Safe websockets and custom headers_ </a>
+
+_2021.05.13_
+
+### Changes
+
+* Added websocket communication over TLS when either `wss`, or `https` are specified in the URL.
+* Added the ability to configure the TLS connection by providing an own `TLSConnector`.
+* Added the ability to set custom headers as requested in [#35](https://github.com/1c3t3a/rust-socketio/issues/35).
 
 ## <a name="021">[0.2.1] - _Bugfixes_ </a>
 
@@ -31,7 +42,7 @@ _2021.04.27_
 * Added this CHANGELOG to keep track of all changes.
 * Small stylistic changes to the codebase in general.
 
-## <a name="020">[0.2.0] - _Fully implemented the socker.io protocol 🎉_ </a>
+## <a name="020">[0.2.0] - _Fully implemented the socket.io protocol 🎉_ </a>
 
 _2021.03.13_
 
