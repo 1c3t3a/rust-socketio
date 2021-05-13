@@ -5,6 +5,8 @@ use super::packet::{Packet, PacketId};
 use crate::engineio::transport::TransportClient;
 use crate::error::{Error, Result};
 use bytes::Bytes;
+use native_tls::TlsConnector;
+use reqwest::header::HeaderMap;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, RwLock,
@@ -19,9 +21,17 @@ pub struct EngineSocket {
 
 impl EngineSocket {
     /// Creates an instance of `EngineSocket`.
-    pub fn new(engine_io_mode: bool) -> Self {
+    pub fn new(
+        engine_io_mode: bool,
+        tls_config: Option<TlsConnector>,
+        opening_headers: Option<HeaderMap>,
+    ) -> Self {
         EngineSocket {
-            transport_client: Arc::new(RwLock::new(TransportClient::new(engine_io_mode))),
+            transport_client: Arc::new(RwLock::new(TransportClient::new(
+                engine_io_mode,
+                tls_config,
+                opening_headers,
+            ))),
         }
     }
 
@@ -160,7 +170,7 @@ mod test {
 
     #[test]
     fn test_basic_connection() {
-        let mut socket = EngineSocket::new(true);
+        let mut socket = EngineSocket::new(true, None, None);
 
         assert!(socket
             .on_open(|_| {
@@ -212,7 +222,7 @@ mod test {
 
     #[test]
     fn test_illegal_actions() {
-        let mut sut = EngineSocket::new(true);
+        let mut sut = EngineSocket::new(true, None, None);
 
         assert!(sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")))

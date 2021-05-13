@@ -2,7 +2,12 @@ use crate::engineio::packet::{decode_payload, encode_payload, Packet, PacketId};
 use crate::error::{Error, Result};
 use adler32::adler32;
 use bytes::{BufMut, Bytes, BytesMut};
-use reqwest::{blocking::Client, Url};
+use native_tls::TlsConnector;
+use reqwest::{
+    blocking::{Client, ClientBuilder},
+    header::HeaderMap,
+    Url,
+};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, time::SystemTime};
 use std::{fmt::Debug, sync::atomic::Ordering};
@@ -11,15 +16,21 @@ use std::{
     time::{Duration, Instant},
 };
 use websocket::{
+    client::sync::Client as WsClient,
+    header::Headers,
+    sync::stream::{TcpStream, TlsStream},
+    ClientBuilder as WsClientBuilder,
+};
+use websocket::{
     dataframe::Opcode, receiver::Reader, sync::Writer, ws::dataframe::DataFrame, Message,
 };
-use websocket::{sync::stream::TcpStream, ClientBuilder};
 
 /// The different types of transport used for transmitting a payload.
 #[derive(Clone)]
 enum TransportType {
     Polling(Arc<Mutex<Client>>),
     Websocket(Arc<Mutex<Reader<TcpStream>>>, Arc<Mutex<Writer<TcpStream>>>),
+    SecureWebsocket(Arc<Mutex<WsClient<TlsStream<TcpStream>>>>),
 }
 
 /// Type of a `Callback` function. (Normal closures can be passed in here).
@@ -40,6 +51,8 @@ pub struct TransportClient {
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     host_address: Arc<Mutex<Option<String>>>,
+    tls_config: Arc<Option<TlsConnector>>,
+    custom_headers: Arc<Option<HeaderMap>>,
     connection_data: Arc<RwLock<Option<HandshakeData>>>,
     engine_io_mode: Arc<AtomicBool>,
 }
@@ -57,9 +70,27 @@ struct HandshakeData {
 
 impl TransportClient {
     /// Creates an instance of `TransportClient`.
-    pub fn new(engine_io_mode: bool) -> Self {
+    pub fn new(
+        engine_io_mode: bool,
+        tls_config: Option<TlsConnector>,
+        opening_headers: Option<HeaderMap>,
+    ) -> Self {
+        let client = match (tls_config.clone(), opening_headers.clone()) {
+            (Some(config), Some(map)) => ClientBuilder::new()
+                .use_preconfigured_tls(config)
+                .default_headers(map)
+                .build()
+                .unwrap(),
+            (Some(config), None) => ClientBuilder::new()
+                .use_preconfigured_tls(config)
+                .build()
+                .unwrap(),
+            (None, Some(map)) => ClientBuilder::new().default_headers(map).build().unwrap(),
+            (None, None) => Client::new(),
+        };
+
         TransportClient {
-            transport: Arc::new(TransportType::Polling(Arc::new(Mutex::new(Client::new())))),
+            transport: Arc::new(TransportType::Polling(Arc::new(Mutex::new(client)))),
             on_error: Arc::new(RwLock::new(None)),
             on_open: Arc::new(RwLock::new(None)),
             on_close: Arc::new(RwLock::new(None)),
@@ -69,6 +100,8 @@ impl TransportClient {
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
             host_address: Arc::new(Mutex::new(None)),
+            tls_config: Arc::new(tls_config),
+            custom_headers: Arc::new(opening_headers),
             connection_data: Arc::new(RwLock::new(None)),
             engine_io_mode: Arc::new(AtomicBool::from(engine_io_mode)),
         }
@@ -223,6 +256,7 @@ impl TransportClient {
         if let Some(address) = &*host_address {
             // unwrapping here is in fact save as we only set this url if it gets orderly parsed
             let mut address = Url::parse(&address).unwrap();
+            drop(host_address);
 
             if self.engine_io_mode.load(Ordering::Relaxed) {
                 address.set_path(&(address.path().to_owned() + "engine.io/"));
@@ -238,37 +272,104 @@ impl TransportClient {
                 .append_pair("sid", new_sid)
                 .finish();
 
-            // connect to the server via websockets
-            let client = ClientBuilder::new(full_address.as_ref())?.connect_insecure()?;
-            client.set_nonblocking(false)?;
-
-            let (mut receiver, mut sender) = client.split()?;
-
-            // send the probe packet, the text `2probe` represents a ping packet with
-            // the content `probe`
-            sender.send_message(&Message::text(Cow::Borrowed("2probe")))?;
-
-            // expect to receive a probe packet
-            let message = receiver.recv_message()?;
-            if message.take_payload() != b"3probe" {
-                return Err(Error::HandshakeError("Error".to_owned()));
+            let custom_headers = self.get_headers_from_header_map();
+            match full_address.scheme() {
+                "https" => {
+                    self.perform_upgrade_secure(&full_address, &custom_headers)?;
+                }
+                "http" => {
+                    self.perform_upgrade_insecure(&full_address, &custom_headers)?;
+                }
+                _ => return Err(Error::InvalidUrl(full_address.to_string())),
             }
-
-            // finally send the upgrade request. the payload `5` stands for an upgrade
-            // packet without any payload
-            sender.send_message(&Message::text(Cow::Borrowed("5")))?;
-
-            // upgrade the transport layer
-            // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection
-            // procedure
-            *Arc::get_mut(&mut self.transport).unwrap() = TransportType::Websocket(
-                Arc::new(Mutex::new(receiver)),
-                Arc::new(Mutex::new(sender)),
-            );
 
             return Ok(());
         }
         Err(Error::HandshakeError("Error - invalid url".to_owned()))
+    }
+
+    /// Converts between `reqwest::HeaderMap` and `websocket::Headers`, if they're currently set, if not
+    /// An empty (allocation free) header map is returned.
+    fn get_headers_from_header_map(&mut self) -> Headers {
+        let mut headers = Headers::new();
+        // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection procedure
+        if let Some(map) = Arc::get_mut(&mut self.custom_headers).unwrap().take() {
+            for (key, val) in map {
+                if let Some(h_key) = key {
+                    headers.append_raw(h_key.to_string(), val.as_bytes().to_owned());
+                }
+            }
+        }
+        headers
+    }
+
+    /// Performs the socketio upgrade handshake via `wss://`. A Description of the
+    /// upgrade request can be found above.
+    fn perform_upgrade_secure(&mut self, address: &Url, headers: &Headers) -> Result<()> {
+        // connect to the server via websockets
+        // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection procedure
+        let tls_config = Arc::get_mut(&mut self.tls_config).unwrap().take();
+        let mut client = WsClientBuilder::new(address.as_ref())?
+            .custom_headers(headers)
+            .connect_secure(tls_config)?;
+
+        client.set_nonblocking(false)?;
+
+        // send the probe packet, the text `2probe` represents a ping packet with
+        // the content `probe`
+        client.send_message(&Message::text(Cow::Borrowed("2probe")))?;
+
+        // expect to receive a probe packet
+        let message = client.recv_message()?;
+        if message.take_payload() != b"3probe" {
+            return Err(Error::HandshakeError("Error".to_owned()));
+        }
+
+        // finally send the upgrade request. the payload `5` stands for an upgrade
+        // packet without any payload
+        client.send_message(&Message::text(Cow::Borrowed("5")))?;
+
+        // upgrade the transport layer
+        // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection
+        // procedure
+        *Arc::get_mut(&mut self.transport).unwrap() =
+            TransportType::SecureWebsocket(Arc::new(Mutex::new(client)));
+
+        Ok(())
+    }
+
+    /// Performs the socketio upgrade handshake in an via `ws://`. A Description of the
+    /// upgrade request can be found above.
+    fn perform_upgrade_insecure(&mut self, addres: &Url, headers: &Headers) -> Result<()> {
+        // connect to the server via websockets
+        let client = WsClientBuilder::new(addres.as_ref())?
+            .custom_headers(headers)
+            .connect_insecure()?;
+        client.set_nonblocking(false)?;
+
+        let (mut receiver, mut sender) = client.split()?;
+
+        // send the probe packet, the text `2probe` represents a ping packet with
+        // the content `probe`
+        sender.send_message(&Message::text(Cow::Borrowed("2probe")))?;
+
+        // expect to receive a probe packet
+        let message = receiver.recv_message()?;
+        if message.take_payload() != b"3probe" {
+            return Err(Error::HandshakeError("Error".to_owned()));
+        }
+
+        // finally send the upgrade request. the payload `5` stands for an upgrade
+        // packet without any payload
+        sender.send_message(&Message::text(Cow::Borrowed("5")))?;
+
+        // upgrade the transport layer
+        // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection
+        // procedure
+        *Arc::get_mut(&mut self.transport).unwrap() =
+            TransportType::Websocket(Arc::new(Mutex::new(receiver)), Arc::new(Mutex::new(sender)));
+
+        Ok(())
     }
 
     /// Sends a packet to the server. This optionally handles sending of a
@@ -335,7 +436,20 @@ impl TransportClient {
                 } else {
                     Message::text(Cow::Borrowed(std::str::from_utf8(data.as_ref())?))
                 };
-                writer.send_message(&message).unwrap();
+                writer.send_message(&message)?;
+
+                Ok(())
+            }
+            TransportType::SecureWebsocket(client) => {
+                let mut client = client.lock()?;
+
+                let message = if is_binary_att {
+                    Message::binary(Cow::Borrowed(data.as_ref()))
+                } else {
+                    Message::text(Cow::Borrowed(std::str::from_utf8(data.as_ref())?))
+                };
+
+                client.send_message(&message)?;
 
                 Ok(())
             }
@@ -388,6 +502,22 @@ impl TransportClient {
 
                     // if this is a binary payload, we mark it as a message
                     let received_df = receiver.recv_dataframe()?;
+                    match received_df.opcode {
+                        Opcode::Binary => {
+                            let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
+                            message.put_u8(b'4');
+                            message.put(received_df.take_payload().as_ref());
+
+                            message.freeze()
+                        }
+                        _ => Bytes::from(received_df.take_payload()),
+                    }
+                }
+                TransportType::SecureWebsocket(client) => {
+                    let mut client = client.lock()?;
+
+                    // if this is a binary payload, we mark it as a message
+                    let received_df = client.recv_dataframe()?;
                     match received_df.opcode {
                         Opcode::Binary => {
                             let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
@@ -496,7 +626,7 @@ impl TransportClient {
             },
             match self.transport.as_ref() {
                 TransportType::Polling(_) => "polling",
-                TransportType::Websocket(_, _) => "websocket",
+                TransportType::Websocket(_, _) | TransportType::SecureWebsocket(_) => "websocket",
             },
             TransportClient::get_random_t(),
         );
@@ -523,7 +653,7 @@ impl Debug for TransportType {
             "TransportType({})",
             match self {
                 Self::Polling(_) => "Polling",
-                Self::Websocket(_, _) => "Websocket",
+                Self::Websocket(_, _) | Self::SecureWebsocket(_) => "Websocket",
             }
         ))
     }
@@ -532,7 +662,7 @@ impl Debug for TransportType {
 impl Debug for TransportClient {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "TransportClient(transport: {:?}, on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, host_address: {:?}, connection_data: {:?}, engine_io_mode: {:?})",
+            "TransportClient(transport: {:?}, on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, host_address: {:?}, tls_config: {:?}, connection_data: {:?}, engine_io_mode: {:?})",
             self.transport,
             if self.on_error.read().unwrap().is_some() {
                 "Fn(String)"
@@ -563,6 +693,7 @@ impl Debug for TransportClient {
             self.last_ping,
             self.last_pong,
             self.host_address,
+            self.tls_config,
             self.connection_data,
             self.engine_io_mode,
         ))
@@ -571,16 +702,69 @@ impl Debug for TransportClient {
 
 #[cfg(test)]
 mod test {
+    use reqwest::header::HOST;
+
     use crate::engineio::packet::{Packet, PacketId};
 
     use super::*;
     /// The `engine.io` server for testing runs on port 4201
     const SERVER_URL: &str = "http://localhost:4201";
+    const SERVER_URL_SECURE: &str = "https://localhost:4202";
 
     #[test]
     fn test_connection_polling() {
-        let mut socket = TransportClient::new(true);
-        assert!(socket.open(SERVER_URL).is_ok());
+        let mut socket = TransportClient::new(true, None, None);
+
+        socket.open(SERVER_URL).unwrap();
+
+        assert!(socket
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
+                false,
+            )
+            .is_ok());
+
+        socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
+            println!(
+                "Received: {:?}",
+                std::str::from_utf8(&data).expect("Error while decoding utf-8")
+            );
+        }))));
+
+        // closes the connection
+        assert!(socket
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"CLOSE")),
+                false,
+            )
+            .is_ok());
+
+        assert!(socket
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
+                true
+            )
+            .is_ok());
+
+        assert!(socket.poll_cycle().is_ok());
+    }
+
+    #[test]
+    fn test_connection_secure_ws_http() {
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, "localhost".parse().unwrap());
+        let mut socket = TransportClient::new(
+            true,
+            Some(
+                TlsConnector::builder()
+                    .danger_accept_invalid_certs(true)
+                    .build()
+                    .unwrap(),
+            ),
+            Some(headers),
+        );
+
+        socket.open(SERVER_URL_SECURE).unwrap();
 
         assert!(socket
             .emit(
@@ -616,7 +800,7 @@ mod test {
 
     #[test]
     fn test_open_invariants() {
-        let mut sut = TransportClient::new(false);
+        let mut sut = TransportClient::new(false, None, None);
         let illegal_url = "this is illegal";
 
         let _error = sut.open(illegal_url).expect_err("Error");
@@ -625,7 +809,7 @@ mod test {
             _error
         ));
 
-        let mut sut = TransportClient::new(false);
+        let mut sut = TransportClient::new(false, None, None);
         let invalid_protocol = "file:///tmp/foo";
 
         let _error = sut.open(invalid_protocol).expect_err("Error");
@@ -634,16 +818,33 @@ mod test {
             _error
         ));
 
-        let sut = TransportClient::new(false);
+        let sut = TransportClient::new(false, None, None);
         let _error = sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
             .expect_err("error");
         assert!(matches!(Error::ActionBeforeOpen, _error));
+
+        // test missing match arm in socket constructor
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, "localhost".parse().unwrap());
+
+        let _ = TransportClient::new(
+            true,
+            Some(
+                TlsConnector::builder()
+                    .danger_accept_invalid_certs(true)
+                    .build()
+                    .unwrap(),
+            ),
+            None,
+        );
+
+        let _ = TransportClient::new(true, None, Some(headers));
     }
 
     #[test]
     fn test_illegal_actions() {
-        let mut sut = TransportClient::new(true);
+        let mut sut = TransportClient::new(true, None, None);
         assert!(sut.poll_cycle().is_err());
     }
 }

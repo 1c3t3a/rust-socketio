@@ -8,7 +8,9 @@ use crate::{
     Socket,
 };
 use bytes::Bytes;
+use native_tls::TlsConnector;
 use rand::{thread_rng, Rng};
+use reqwest::header::HeaderMap;
 use std::{
     fmt::Debug,
     sync::{atomic::Ordering, RwLock},
@@ -52,9 +54,18 @@ pub struct TransportClient {
 
 impl TransportClient {
     /// Creates an instance of `TransportClient`.
-    pub fn new<T: Into<String>>(address: T, nsp: Option<String>) -> Self {
+    pub fn new<T: Into<String>>(
+        address: T,
+        nsp: Option<String>,
+        tls_config: Option<TlsConnector>,
+        opening_headers: Option<HeaderMap>,
+    ) -> Self {
         TransportClient {
-            engine_socket: Arc::new(Mutex::new(EngineSocket::new(false))),
+            engine_socket: Arc::new(Mutex::new(EngineSocket::new(
+                false,
+                tls_config,
+                opening_headers,
+            ))),
             host: Arc::new(address.into()),
             connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
@@ -65,13 +76,13 @@ impl TransportClient {
     }
 
     /// Registers a new event with some callback function `F`.
-    pub fn on<F>(&mut self, event: Event, callback: F) -> Result<()>
+    pub fn on<F>(&mut self, event: Event, callback: Box<F>) -> Result<()>
     where
         F: FnMut(Payload, Socket) + 'static + Sync + Send,
     {
         Arc::get_mut(&mut self.on)
             .unwrap()
-            .push((event, RwLock::new(Box::new(callback))));
+            .push((event, RwLock::new(callback)));
         Ok(())
     }
 
@@ -511,21 +522,24 @@ mod test {
 
     #[test]
     fn it_works() {
-        let mut socket = TransportClient::new(SERVER_URL, None);
+        let mut socket = TransportClient::new(SERVER_URL, None, None, None);
 
         assert!(socket
-            .on("test".into(), |message, _| {
-                if let Payload::String(st) = message {
-                    println!("{}", st)
-                }
-            })
+            .on(
+                "test".into(),
+                Box::new(|message, _| {
+                    if let Payload::String(st) = message {
+                        println!("{}", st)
+                    }
+                })
+            )
             .is_ok());
 
-        assert!(socket.on("Error".into(), |_, _| {}).is_ok());
+        assert!(socket.on("Error".into(), Box::new(|_, _| {})).is_ok());
 
-        assert!(socket.on("Connect".into(), |_, _| {}).is_ok());
+        assert!(socket.on("Connect".into(), Box::new(|_, _| {})).is_ok());
 
-        assert!(socket.on("Close".into(), |_, _| {}).is_ok());
+        assert!(socket.on("Close".into(), Box::new(|_, _| {})).is_ok());
 
         socket.connect().unwrap();
 
@@ -549,7 +563,7 @@ mod test {
 
     #[test]
     fn test_error_cases() {
-        let sut = TransportClient::new("http://localhost:123", None);
+        let sut = TransportClient::new("http://localhost:123", None, None, None);
 
         let packet = SocketPacket::new(
             SocketPacketId::Connect,
