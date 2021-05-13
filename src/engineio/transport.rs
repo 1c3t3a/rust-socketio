@@ -17,6 +17,7 @@ use std::{
 };
 use websocket::{
     client::sync::Client as WsClient,
+    header::Headers,
     sync::stream::{TcpStream, TlsStream},
     ClientBuilder as WsClientBuilder,
 };
@@ -51,6 +52,7 @@ pub struct TransportClient {
     last_pong: Arc<Mutex<Instant>>,
     host_address: Arc<Mutex<Option<String>>>,
     tls_config: Arc<Option<TlsConnector>>,
+    custom_headers: Arc<Option<HeaderMap>>,
     connection_data: Arc<RwLock<Option<HandshakeData>>>,
     engine_io_mode: Arc<AtomicBool>,
 }
@@ -73,7 +75,7 @@ impl TransportClient {
         tls_config: Option<TlsConnector>,
         opening_headers: Option<HeaderMap>,
     ) -> Self {
-        let client = match (tls_config.clone(), opening_headers) {
+        let client = match (tls_config.clone(), opening_headers.clone()) {
             (Some(config), Some(map)) => ClientBuilder::new()
                 .use_preconfigured_tls(config)
                 .default_headers(map)
@@ -99,6 +101,7 @@ impl TransportClient {
             last_pong: Arc::new(Mutex::new(Instant::now())),
             host_address: Arc::new(Mutex::new(None)),
             tls_config: Arc::new(tls_config),
+            custom_headers: Arc::new(opening_headers),
             connection_data: Arc::new(RwLock::new(None)),
             engine_io_mode: Arc::new(AtomicBool::from(engine_io_mode)),
         }
@@ -269,12 +272,13 @@ impl TransportClient {
                 .append_pair("sid", new_sid)
                 .finish();
 
+            let custom_headers = self.get_headers_from_header_map();
             match full_address.scheme() {
                 "https" => {
-                    self.perform_upgrade_secure(&full_address)?;
+                    self.perform_upgrade_secure(&full_address, &custom_headers)?;
                 }
                 "http" => {
-                    self.perform_upgrade_insecure(&full_address)?;
+                    self.perform_upgrade_insecure(&full_address, &custom_headers)?;
                 }
                 _ => return Err(Error::InvalidUrl(full_address.to_string())),
             }
@@ -284,13 +288,30 @@ impl TransportClient {
         Err(Error::HandshakeError("Error - invalid url".to_owned()))
     }
 
+    /// Converts between `reqwest::HeaderMap` and `websocket::Headers`, if they're currently set, if not
+    /// An empty (allocation free) header map is returned.
+    fn get_headers_from_header_map(&mut self) -> Headers {
+        let mut headers = Headers::new();
+        // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection procedure
+        if let Some(map) = Arc::get_mut(&mut self.custom_headers).unwrap().take() {
+            for (key, val) in map {
+                if let Some(h_key) = key {
+                    headers.append_raw(h_key.to_string(), val.as_bytes().to_owned());
+                }
+            }
+        }
+        headers
+    }
+
     /// Performs the socketio upgrade handshake via `wss://`. A Description of the
     /// upgrade request can be found above.
-    fn perform_upgrade_secure(&mut self, address: &Url) -> Result<()> {
+    fn perform_upgrade_secure(&mut self, address: &Url, headers: &Headers) -> Result<()> {
         // connect to the server via websockets
         // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection procedure
         let tls_config = Arc::get_mut(&mut self.tls_config).unwrap().take();
-        let mut client = WsClientBuilder::new(address.as_ref())?.connect_secure(tls_config)?;
+        let mut client = WsClientBuilder::new(address.as_ref())?
+            .custom_headers(headers)
+            .connect_secure(tls_config)?;
 
         client.set_nonblocking(false)?;
 
@@ -319,9 +340,11 @@ impl TransportClient {
 
     /// Performs the socketio upgrade handshake in an via `ws://`. A Description of the
     /// upgrade request can be found above.
-    fn perform_upgrade_insecure(&mut self, addres: &Url) -> Result<()> {
+    fn perform_upgrade_insecure(&mut self, addres: &Url, headers: &Headers) -> Result<()> {
         // connect to the server via websockets
-        let client = WsClientBuilder::new(addres.as_ref())?.connect_insecure()?;
+        let client = WsClientBuilder::new(addres.as_ref())?
+            .custom_headers(headers)
+            .connect_insecure()?;
         client.set_nonblocking(false)?;
 
         let (mut receiver, mut sender) = client.split()?;

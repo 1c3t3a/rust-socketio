@@ -244,9 +244,23 @@ impl SocketBuilder {
         self
     }
 
-    /// Sets custom http headers for the opening request. The headers will definetly be send with the open
-    /// request but not necessarly with every other request. When the transport type evaluates to `polling`
-    /// the headers get send with every request, when websockets are used, not.
+    /// Sets custom http headers for the opening request. The headers will be passed to the underlying
+    /// transport type (either websockets or polling) and then get passed with every request thats made.
+    /// via the transport layer.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use reqwest::header::{ACCEPT_ENCODING};
+    ///
+    ///
+    /// let socket = SocketBuilder::new("http://localhost:4200")
+    ///     .set_namespace("/admin")
+    ///     .expect("illegal namespace")
+    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    ///     .set_opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
+    ///     .connect();
+    ///
+    /// ```
     pub fn set_opening_header<K: IntoHeaderName>(mut self, key: K, val: HeaderValue) -> Self {
         match self.opening_headers {
             Some(ref mut map) => {
