@@ -95,11 +95,14 @@ impl TransportClient {
             .lock()?
             .bind(self.host.as_ref().to_string())?;
 
-        let default = String::from("/");
         // construct the opening packet
         let open_packet = SocketPacket::new(
             SocketPacketId::Connect,
-            self.nsp.as_ref().as_ref().unwrap_or(&default).to_owned(),
+            self.nsp
+                .as_ref()
+                .as_ref()
+                .unwrap_or(&String::from("/"))
+                .to_owned(),
             None,
             None,
             None,
@@ -112,10 +115,35 @@ impl TransportClient {
         self.send(&open_packet)
     }
 
+    /// Disconnects from the server by sending a socket.io `Disconnect` packet. This results
+    /// in the underlying engine.io transport to get closed as well.
+    pub fn disconnect(&mut self) -> Result<()> {
+        if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
+            return Err(Error::IllegalActionAfterOpen);
+        }
+
+        let disconnect_packet = SocketPacket::new(
+            SocketPacketId::Disconnect,
+            self.nsp
+                .as_ref()
+                .as_ref()
+                .unwrap_or(&String::from("/"))
+                .to_owned(),
+            None,
+            None,
+            None,
+            None,
+        );
+
+        self.send(&disconnect_packet)?;
+        self.connected.store(false, Ordering::Release);
+        Ok(())
+    }
+
     /// Sends a `socket.io` packet to the server using the `engine.io` client.
     pub fn send(&self, packet: &SocketPacket) -> Result<()> {
         if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
-            return Err(Error::ActionBeforeOpen);
+            return Err(Error::IllegalActionAfterOpen);
         }
 
         // the packet, encoded as an engine.io message packet

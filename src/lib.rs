@@ -382,6 +382,33 @@ impl Socket {
         self.transport.emit(event.into(), data.into())
     }
 
+    /// Disconnects this client from the server by sending a `socket.io` closing
+    /// packet.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use serde_json::json;
+    ///
+    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    ///     .on("test", |payload: Payload, mut socket| {
+    ///         println!("Received: {:#?}", payload);
+    ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
+    ///      })
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    /// let json_payload = json!({"token": 123});
+    ///
+    /// socket.emit("foo", json_payload);
+    ///
+    /// // disconnect from the server
+    /// socket.disconnect();
+    ///
+    /// ```
+    pub fn disconnect(&mut self) -> Result<()> {
+        self.transport.disconnect()
+    }
+
     /// Sends a message to the server but `alloc`s an `ack` to check whether the
     /// server responded in a given timespan. This message takes an event, which
     /// could either be one of the common events like "message" or "error" or a
@@ -491,6 +518,9 @@ mod test {
             ack_callback,
         );
         assert!(ack.is_ok());
+
+        socket.disconnect().unwrap();
+        // assert!(socket.disconnect().is_ok());
 
         sleep(Duration::from_secs(4));
     }
