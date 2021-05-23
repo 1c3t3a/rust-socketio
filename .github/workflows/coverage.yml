@@ -25,9 +25,6 @@ jobs:
         id: buildx
         uses: docker/setup-buildx-action@v1
 
-      - name: Install covfix
-        run: cargo install rust-covfix
-
       - name: Build docker container
         run: |
           cd ci && docker build -t test_suite:latest .
