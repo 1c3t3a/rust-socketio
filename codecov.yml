@@ -1,13 +1,11 @@
 coverage:
+  range: 50..90 # coverage lower than 50 is red, higher than 90 green, between color code
+
   status:
-    project:
+    project: # settings affecting project coverage
       default:
-        target: auto
-        threshold: 2%
-        paths: 
-          - "src"
-        branches: 
-          - main
-        if_ci_failed: ignore
-        informational: false
-        only_pulls: false
+        target: auto # auto % coverage target
+        threshold: 5%  # allow for 5% reduction of coverage without failing
+
+    # do not run coverage on patch nor changes
+    patch: false
