@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.2.3`](#023) - _2021.05.24_
 * [`0.2.2`](#022) - _2021.05.13
 * [`0.2.1`](#021) - _2021.04.27_
 * [`0.2.0`](#020) – _2021.03.13_
@@ -21,6 +22,14 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## _[Unreleased]_
 
 _nothing new to show for… yet!_
+
+## <a name="023">[0.2.3] - _Disconnect methos on the Socket struct_ </a>
+
+_2021.05.24_
+
+### Changes
+
+* Added a `disconnect` method to the `Socket` struct as requested in [#43](https://github.com/1c3t3a/rust-socketio/issues/43).
 
 ## <a name="022">[0.2.2] - _Safe websockets and custom headers_ </a>
 
