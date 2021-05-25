@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.2.4`](#024) - _2021.05.25_
 * [`0.2.3`](#023) - _2021.05.24_
 * [`0.2.2`](#022) - _2021.05.13
 * [`0.2.1`](#021) - _2021.04.27_
@@ -22,6 +23,14 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## _[Unreleased]_
 
 _nothing new to show for… yet!_
+
+## <a name="024">[0.2.4] - _Bugfixes_ </a>
+
+_2021.05.25_
+
+### Changes
+
+* Fixed a bug that prevented the client from receiving data for a message event issued on the server.
 
 ## <a name="023">[0.2.3] - _Disconnect methos on the Socket struct_ </a>
 

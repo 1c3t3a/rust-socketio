@@ -56,7 +56,7 @@ The main entry point for using this crate is the `SocketBuilder` which provides 
 
 ## Documentation
 
-Documentation of this crate can be found up on [docs.rs](https://docs.rs/rust_socketio/0.2.3/rust_socketio/).
+Documentation of this crate can be found up on [docs.rs](https://docs.rs/rust_socketio/0.2.4/rust_socketio/).
 
 ## Current features
 
