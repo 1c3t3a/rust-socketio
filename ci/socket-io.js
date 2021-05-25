@@ -29,6 +29,7 @@ io.on('connection', client => {
     });
     client.emit("test", "Hello Wld");
     client.emit("test", Buffer.from([1, 2, 3]));
+    client.emit("Hello from the message event!");
 });
 // the socket.io client runs on port 4201
 server.listen(4200);

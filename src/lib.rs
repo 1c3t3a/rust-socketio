@@ -546,7 +546,8 @@ mod test {
             .set_tls_config(tls_connector)
             .set_opening_header(HOST, "localhost".parse().unwrap())
             .set_opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
-            .on("test", Box::new(|str, _| println!("Received: {:#?}", str)))
+            .on("test", |str, _| println!("Received: {:#?}", str))
+            .on("message", |payload, _| println!("{:#?}", payload))
             .connect();
 
         assert!(socket.is_ok());
