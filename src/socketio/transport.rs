@@ -478,29 +478,37 @@ impl TransportClient {
             if let Ok(serde_json::Value::Array(contents)) =
                 serde_json::from_str::<serde_json::Value>(&data)
             {
+                let event: Event = if contents.len() > 1 {
+                    contents
+                        .get(0)
+                        .map(|value| match value {
+                            serde_json::Value::String(ev) => ev,
+                            _ => "message",
+                        })
+                        .unwrap_or("message")
+                        .into()
+                } else {
+                    Event::Message
+                };
                 // check which callback to use and call it with the data if it's present
-                if data.len() > 1 {
-                    if let serde_json::Value::String(event) = &contents[0] {
-                        if let Some(function) =
-                            clone_self.get_event_callback(&Event::Custom(event.to_owned()))
-                        {
-                            spawn_scoped!({
-                                let mut lock = function.1.write().unwrap();
-                                let socket = Socket {
-                                    transport: clone_self.clone(),
-                                };
-                                lock(Payload::String(contents[1].to_string()), socket);
-                                drop(lock);
-                            });
-                        }
-                    }
-                } else if let Some(function) = clone_self.get_event_callback(&Event::Message) {
+                if let Some(function) = clone_self.get_event_callback(&event) {
                     spawn_scoped!({
                         let mut lock = function.1.write().unwrap();
                         let socket = Socket {
                             transport: clone_self.clone(),
                         };
-                        lock(Payload::String(contents[0].to_string()), socket);
+                        // if the data doesn't contain an event type at position `1`, the event must be
+                        // of the type `Message`, in that case the data must be on position one and
+                        // unwrapping is safe
+                        lock(
+                            Payload::String(
+                                contents
+                                    .get(1)
+                                    .unwrap_or_else(|| contents.get(0).unwrap())
+                                    .to_string(),
+                            ),
+                            socket,
+                        );
                         drop(lock);
                     });
                 }
