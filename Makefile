@@ -1,4 +1,4 @@
-.PHONY: build test-fast test-all clippy format
+.PHONY: build test-fast test-all clippy format checks pipeline
 
 build: 
 	@cargo build --verbose
