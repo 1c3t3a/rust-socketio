@@ -471,16 +471,14 @@ impl TransportClient {
         let mut last_ping = *self.last_ping.lock()?;
         // the time after we assume the server to be timed out
         let server_timeout = Duration::from_millis(
-            Arc::as_ref(&self.connection_data)
+            (*self.connection_data)
                 .read()?
                 .as_ref()
-                .unwrap()
-                .ping_timeout
-                + Arc::as_ref(&self.connection_data)
+                .map_or_else(|| 0, |data| data.ping_timeout)
+                + (*self.connection_data)
                     .read()?
                     .as_ref()
-                    .unwrap()
-                    .ping_interval,
+                    .map_or_else(|| 0, |data| data.ping_interval),
         );
 
         while self.connected.load(Ordering::Acquire) {
@@ -632,14 +630,12 @@ impl TransportClient {
         );
 
         // append a session id if the socket is connected
+        // unwrapping is safe as a connected socket always
+        // holds its connection data
         if self.connected.load(Ordering::Acquire) {
             path.push_str(&format!(
                 "&sid={}",
-                Arc::as_ref(&self.connection_data)
-                    .read()?
-                    .as_ref()
-                    .unwrap()
-                    .sid
+                (*self.connection_data).read()?.as_ref().unwrap().sid
             ));
         }
 

@@ -1,5 +1,5 @@
 #![allow(unused)]
-use std::thread;
+use std::{ops::Deref, thread};
 
 use super::packet::{Packet, PacketId};
 use crate::engineio::transport::TransportClient;
