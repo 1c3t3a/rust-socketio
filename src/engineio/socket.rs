@@ -190,7 +190,9 @@ mod test {
             })
             .is_ok());
 
-        assert!(socket.bind(SERVER_URL).is_ok());
+        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+
+        assert!(socket.bind(url).is_ok());
 
         assert!(socket
             .emit(Packet::new(
@@ -229,7 +231,9 @@ mod test {
             .is_err());
         assert!(sut.emit_binary_attachment(Bytes::from_static(b"")).is_err());
 
-        assert!(sut.bind(SERVER_URL).is_ok());
+        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+
+        assert!(sut.bind(url).is_ok());
 
         assert!(sut.on_open(|_| {}).is_err());
         assert!(sut.on_close(|_| {}).is_err());

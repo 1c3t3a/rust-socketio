@@ -558,7 +558,10 @@ mod test {
 
     #[test]
     fn it_works() {
-        let mut socket = TransportClient::new(SERVER_URL, None, None, None);
+
+        let url = std::env::var("SOCKET_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+
+        let mut socket = TransportClient::new(url, None, None, None);
 
         assert!(socket
             .on(
