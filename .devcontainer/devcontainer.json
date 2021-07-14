@@ -2,7 +2,7 @@
 // https://github.com/microsoft/vscode-dev-containers/tree/v0.187.0/containers/rust
 {
     "name": "Rust",
-    "dockerComposeFile": ["../docker-compose.yaml"],
+    "dockerComposeFile": ["./docker-compose.yaml"],
     "service": "rust-client",
     "workspaceFolder": "/workspace/rust-socketio",
     "shutdownAction": "stopCompose",
