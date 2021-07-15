@@ -1,5 +1,5 @@
 use crate::engineio::packet::Packet;
-use crate::engineio::transports::Transport as TransportType;
+use crate::engineio::transports::Transport;
 use crate::engineio::transports::Transports;
 use crate::error::Result;
 use bytes::Bytes;
@@ -16,7 +16,7 @@ type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
 /// protocol. Used by the wrapper `EngineSocket`. This struct also holds the
 /// callback functions.
 #[derive(Clone)]
-pub struct Transport {
+pub struct TransportEmitter {
     transport: Arc<Mutex<Transports>>,
     pub on_error: Callback<String>,
     pub on_open: Callback<()>,
@@ -63,10 +63,10 @@ pub trait EventEmitter {
         F: Fn(()) + 'static + Sync + Send;
 }
 
-impl Transport {
+impl TransportEmitter {
     /// Creates an instance of `Transport`.
     pub fn new(tls_config: Option<TlsConnector>, opening_headers: Option<HeaderMap>) -> Self {
-        Transport {
+        TransportEmitter {
             transport: Arc::new(Mutex::new(Transports::new(tls_config, opening_headers))),
             on_error: Arc::new(RwLock::new(None)),
             on_open: Arc::new(RwLock::new(None)),
@@ -85,7 +85,7 @@ impl Transport {
     }
 }
 
-impl EventEmitter for Transport {
+impl EventEmitter for TransportEmitter {
     /// Registers an `on_open` callback.
     fn set_on_open<F>(&mut self, function: F) -> Result<()>
     where
@@ -142,7 +142,7 @@ impl EventEmitter for Transport {
     }
 }
 
-impl TransportType for Transport {
+impl Transport for TransportEmitter {
     fn emit(&self, address: String, data: Bytes, is_binary_att: bool) -> Result<()> {
         self.transport.lock()?.emit(address, data, is_binary_att)
     }
@@ -156,7 +156,7 @@ impl TransportType for Transport {
     }
 }
 
-impl Debug for Transport {
+impl Debug for TransportEmitter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
             "TransportType({})",

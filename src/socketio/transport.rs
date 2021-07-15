@@ -4,7 +4,7 @@ use crate::{
     engineio::{
         packet::{Packet as EnginePacket, PacketId as EnginePacketId},
         socket::EngineSocket,
-        transport::EventEmitter,
+        transport_emitter::EventEmitter,
     },
     Socket,
 };

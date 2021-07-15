@@ -2,8 +2,8 @@ use std::thread;
 
 use crate::client::Client;
 use crate::engineio::packet::{decode_payload, encode_payload, HandshakePacket, Packet, PacketId};
-use crate::engineio::transport::{EventEmitter, Transport};
-use crate::engineio::transports::Transport as TransportType;
+use crate::engineio::transport_emitter::{EventEmitter, TransportEmitter};
+use crate::engineio::transports::Transport;
 use crate::error::{Error, Result};
 use adler32::adler32;
 use bytes::Bytes;
@@ -21,7 +21,7 @@ use std::{
 /// it to register common callbacks.
 #[derive(Clone, Debug)]
 pub struct EngineSocket {
-    pub(super) transport: Arc<Mutex<Transport>>,
+    pub(super) transport: Arc<Mutex<TransportEmitter>>,
     pub connected: Arc<AtomicBool>,
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
@@ -34,7 +34,10 @@ impl EngineSocket {
     /// Creates an instance of `EngineSocket`.
     pub fn new(tls_config: Option<TlsConnector>, opening_headers: Option<HeaderMap>) -> Self {
         EngineSocket {
-            transport: Arc::new(Mutex::new(Transport::new(tls_config, opening_headers))),
+            transport: Arc::new(Mutex::new(TransportEmitter::new(
+                tls_config,
+                opening_headers,
+            ))),
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
