@@ -114,10 +114,10 @@ impl EngineSocket {
 
             match full_address.scheme() {
                 "https" => {
-                    self.perform_upgrade_secure(&full_address)?;
+                    self.transport.lock()?.upgrade_websocket_secure(full_address.to_string())?;
                 }
                 "http" => {
-                    self.perform_upgrade_insecure(&full_address)?;
+                    self.transport.lock()?.upgrade_websocket(full_address.to_string())?;
                 }
                 _ => return Err(Error::InvalidUrl(full_address.to_string())),
             }
@@ -125,20 +125,6 @@ impl EngineSocket {
             return Ok(());
         }
         Err(Error::HandshakeError("Error - invalid url".to_owned()))
-    }
-
-
-    /// Performs the socketio upgrade handshake via `wss://`. A Description of the
-    /// upgrade request can be found above.
-    fn perform_upgrade_secure(&mut self, address: &Url) -> Result<()> {
-        self.transport.lock()?.upgrade_websocket_secure(address.to_string())
-    }
-
-    /// Performs the socketio upgrade handshake in an via `ws://`. A Description of the
-    /// upgrade request can be found above.
-    fn perform_upgrade_insecure(&mut self, address: &Url) -> Result<()> {
-        // connect to the server via websockets
-        self.transport.lock()?.upgrade_websocket(address.to_string())
     }
 
     /// Sends a packet to the server. This optionally handles sending of a
