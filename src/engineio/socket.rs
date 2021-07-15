@@ -159,107 +159,9 @@ impl EngineSocket {
         Ok(())
     }
 
-    /// Performs the server long polling procedure as long as the client is
-    /// connected. This should run separately at all time to ensure proper
-    /// response handling from the server.
-    pub fn poll_cycle(&mut self) -> Result<()> {
-        if !self.connected.load(Ordering::Acquire) {
-            let error = Error::ActionBeforeOpen;
-            self.call_error_callback(format!("{}", error))?;
-            return Err(error);
-        }
-
-        // as we don't have a mut self, the last_ping needs to be safed for later
-        let mut last_ping = *self.last_ping.lock()?;
-        // the time after we assume the server to be timed out
-        let server_timeout = Duration::from_millis(
-            (*self.connection_data)
-                .read()?
-                .as_ref()
-                .map_or_else(|| 0, |data| data.ping_timeout)
-                + (*self.connection_data)
-                    .read()?
-                    .as_ref()
-                    .map_or_else(|| 0, |data| data.ping_interval),
-        );
-
-        while self.connected.load(Ordering::Acquire) {
-            let query_path = self.get_query_path()?.to_owned();
-
-            let host = self.host_address.lock()?;
-            let address =
-                Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
-            drop(host);
-            let data = self.transport.lock()?.poll(address.to_string())?;
-
-            if data.is_empty() {
-                return Ok(());
-            }
-
-            let packets = decode_payload(data)?;
-
-            for packet in packets {
-                {
-                    let transport = self.transport.lock()?;
-                    let on_packet = transport.on_packet.read()?;
-                    // call the packet callback
-                    if let Some(function) = on_packet.as_ref() {
-                        spawn_scoped!(function(packet.clone()));
-                    }
-                }
-
-                // check for the appropriate action or callback
-                match packet.packet_id {
-                    PacketId::Message => {
-                        let transport = self.transport.lock()?;
-                        let on_data = transport.on_data.read()?;
-                        if let Some(function) = on_data.as_ref() {
-                            spawn_scoped!(function(packet.data));
-                        }
-                        drop(on_data);
-                    }
-
-                    PacketId::Close => {
-                        let transport = self.transport.lock()?;
-                        let on_close = transport.on_close.read()?;
-                        if let Some(function) = on_close.as_ref() {
-                            spawn_scoped!(function(()));
-                        }
-                        drop(on_close);
-                        // set current state to not connected and stop polling
-                        self.connected.store(false, Ordering::Release);
-                    }
-                    PacketId::Open => {
-                        unreachable!("Won't happen as we open the connection beforehand");
-                    }
-                    PacketId::Upgrade => {
-                        // this is already checked during the handshake, so just do nothing here
-                    }
-                    PacketId::Ping => {
-                        last_ping = Instant::now();
-                        self.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
-                    }
-                    PacketId::Pong => {
-                        // this will never happen as the pong packet is
-                        // only sent by the client
-                        unreachable!();
-                    }
-                    PacketId::Noop => (),
-                }
-            }
-
-            if server_timeout < last_ping.elapsed() {
-                // the server is unreachable
-                // set current state to not connected and stop polling
-                self.connected.store(false, Ordering::Release);
-            }
-        }
-        Ok(())
-    }
-
     /// Produces a random String that is used to prevent browser caching.
     #[inline]
-    fn get_random_t(&self) -> String {
+    fn get_time(&self) -> String {
         let reader = format!("{:#?}", SystemTime::now());
         let hash = adler32(reader.as_bytes()).unwrap();
         hash.to_string()
@@ -278,7 +180,7 @@ impl EngineSocket {
             "/{}/?EIO=4&transport={}&t={}",
             self.root_path.read()?.as_ref().unwrap(),
             self.transport.lock()?.name()?,
-            self.get_random_t(),
+            self.get_time(),
         );
 
         // append a session id if the socket is connected
@@ -439,6 +341,106 @@ impl Client for EngineSocket {
             self.call_error_callback(format!("{}", error))?;
             Err(error)
         }
+    }
+
+    /// Performs the server long polling procedure as long as the client is
+    /// connected. This should run separately at all time to ensure proper
+    /// response handling from the server.
+    fn poll_cycle(&mut self) -> Result<()> {
+        if !self.connected.load(Ordering::Acquire) {
+            let error = Error::ActionBeforeOpen;
+            self.call_error_callback(format!("{}", error))?;
+            return Err(error);
+        }
+
+        // as we don't have a mut self, the last_ping needs to be safed for later
+        let mut last_ping = *self.last_ping.lock()?;
+        // the time after we assume the server to be timed out
+        let server_timeout = Duration::from_millis(
+            (*self.connection_data)
+                .read()?
+                .as_ref()
+                .map_or_else(|| 0, |data| data.ping_timeout)
+                + (*self.connection_data)
+                    .read()?
+                    .as_ref()
+                    .map_or_else(|| 0, |data| data.ping_interval),
+        );
+
+        while self.connected.load(Ordering::Acquire) {
+            let query_path = self.get_query_path()?.to_owned();
+
+            let host = self.host_address.lock()?;
+            let address =
+                Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
+            drop(host);
+            let mut transport = self.transport.lock()?;
+            let data = transport.poll(address.to_string())?;
+            drop(transport);
+
+            if data.is_empty() {
+                return Ok(());
+            }
+
+            let packets = decode_payload(data)?;
+
+            for packet in packets {
+                {
+                    let transport = self.transport.lock()?;
+                    let on_packet = transport.on_packet.read()?;
+                    // call the packet callback
+                    if let Some(function) = on_packet.as_ref() {
+                        spawn_scoped!(function(packet.clone()));
+                    }
+                }
+
+                // check for the appropriate action or callback
+                match packet.packet_id {
+                    PacketId::Message => {
+                        let transport = self.transport.lock()?;
+                        let on_data = transport.on_data.read()?;
+                        if let Some(function) = on_data.as_ref() {
+                            spawn_scoped!(function(packet.data));
+                        }
+                        drop(on_data);
+                    }
+
+                    PacketId::Close => {
+                        let transport = self.transport.lock()?;
+                        let on_close = transport.on_close.read()?;
+                        if let Some(function) = on_close.as_ref() {
+                            spawn_scoped!(function(()));
+                        }
+                        drop(on_close);
+                        // set current state to not connected and stop polling
+                        self.connected.store(false, Ordering::Release);
+                    }
+                    PacketId::Open => {
+                        unreachable!("Won't happen as we open the connection beforehand");
+                    }
+                    PacketId::Upgrade => {
+                        // this is already checked during the handshake, so just do nothing here
+                    }
+                    PacketId::Ping => {
+                        last_ping = Instant::now();
+                        self.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
+                    }
+                    PacketId::Pong => {
+                        // this will never happen as the pong packet is
+                        // only sent by the client
+                        unreachable!();
+                    }
+                    PacketId::Noop => (),
+                }
+            }
+
+            if server_timeout < last_ping.elapsed() {
+                // the server is unreachable
+                // set current state to not connected and stop polling
+                self.connected.store(false, Ordering::Release);
+            }
+        }
+        Ok(())
     }
 }
 /*
