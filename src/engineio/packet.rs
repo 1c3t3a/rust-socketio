@@ -1,8 +1,8 @@
 extern crate base64;
 use base64::{decode, encode};
 use bytes::{BufMut, Bytes, BytesMut};
-use std::char;
 use serde::{Deserialize, Serialize};
+use std::char;
 use std::convert::TryInto;
 
 use crate::error::{Error, Result};
@@ -144,7 +144,6 @@ pub fn encode_payload(packets: Vec<Packet>) -> Bytes {
     let _ = buf.split_off(buf.len() - 1);
     buf.freeze()
 }
-
 
 /// Data which gets exchanged in a handshake as defined by the server.
 #[derive(Serialize, Deserialize, Debug, Clone)]

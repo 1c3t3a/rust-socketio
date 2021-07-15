@@ -50,7 +50,7 @@ pub enum Error {
     #[error("No transports defined")]
     NoTransport(),
     #[error("That transport already exists")]
-    TransportExists()
+    TransportExists(),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;

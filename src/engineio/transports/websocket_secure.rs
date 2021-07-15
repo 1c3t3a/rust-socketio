@@ -1,58 +1,63 @@
-
-use crate::engineio::transports::{Transport};
 use crate::engineio::packet::{Packet, PacketId};
-use crate::error::{Result, Error};
+use crate::engineio::transports::Transport;
+use crate::error::{Error, Result};
 use bytes::{BufMut, Bytes, BytesMut};
-use std::{borrow::Cow};
-use std::{
-    sync::{Arc, Mutex},
-};
+use native_tls::TlsConnector;
+use std::borrow::Cow;
+use std::sync::{Arc, Mutex};
 use websocket::{
     client::sync::Client as WsClient,
-    sync::stream::{TcpStream, TlsStream},
-    ClientBuilder as WsClientBuilder,
     dataframe::Opcode,
+    sync::stream::{TcpStream, TlsStream},
     ws::dataframe::DataFrame,
-    Message,
+    ClientBuilder as WsClientBuilder, Message,
 };
-use native_tls::TlsConnector;
 
 pub(super) struct WebsocketSecureTransport {
-    client: Arc<Mutex<WsClient<TlsStream<TcpStream>>>>
+    client: Arc<Mutex<WsClient<TlsStream<TcpStream>>>>,
 }
 
 impl WebsocketSecureTransport {
     /// Creates an instance of `TransportClient`.
-    pub fn new(
-        address: String,
-        tls_config: Option<TlsConnector>
-    ) -> Self {
-        let client = WsClientBuilder::new(address[..].as_ref()).unwrap().connect_secure(tls_config).unwrap();
+    pub fn new(address: String, tls_config: Option<TlsConnector>) -> Self {
+        let client = WsClientBuilder::new(address[..].as_ref())
+            .unwrap()
+            .connect_secure(tls_config)
+            .unwrap();
 
         client.set_nonblocking(false).unwrap();
 
         WebsocketSecureTransport {
-            client: Arc::new(Mutex::new(client))
+            client: Arc::new(Mutex::new(client)),
         }
     }
 
     pub(super) fn probe(&self) -> Result<()> {
-        
         let mut client = self.client.lock()?;
 
         // send the probe packet, the text `2probe` represents a ping packet with
         // the content `probe`
-        client.send_message(&Message::binary(Cow::Borrowed(Packet::new(PacketId::Ping, Bytes::from("probe")).encode_packet().as_ref())))?;
+        client.send_message(&Message::binary(Cow::Borrowed(
+            Packet::new(PacketId::Ping, Bytes::from("probe"))
+                .encode_packet()
+                .as_ref(),
+        )))?;
 
         // expect to receive a probe packet
         let message = client.recv_message()?;
-        if message.take_payload() != Packet::new(PacketId::Pong, Bytes::from("probe")).encode_packet() {
+        if message.take_payload()
+            != Packet::new(PacketId::Pong, Bytes::from("probe")).encode_packet()
+        {
             return Err(Error::HandshakeError("Error".to_owned()));
         }
 
         // finally send the upgrade request. the payload `5` stands for an upgrade
         // packet without any payload
-        client.send_message(&Message::binary(Cow::Borrowed(Packet::new(PacketId::Upgrade, Bytes::from("")).encode_packet().as_ref())))?;
+        client.send_message(&Message::binary(Cow::Borrowed(
+            Packet::new(PacketId::Upgrade, Bytes::from(""))
+                .encode_packet()
+                .as_ref(),
+        )))?;
 
         Ok(())
     }

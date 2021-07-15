@@ -1,20 +1,17 @@
-use std::{thread};
+use std::thread;
 
-use crate::engineio::transport::{Transport, EventEmitter};
-use crate::engineio::transports::{Transport as TransportType};
-use crate::error::{Error, Result};
-use crate::engineio::packet::{decode_payload, encode_payload, Packet, PacketId, HandshakePacket};
 use crate::client::Client;
+use crate::engineio::packet::{decode_payload, encode_payload, HandshakePacket, Packet, PacketId};
+use crate::engineio::transport::{EventEmitter, Transport};
+use crate::engineio::transports::Transport as TransportType;
+use crate::error::{Error, Result};
 use adler32::adler32;
-use bytes::{Bytes};
+use bytes::Bytes;
 use native_tls::TlsConnector;
-use reqwest::{
-    header::HeaderMap,
-    Url,
-};
-use std::{time::SystemTime};
-use std::{fmt::Debug, sync::atomic::Ordering};
+use reqwest::{header::HeaderMap, Url};
 use std::convert::TryInto;
+use std::time::SystemTime;
+use std::{fmt::Debug, sync::atomic::Ordering};
 use std::{
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
     time::{Duration, Instant},
@@ -35,15 +32,9 @@ pub struct EngineSocket {
 
 impl EngineSocket {
     /// Creates an instance of `EngineSocket`.
-    pub fn new(
-        tls_config: Option<TlsConnector>,
-        opening_headers: Option<HeaderMap>,
-    ) -> Self {
+    pub fn new(tls_config: Option<TlsConnector>, opening_headers: Option<HeaderMap>) -> Self {
         EngineSocket {
-            transport: Arc::new(Mutex::new(Transport::new(
-                tls_config,
-                opening_headers,
-            ))),
+            transport: Arc::new(Mutex::new(Transport::new(tls_config, opening_headers))),
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
@@ -56,8 +47,7 @@ impl EngineSocket {
     /// Binds the socket to a certain `address`. Attention! This doesn't allow
     /// to configure callbacks afterwards.
     pub fn bind<T: Into<String>>(&mut self, address: T) -> Result<()> {
-        if self.connected.load(Ordering::Acquire)
-        {
+        if self.connected.load(Ordering::Acquire) {
             return Err(Error::IllegalActionAfterOpen);
         }
         self.open(address.into())?;
@@ -102,7 +92,10 @@ impl EngineSocket {
             let mut address = Url::parse(&address).unwrap();
             drop(host_address);
 
-            address.set_path(&(address.path().to_owned() + self.root_path.read()?.as_ref().unwrap()[..].as_ref()));
+            address.set_path(
+                &(address.path().to_owned()
+                    + self.root_path.read()?.as_ref().unwrap()[..].as_ref()),
+            );
 
             let full_address = address
                 .query_pairs_mut()
@@ -114,10 +107,14 @@ impl EngineSocket {
 
             match full_address.scheme() {
                 "https" => {
-                    self.transport.lock()?.upgrade_websocket_secure(full_address.to_string())?;
+                    self.transport
+                        .lock()?
+                        .upgrade_websocket_secure(full_address.to_string())?;
                 }
                 "http" => {
-                    self.transport.lock()?.upgrade_websocket(full_address.to_string())?;
+                    self.transport
+                        .lock()?
+                        .upgrade_websocket(full_address.to_string())?;
                 }
                 _ => return Err(Error::InvalidUrl(full_address.to_string())),
             }
@@ -150,7 +147,11 @@ impl EngineSocket {
             encode_payload(vec![packet])
         };
 
-        if let Err(error) = self.transport.lock()?.emit(address.to_string(), data, is_binary_att) {
+        if let Err(error) = self
+            .transport
+            .lock()?
+            .emit(address.to_string(), data, is_binary_att)
+        {
             self.call_error_callback(error.to_string())?;
             return Err(error);
         }
@@ -309,7 +310,9 @@ impl EngineSocket {
 
 impl EventEmitter for EngineSocket {
     fn set_on_open<F>(&mut self, function: F) -> Result<()>
-    where F: Fn(()) + 'static + Sync + Send {
+    where
+        F: Fn(()) + 'static + Sync + Send,
+    {
         if self.connected.load(Ordering::Acquire) {
             Err(Error::IllegalActionAfterOpen)
         } else {
@@ -318,7 +321,9 @@ impl EventEmitter for EngineSocket {
     }
 
     fn set_on_error<F>(&mut self, function: F) -> Result<()>
-    where F: Fn(String) + 'static + Sync + Send {
+    where
+        F: Fn(String) + 'static + Sync + Send,
+    {
         if self.connected.load(Ordering::Acquire) {
             Err(Error::IllegalActionAfterOpen)
         } else {
@@ -328,16 +333,19 @@ impl EventEmitter for EngineSocket {
 
     fn set_on_packet<F>(&mut self, function: F) -> Result<()>
     where
-        F: Fn(Packet) + 'static + Sync + Send {
-            if self.connected.load(Ordering::Acquire) {
-                Err(Error::IllegalActionAfterOpen)
-            } else {
-                self.transport.lock()?.set_on_packet(function)
-            }
+        F: Fn(Packet) + 'static + Sync + Send,
+    {
+        if self.connected.load(Ordering::Acquire) {
+            Err(Error::IllegalActionAfterOpen)
+        } else {
+            self.transport.lock()?.set_on_packet(function)
         }
+    }
 
     fn set_on_data<F>(&mut self, function: F) -> Result<()>
-    where F: Fn(Bytes) + 'static + Sync + Send {
+    where
+        F: Fn(Bytes) + 'static + Sync + Send,
+    {
         if self.connected.load(Ordering::Acquire) {
             Err(Error::IllegalActionAfterOpen)
         } else {
@@ -346,7 +354,9 @@ impl EventEmitter for EngineSocket {
     }
 
     fn set_on_close<F>(&mut self, function: F) -> Result<()>
-    where F: Fn(()) + 'static + Sync + Send {
+    where
+        F: Fn(()) + 'static + Sync + Send,
+    {
         if self.connected.load(Ordering::Acquire) {
             Err(Error::IllegalActionAfterOpen)
         } else {
@@ -356,7 +366,6 @@ impl EventEmitter for EngineSocket {
 }
 
 impl Client for EngineSocket {
-    
     /// Opens the connection to a specified server. Includes an opening `GET`
     /// request to the server, the server passes back the handshake data in the
     /// response. If the handshake data mentions a websocket upgrade possibility,
@@ -366,8 +375,7 @@ impl Client for EngineSocket {
         // build the query path, random_t is used to prevent browser caching
         let query_path = self.get_query_path()?;
 
-        if let Ok(mut full_address) = Url::parse(&(address.to_owned().into() + &query_path))
-        {
+        if let Ok(mut full_address) = Url::parse(&(address.to_owned().into() + &query_path)) {
             self.host_address = Arc::new(Mutex::new(Some(address.into())));
 
             // change the url scheme here if necessary, unwrapping here is
@@ -381,7 +389,8 @@ impl Client for EngineSocket {
 
             let response = self.transport.lock()?.poll(full_address.to_string())?;
 
-            let handshake : Result<HandshakePacket> = Packet::decode_packet(response.clone())?.try_into();
+            let handshake: Result<HandshakePacket> =
+                Packet::decode_packet(response.clone())?.try_into();
 
             // the response contains the handshake data
             if let Ok(conn_data) = handshake {
@@ -420,7 +429,8 @@ impl Client for EngineSocket {
 
                 Ok(())
             } else {
-                let error = Error::HandshakeError(std::str::from_utf8(response[..].as_ref())?.to_owned());
+                let error =
+                    Error::HandshakeError(std::str::from_utf8(response[..].as_ref())?.to_owned());
                 self.call_error_callback(format!("{}", error))?;
                 Err(error)
             }
@@ -430,7 +440,6 @@ impl Client for EngineSocket {
             Err(error)
         }
     }
-
 }
 /*
 #[cfg(test)]

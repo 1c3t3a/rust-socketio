@@ -5,14 +5,10 @@ use self::polling::PollingTransport;
 use self::websocket::WebsocketTransport;
 use self::websocket_secure::WebsocketSecureTransport;
 use crate::error::{Error, Result};
-use reqwest::{
-    header::HeaderMap,
-};
+use bytes::Bytes;
 use native_tls::TlsConnector;
-use bytes::{Bytes};
-use std::{
-    sync::{Arc, Mutex},
-};
+use reqwest::header::HeaderMap;
+use std::sync::{Arc, Mutex};
 
 pub trait Transport {
     /// Sends a packet to the server. This optionally handles sending of a
@@ -40,7 +36,10 @@ impl Transports {
         Transports {
             websocket_secure: Arc::new(Mutex::new(None)),
             websocket: Arc::new(Mutex::new(None)),
-            polling: Arc::new(Mutex::new(Some(PollingTransport::new(tls_config.clone(), opening_headers)))),
+            polling: Arc::new(Mutex::new(Some(PollingTransport::new(
+                tls_config.clone(),
+                opening_headers,
+            )))),
             tls_config: Arc::new(Mutex::new(tls_config)),
         }
     }
@@ -57,7 +56,10 @@ impl Transports {
 
     pub(super) fn upgrade_websocket_secure(&mut self, address: String) -> Result<()> {
         if self.websocket_secure.lock()?.is_none() {
-            *self.websocket_secure.lock()? = Some(WebsocketSecureTransport::new(address, self.tls_config.lock()?.clone()));
+            *self.websocket_secure.lock()? = Some(WebsocketSecureTransport::new(
+                address,
+                self.tls_config.lock()?.clone(),
+            ));
             self.websocket_secure.lock()?.as_ref().unwrap().probe()?;
             Ok(())
         } else {
@@ -69,11 +71,23 @@ impl Transports {
 impl Transport for Transports {
     fn emit(&self, address: String, data: Bytes, is_binary_att: bool) -> Result<()> {
         if self.websocket_secure.lock()?.is_some() {
-            self.websocket_secure.lock()?.as_ref().unwrap().emit(address, data, is_binary_att)
+            self.websocket_secure
+                .lock()?
+                .as_ref()
+                .unwrap()
+                .emit(address, data, is_binary_att)
         } else if self.websocket.lock()?.is_some() {
-            self.websocket.lock()?.as_ref().unwrap().emit(address, data, is_binary_att)
+            self.websocket
+                .lock()?
+                .as_ref()
+                .unwrap()
+                .emit(address, data, is_binary_att)
         } else if self.polling.lock()?.is_some() {
-            self.polling.lock()?.as_ref().unwrap().emit(address, data, is_binary_att)
+            self.polling
+                .lock()?
+                .as_ref()
+                .unwrap()
+                .emit(address, data, is_binary_att)
         } else {
             Err(Error::NoTransport())
         }
@@ -81,7 +95,11 @@ impl Transport for Transports {
 
     fn poll(&mut self, address: String) -> Result<Bytes> {
         if self.websocket_secure.lock()?.is_some() {
-            self.websocket_secure.lock()?.as_mut().unwrap().poll(address)
+            self.websocket_secure
+                .lock()?
+                .as_mut()
+                .unwrap()
+                .poll(address)
         } else if self.websocket.lock()?.is_some() {
             self.websocket.lock()?.as_mut().unwrap().poll(address)
         } else if self.polling.lock()?.is_some() {

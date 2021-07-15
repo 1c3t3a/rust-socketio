@@ -62,10 +62,7 @@ impl TransportClient {
         opening_headers: Option<HeaderMap>,
     ) -> Self {
         TransportClient {
-            engine_socket: Arc::new(Mutex::new(EngineSocket::new(
-                tls_config,
-                opening_headers,
-            ))),
+            engine_socket: Arc::new(Mutex::new(EngineSocket::new(tls_config, opening_headers))),
             host: Arc::new(address.into()),
             connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
@@ -164,9 +161,7 @@ impl TransportClient {
         // the packet, encoded as an engine.io message packet
         let engine_packet = EnginePacket::new(EnginePacketId::Message, attachment);
 
-        self.engine_socket
-            .lock()?
-            .emit(engine_packet, true)
+        self.engine_socket.lock()?.emit(engine_packet, true)
     }
 
     /// Emits to certain event with given data. The data needs to be JSON,

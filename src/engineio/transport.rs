@@ -1,17 +1,13 @@
-use crate::engineio::packet::{Packet};
-use crate::engineio::transports::Transports;
+use crate::engineio::packet::Packet;
 use crate::engineio::transports::Transport as TransportType;
-use crate::error::{Result};
-use bytes::{Bytes};
-use reqwest::{
-    header::HeaderMap,
-};
+use crate::engineio::transports::Transports;
+use crate::error::Result;
+use bytes::Bytes;
 use native_tls::TlsConnector;
+use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug};
-use std::{
-    sync::{Arc, Mutex, RwLock},
-};
+use std::fmt::Debug;
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Type of a `Callback` function. (Normal closures can be passed in here).
 type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
@@ -43,11 +39,13 @@ struct HandshakeData {
 pub trait EventEmitter {
     /// Registers an `on_open` callback
     fn set_on_open<F>(&mut self, function: F) -> Result<()>
-    where F: Fn(()) + 'static + Sync + Send;
+    where
+        F: Fn(()) + 'static + Sync + Send;
 
     /// Registers an `on_error` callback.
     fn set_on_error<F>(&mut self, function: F) -> Result<()>
-    where F: Fn(String) + 'static + Sync + Send;
+    where
+        F: Fn(String) + 'static + Sync + Send;
 
     /// Registers an `on_packet` callback.
     fn set_on_packet<F>(&mut self, function: F) -> Result<()>
@@ -56,11 +54,13 @@ pub trait EventEmitter {
 
     /// Registers an `on_data` callback.
     fn set_on_data<F>(&mut self, function: F) -> Result<()>
-    where F: Fn(Bytes) + 'static + Sync + Send;
+    where
+        F: Fn(Bytes) + 'static + Sync + Send;
 
     /// Registers an `on_close` callback.
     fn set_on_close<F>(&mut self, function: F) -> Result<()>
-    where F: Fn(()) + 'static + Sync + Send;
+    where
+        F: Fn(()) + 'static + Sync + Send;
 }
 
 impl Transport {
@@ -86,7 +86,6 @@ impl Transport {
 }
 
 impl EventEmitter for Transport {
-    
     /// Registers an `on_open` callback.
     fn set_on_open<F>(&mut self, function: F) -> Result<()>
     where

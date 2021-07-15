@@ -1,4 +1,4 @@
-use crate::engineio::transports::{Transport};
+use crate::engineio::transports::Transport;
 use crate::error::{Error, Result};
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
@@ -6,20 +6,15 @@ use reqwest::{
     blocking::{Client, ClientBuilder},
     header::HeaderMap,
 };
-use std::{
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 pub(super) struct PollingTransport {
-    client: Arc<Mutex<Client>>
+    client: Arc<Mutex<Client>>,
 }
 
 impl PollingTransport {
     /// Creates an instance of `TransportClient`.
-    pub fn new(
-        tls_config: Option<TlsConnector>,
-        opening_headers: Option<HeaderMap>,
-    ) -> Self {
+    pub fn new(tls_config: Option<TlsConnector>, opening_headers: Option<HeaderMap>) -> Self {
         let client = match (tls_config.clone(), opening_headers.clone()) {
             (Some(config), Some(map)) => ClientBuilder::new()
                 .use_preconfigured_tls(config)
@@ -35,7 +30,7 @@ impl PollingTransport {
         };
 
         PollingTransport {
-            client: Arc::new(Mutex::new(client))
+            client: Arc::new(Mutex::new(client)),
         }
     }
 }
