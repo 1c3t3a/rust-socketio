@@ -164,7 +164,7 @@ impl EngineSocket {
 
     /// Produces a random String that is used to prevent browser caching.
     #[inline]
-    fn get_time(&self) -> String {
+    fn get_hashed_time(&self) -> String {
         let reader = format!("{:#?}", SystemTime::now());
         let hash = adler32(reader.as_bytes()).unwrap();
         hash.to_string()
@@ -183,7 +183,7 @@ impl EngineSocket {
             "/{}/?EIO=4&transport={}&t={}",
             self.root_path.read()?.as_ref().unwrap(),
             self.transport.lock()?.name()?,
-            self.get_time(),
+            self.get_hashed_time(),
         );
 
         // append a session id if the socket is connected
