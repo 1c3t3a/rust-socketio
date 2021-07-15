@@ -19,6 +19,8 @@ pub enum Error {
     Utf8Error(#[from] str::Utf8Error),
     #[error("An error occurred while encoding/decoding base64: {0}")]
     Base64Error(#[from] DecodeError),
+    #[error("An error occurred while encoding/decoding json")]
+    JsonError,
     #[error("Invalid Url: {0}")]
     InvalidUrl(String),
     #[error("Error during connection via http: {0}")]
@@ -45,6 +47,10 @@ pub enum Error {
     FromWebsocketParseError(#[from] ParseError),
     #[error("Got an IO-Error: {0}")]
     FromIoError(#[from] std::io::Error),
+    #[error("No transports defined")]
+    NoTransport(),
+    #[error("That transport already exists")]
+    TransportExists()
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;

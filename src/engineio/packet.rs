@@ -2,6 +2,8 @@ extern crate base64;
 use base64::{decode, encode};
 use bytes::{BufMut, Bytes, BytesMut};
 use std::char;
+use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
 
 use crate::error::{Error, Result};
 /// Enumeration of the `engine.io` `Packet` types.
@@ -52,7 +54,7 @@ impl Packet {
     }
 
     /// Decodes a single `Packet` from an `u8` byte stream.
-    fn decode_packet(bytes: Bytes) -> Result<Self> {
+    pub(super) fn decode_packet(bytes: Bytes) -> Result<Self> {
         if bytes.is_empty() {
             return Err(Error::EmptyPacket);
         }
@@ -84,7 +86,7 @@ impl Packet {
 
     /// Encodes a `Packet` into an `u8` byte stream.
     #[inline]
-    fn encode_packet(self) -> Bytes {
+    pub(super) fn encode_packet(self) -> Bytes {
         let mut result = BytesMut::with_capacity(self.data.len() + 1);
         result.put((self.packet_id as u8).to_string().as_bytes());
         result.put(self.data);
@@ -96,7 +98,7 @@ impl Packet {
     /// Encodes a `Packet` with the payload as `base64`.
     #[allow(dead_code)]
     #[inline]
-    fn encode_base64(self) -> Bytes {
+    pub(super) fn encode_base64(self) -> Bytes {
         assert_eq!(self.packet_id, PacketId::Message);
 
         let mut result = BytesMut::with_capacity(self.data.len() + 1);
@@ -141,6 +143,30 @@ pub fn encode_payload(packets: Vec<Packet>) -> Bytes {
     // remove the last separator
     let _ = buf.split_off(buf.len() - 1);
     buf.freeze()
+}
+
+
+/// Data which gets exchanged in a handshake as defined by the server.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct HandshakePacket {
+    pub sid: String,
+    pub upgrades: Vec<String>,
+    #[serde(rename = "pingInterval")]
+    pub ping_interval: u64,
+    #[serde(rename = "pingTimeout")]
+    pub ping_timeout: u64,
+}
+
+impl TryInto<HandshakePacket> for Packet {
+    type Error = Error;
+    fn try_into(self) -> Result<HandshakePacket> {
+        // TODO: properly cast serde_json to JsonError
+        if let Ok(handshake) = serde_json::from_slice::<HandshakePacket>(self.data[..].as_ref()) {
+            Ok(handshake)
+        } else {
+            Err(Error::JsonError)
+        }
+    }
 }
 
 #[cfg(test)]

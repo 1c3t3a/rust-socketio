@@ -96,6 +96,9 @@ mod engineio;
 /// Contains the types and the code concerning the `socket.io` protocol.
 pub mod socketio;
 
+/// Contains Client trait
+mod client;
+
 /// Contains the error type which will be returned with every result in this
 /// crate. Handles all kinds of errors.
 pub mod error;

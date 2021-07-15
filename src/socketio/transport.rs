@@ -4,6 +4,7 @@ use crate::{
     engineio::{
         packet::{Packet as EnginePacket, PacketId as EnginePacketId},
         socket::EngineSocket,
+        transport::EventEmitter,
     },
     Socket,
 };
@@ -62,7 +63,6 @@ impl TransportClient {
     ) -> Self {
         TransportClient {
             engine_socket: Arc::new(Mutex::new(EngineSocket::new(
-                false,
                 tls_config,
                 opening_headers,
             ))),
@@ -149,7 +149,7 @@ impl TransportClient {
         // the packet, encoded as an engine.io message packet
         let engine_packet = EnginePacket::new(EnginePacketId::Message, packet.encode());
 
-        self.engine_socket.lock()?.emit(engine_packet)
+        self.engine_socket.lock()?.emit(engine_packet, false)
     }
 
     /// Sends a single binary attachment to the server. This method
@@ -161,9 +161,12 @@ impl TransportClient {
             return Err(Error::ActionBeforeOpen);
         }
 
+        // the packet, encoded as an engine.io message packet
+        let engine_packet = EnginePacket::new(EnginePacketId::Message, attachment);
+
         self.engine_socket
             .lock()?
-            .emit_binary_attachment(attachment)
+            .emit(engine_packet, true)
     }
 
     /// Emits to certain event with given data. The data needs to be JSON,
@@ -433,16 +436,16 @@ impl TransportClient {
             }
         };
 
-        self.engine_socket.lock()?.on_open(open_callback)?;
+        self.engine_socket.lock()?.set_on_open(open_callback)?;
 
-        self.engine_socket.lock()?.on_error(error_callback)?;
+        self.engine_socket.lock()?.set_on_error(error_callback)?;
 
-        self.engine_socket.lock()?.on_close(close_callback)?;
+        self.engine_socket.lock()?.set_on_close(close_callback)?;
 
         let clone_self = self.clone();
         self.engine_socket
             .lock()?
-            .on_data(move |data| Self::handle_new_message(data, &clone_self))
+            .set_on_data(move |data| Self::handle_new_message(data, &clone_self))
     }
 
     /// Handles a binary event.
