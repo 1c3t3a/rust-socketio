@@ -20,7 +20,7 @@ use std::{
 /// An `engine.io` socket which manages a connection with the server and allows
 /// it to register common callbacks.
 #[derive(Clone, Debug)]
-pub struct EngineSocket {
+pub struct EngineIOSocket {
     pub(super) transport: Arc<Mutex<TransportEmitter>>,
     pub connected: Arc<AtomicBool>,
     last_ping: Arc<Mutex<Instant>>,
@@ -30,10 +30,10 @@ pub struct EngineSocket {
     root_path: Arc<RwLock<Option<String>>>,
 }
 
-impl EngineSocket {
-    /// Creates an instance of `EngineSocket`.
+impl EngineIOSocket {
+    /// Creates an instance of `EngineIOSocket`.
     pub fn new(tls_config: Option<TlsConnector>, opening_headers: Option<HeaderMap>) -> Self {
-        EngineSocket {
+        EngineIOSocket {
             transport: Arc::new(Mutex::new(TransportEmitter::new(
                 tls_config,
                 opening_headers,
@@ -213,7 +213,7 @@ impl EngineSocket {
     }
 }
 
-impl EventEmitter for EngineSocket {
+impl EventEmitter for EngineIOSocket {
     fn set_on_open<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(()) + 'static + Sync + Send,
@@ -270,7 +270,7 @@ impl EventEmitter for EngineSocket {
     }
 }
 
-impl Client for EngineSocket {
+impl Client for EngineIOSocket {
     /// Opens the connection to a specified server. Includes an opening `GET`
     /// request to the server, the server passes back the handshake data in the
     /// response. If the handshake data mentions a websocket upgrade possibility,
@@ -615,7 +615,7 @@ mod test {
 
     #[test]
     fn test_basic_connection() {
-        let mut socket = EngineSocket::new(true, None, None);
+        let mut socket = EngineIOSocket::new(true, None, None);
 
         assert!(socket
             .on_open(|_| {
@@ -669,7 +669,7 @@ mod test {
 
     #[test]
     fn test_illegal_actions() {
-        let mut sut = EngineSocket::new(true, None, None);
+        let mut sut = EngineIOSocket::new(true, None, None);
 
         assert!(sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")))

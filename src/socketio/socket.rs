@@ -3,7 +3,7 @@ use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId
 use crate::{
     engineio::{
         packet::{Packet as EnginePacket, PacketId as EnginePacketId},
-        socket::EngineSocket,
+        socket::EngineIOSocket,
         transport_emitter::EventEmitter,
     },
     Socket,
@@ -40,8 +40,8 @@ pub struct Ack {
 
 /// Handles communication in the `socket.io` protocol.
 #[derive(Clone)]
-pub struct TransportClient {
-    engine_socket: Arc<Mutex<EngineSocket>>,
+pub struct SocketIOSocket {
+    engine_socket: Arc<Mutex<EngineIOSocket>>,
     host: Arc<String>,
     connected: Arc<AtomicBool>,
     on: Arc<Vec<EventCallback>>,
@@ -53,16 +53,16 @@ pub struct TransportClient {
     pub(crate) nsp: Arc<Option<String>>,
 }
 
-impl TransportClient {
-    /// Creates an instance of `TransportClient`.
+impl SocketIOSocket {
+    /// Creates an instance of `SocketIOSocket`.
     pub fn new<T: Into<String>>(
         address: T,
         nsp: Option<String>,
         tls_config: Option<TlsConnector>,
         opening_headers: Option<HeaderMap>,
     ) -> Self {
-        TransportClient {
-            engine_socket: Arc::new(Mutex::new(EngineSocket::new(tls_config, opening_headers))),
+        SocketIOSocket {
+            engine_socket: Arc::new(Mutex::new(EngineIOSocket::new(tls_config, opening_headers))),
             host: Arc::new(address.into()),
             connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
@@ -263,7 +263,7 @@ impl TransportClient {
     /// This method is later registered as the callback for the `on_data` event of the
     /// engineio client.
     #[inline]
-    fn handle_new_message(socket_bytes: Bytes, clone_self: &TransportClient) {
+    fn handle_new_message(socket_bytes: Bytes, clone_self: &SocketIOSocket) {
         let mut is_finalized_packet = false;
         // either this is a complete packet or the rest of a binary packet (as attachments are
         // sent in a separate packet).
@@ -315,7 +315,7 @@ impl TransportClient {
                     clone_self.connected.store(false, Ordering::Release);
                 }
                 SocketPacketId::Event => {
-                    TransportClient::handle_event(socket_packet, clone_self);
+                    SocketIOSocket::handle_event(socket_packet, clone_self);
                 }
                 SocketPacketId::Ack => {
                     Self::handle_ack(socket_packet, clone_self);
@@ -342,7 +342,7 @@ impl TransportClient {
 
     /// Handles the incoming acks and classifies what callbacks to call and how.
     #[inline]
-    fn handle_ack(socket_packet: SocketPacket, clone_self: &TransportClient) {
+    fn handle_ack(socket_packet: SocketPacket, clone_self: &SocketIOSocket) {
         let mut to_be_removed = Vec::new();
         if let Some(id) = socket_packet.id {
             for (index, ack) in clone_self
@@ -389,7 +389,7 @@ impl TransportClient {
     /// Sets up the callback routes on the engine.io socket, called before
     /// opening the connection.
     fn setup_callbacks(&mut self) -> Result<()> {
-        let clone_self: TransportClient = self.clone();
+        let clone_self: SocketIOSocket = self.clone();
         let error_callback = move |msg| {
             if let Some(function) = clone_self.get_event_callback(&Event::Error) {
                 let mut lock = function.1.write().unwrap();
@@ -445,7 +445,7 @@ impl TransportClient {
 
     /// Handles a binary event.
     #[inline]
-    fn handle_binary_event(socket_packet: SocketPacket, clone_self: &TransportClient) {
+    fn handle_binary_event(socket_packet: SocketPacket, clone_self: &SocketIOSocket) {
         let event = if let Some(string_data) = socket_packet.data {
             string_data.replace("\"", "").into()
         } else {
@@ -468,7 +468,7 @@ impl TransportClient {
 
     /// A method for handling the Event Socket Packets.
     // this could only be called with an event
-    fn handle_event(socket_packet: SocketPacket, clone_self: &TransportClient) {
+    fn handle_event(socket_packet: SocketPacket, clone_self: &SocketIOSocket) {
         // unwrap the potential data
         if let Some(data) = socket_packet.data {
             // the string must be a valid json array with the event at index 0 and the
@@ -534,9 +534,9 @@ impl Debug for Ack {
     }
 }
 
-impl Debug for TransportClient {
+impl Debug for SocketIOSocket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("TransportClient(engine_socket: {:?}, host: {:?}, connected: {:?}, on: <defined callbacks>, outstanding_acks: {:?}, nsp: {:?})",
+        f.write_fmt(format_args!("SocketIOSocket(engine_socket: {:?}, host: {:?}, connected: {:?}, on: <defined callbacks>, outstanding_acks: {:?}, nsp: {:?})",
             self.engine_socket,
             self.host,
             self.connected,
@@ -558,7 +558,7 @@ mod test {
     fn it_works() {
         let url = std::env::var("SOCKET_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
 
-        let mut socket = TransportClient::new(url, None, None, None);
+        let mut socket = SocketIOSocket::new(url, None, None, None);
 
         assert!(socket
             .on(
@@ -599,7 +599,7 @@ mod test {
 
     #[test]
     fn test_error_cases() {
-        let sut = TransportClient::new("http://localhost:123", None, None, None);
+        let sut = SocketIOSocket::new("http://localhost:123", None, None, None);
 
         let packet = SocketPacket::new(
             SocketPacketId::Connect,

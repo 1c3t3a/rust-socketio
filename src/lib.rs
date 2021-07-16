@@ -111,7 +111,7 @@ pub use socketio::{event::Event, payload::Payload};
 use crate::error::Result;
 use std::{time::Duration, vec};
 
-use crate::socketio::transport::TransportClient;
+use crate::socketio::socket::SocketIOSocket;
 
 /// A socket which handles communication with the server. It's initialized with
 /// a specific address as well as an optional namespace to connect to. If `None`
@@ -119,7 +119,7 @@ use crate::socketio::transport::TransportClient;
 #[derive(Debug, Clone)]
 pub struct Socket {
     /// The inner transport client to delegate the methods to.
-    transport: TransportClient,
+    transport: SocketIOSocket,
 }
 
 type SocketCallback = dyn FnMut(Payload, Socket) + 'static + Sync + Send;
@@ -330,7 +330,7 @@ impl Socket {
         opening_headers: Option<HeaderMap>,
     ) -> Self {
         Socket {
-            transport: TransportClient::new(address, namespace, tls_config, opening_headers),
+            transport: SocketIOSocket::new(address, namespace, tls_config, opening_headers),
         }
     }
 
