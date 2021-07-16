@@ -73,8 +73,4 @@ impl Transport for PollingTransport {
         // in the long polling requests
         Ok(Client::new().get(address).send().unwrap().bytes().unwrap())
     }
-
-    fn name(&self) -> Result<String> {
-        Ok("polling".to_owned())
-    }
 }

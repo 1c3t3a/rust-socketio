@@ -19,9 +19,6 @@ pub trait Transport {
     /// connected. This should run separately at all time to ensure proper
     /// response handling from the server.
     fn poll(&mut self, address: String) -> Result<Bytes>;
-
-    /// Gets the name of the transport type
-    fn name(&self) -> Result<String>;
 }
 
 enum TransportTypes {
@@ -76,6 +73,14 @@ impl Transports {
             Err(Error::TransportExists())
         }
     }
+
+    pub(super) fn get_transport_name(&self) -> Result<&'static str> {
+        match &*self.transport_type.read()? {
+            TransportTypes::Websocket => Ok("websocket"),
+            TransportTypes::WebsocketSecure => Ok("websocket"),
+            TransportTypes::Polling => Ok("polling"),
+        }
+    }
 }
 
 impl Transport for Transports {
@@ -114,14 +119,6 @@ impl Transport for Transports {
                 .unwrap()
                 .poll(address),
             TransportTypes::Polling => self.polling.lock()?.as_mut().unwrap().poll(address),
-        }
-    }
-
-    fn name(&self) -> Result<String> {
-        match &*self.transport_type.read()? {
-            TransportTypes::Websocket => self.websocket_secure.lock()?.as_ref().unwrap().name(),
-            TransportTypes::WebsocketSecure => self.websocket.lock()?.as_ref().unwrap().name(),
-            TransportTypes::Polling => self.polling.lock()?.as_ref().unwrap().name(),
         }
     }
 }

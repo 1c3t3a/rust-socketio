@@ -93,8 +93,4 @@ impl Transport for WebsocketSecureTransport {
             _ => Ok(Bytes::from(received_df.take_payload())),
         }
     }
-
-    fn name(&self) -> Result<String> {
-        Ok("websocket".to_owned())
-    }
 }

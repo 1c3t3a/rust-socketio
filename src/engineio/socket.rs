@@ -182,7 +182,7 @@ impl EngineSocket {
         let mut path = format!(
             "/{}/?EIO=4&transport={}&t={}",
             self.root_path.read()?.as_ref().unwrap(),
-            self.transport.lock()?.name()?,
+            self.transport.lock()?.get_transport_name()?,
             self.get_hashed_time(),
         );
 

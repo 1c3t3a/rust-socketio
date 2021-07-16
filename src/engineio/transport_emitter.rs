@@ -83,6 +83,10 @@ impl TransportEmitter {
     pub(super) fn upgrade_websocket_secure(&mut self, address: String) -> Result<()> {
         self.transport.lock()?.upgrade_websocket_secure(address)
     }
+
+    pub(super) fn get_transport_name(&self) -> Result<&'static str> {
+        self.transport.lock()?.get_transport_name()
+    }
 }
 
 impl EventEmitter for TransportEmitter {
@@ -150,17 +154,13 @@ impl Transport for TransportEmitter {
     fn poll(&mut self, address: String) -> Result<Bytes> {
         self.transport.lock()?.poll(address)
     }
-
-    fn name(&self) -> Result<String> {
-        self.transport.lock().unwrap().name()
-    }
 }
 
 impl Debug for TransportEmitter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
             "TransportType({})",
-            self.transport.lock().unwrap().name().unwrap()
+            self.transport.lock().unwrap().get_transport_name().unwrap()
         ))
     }
 }
