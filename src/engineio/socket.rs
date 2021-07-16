@@ -27,12 +27,12 @@ pub struct EngineIOSocket {
     last_pong: Arc<Mutex<Instant>>,
     host_address: Arc<Mutex<Option<String>>>,
     connection_data: Arc<RwLock<Option<HandshakePacket>>>,
-    root_path: Arc<RwLock<Option<String>>>,
+    root_path: Arc<RwLock<String>>,
 }
 
 impl EngineIOSocket {
     /// Creates an instance of `EngineIOSocket`.
-    pub fn new(tls_config: Option<TlsConnector>, opening_headers: Option<HeaderMap>) -> Self {
+    pub fn new(root_path: Option<String>, tls_config: Option<TlsConnector>, opening_headers: Option<HeaderMap>) -> Self {
         EngineIOSocket {
             transport: Arc::new(Mutex::new(TransportEmitter::new(
                 tls_config,
@@ -43,7 +43,7 @@ impl EngineIOSocket {
             last_pong: Arc::new(Mutex::new(Instant::now())),
             host_address: Arc::new(Mutex::new(None)),
             connection_data: Arc::new(RwLock::new(None)),
-            root_path: Arc::new(RwLock::new(None)),
+            root_path: Arc::new(RwLock::new(root_path.unwrap_or("engine.io/".to_owned()))),
         }
     }
 
@@ -97,7 +97,7 @@ impl EngineIOSocket {
 
             address.set_path(
                 &(address.path().to_owned()
-                    + self.root_path.read()?.as_ref().unwrap()[..].as_ref()),
+                    + self.root_path.read()?[..].as_ref()),
             );
 
             let full_address = address
@@ -181,7 +181,7 @@ impl EngineIOSocket {
         // build the base path
         let mut path = format!(
             "/{}/?EIO=4&transport={}&t={}",
-            self.root_path.read()?.as_ref().unwrap(),
+            self.root_path.read()?,
             self.transport.lock()?.get_transport_name()?,
             self.get_hashed_time(),
         );
@@ -446,7 +446,7 @@ impl Client for EngineIOSocket {
         Ok(())
     }
 }
-/*
+
 #[cfg(test)]
 mod test {
     use reqwest::header::HOST;
@@ -460,7 +460,7 @@ mod test {
 
     #[test]
     fn test_connection_polling() {
-        let mut socket = TransportClient::new(true, None, None);
+        let mut socket = EngineIOSocket::new(None, None, None);
 
         let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
 
@@ -473,12 +473,12 @@ mod test {
             )
             .is_ok());
 
-        socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
+        socket.set_on_data(|data| {
             println!(
                 "Received: {:?}",
                 std::str::from_utf8(&data).expect("Error while decoding utf-8")
             );
-        }))));
+        }).unwrap();
 
         // closes the connection
         assert!(socket
@@ -505,8 +505,8 @@ mod test {
 
         let mut headers = HeaderMap::new();
         headers.insert(HOST, host.parse().unwrap());
-        let mut socket = TransportClient::new(
-            true,
+        let mut socket = EngineIOSocket::new(
+            None,
             Some(
                 TlsConnector::builder()
                     .danger_accept_invalid_certs(true)
@@ -528,12 +528,12 @@ mod test {
             )
             .is_ok());
 
-        socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
+        socket.set_on_data(|data| {
             println!(
                 "Received: {:?}",
                 std::str::from_utf8(&data).expect("Error while decoding utf-8")
             );
-        }))));
+        }).unwrap();
 
         // closes the connection
         assert!(socket
@@ -555,7 +555,7 @@ mod test {
 
     #[test]
     fn test_open_invariants() {
-        let mut sut = TransportClient::new(false, None, None);
+        let mut sut = EngineIOSocket::new(None, None, None);
         let illegal_url = "this is illegal";
 
         let _error = sut.open(illegal_url).expect_err("Error");
@@ -564,7 +564,7 @@ mod test {
             _error
         ));
 
-        let mut sut = TransportClient::new(false, None, None);
+        let mut sut = EngineIOSocket::new(None, None, None);
         let invalid_protocol = "file:///tmp/foo";
 
         let _error = sut.open(invalid_protocol).expect_err("Error");
@@ -573,7 +573,7 @@ mod test {
             _error
         ));
 
-        let sut = TransportClient::new(false, None, None);
+        let sut = EngineIOSocket::new(None, None, None);
         let _error = sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
             .expect_err("error");
@@ -585,8 +585,8 @@ mod test {
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
         headers.insert(HOST, host.parse().unwrap());
 
-        let _ = TransportClient::new(
-            true,
+        let _ = EngineIOSocket::new(
+            None,
             Some(
                 TlsConnector::builder()
                     .danger_accept_invalid_certs(true)
@@ -596,41 +596,50 @@ mod test {
             None,
         );
 
-        let _ = TransportClient::new(true, None, Some(headers));
+        let _ = EngineIOSocket::new(None, None, Some(headers));
     }
 
     #[test]
     fn test_illegal_actions() {
-        let mut sut = TransportClient::new(true, None, None);
+        let mut sut = EngineIOSocket::new(None, None, None);
         assert!(sut.poll_cycle().is_err());
+
+        assert!(sut
+            .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
+            .is_err());
+        assert!(sut.emit(Packet::new(PacketId::Message, Bytes::from_static(b"")), true).is_err());
+
+        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+
+        assert!(sut.bind(url).is_ok());
+
+        assert!(sut.set_on_open(|_| {}).is_err());
+        assert!(sut.set_on_close(|_| {}).is_err());
+        assert!(sut.set_on_packet(|_| {}).is_err());
+        assert!(sut.set_on_data(|_| {}).is_err());
+        assert!(sut.set_on_error(|_| {}).is_err());
     }
 
     use std::{thread::sleep, time::Duration};
 
-    use crate::engineio::packet::PacketId;
-
-    use super::*;
-
-    const SERVER_URL: &str = "http://localhost:4201";
-
     #[test]
     fn test_basic_connection() {
-        let mut socket = EngineIOSocket::new(true, None, None);
+        let mut socket = EngineIOSocket::new(None, None, None);
 
         assert!(socket
-            .on_open(|_| {
+            .set_on_open(|_| {
                 println!("Open event!");
             })
             .is_ok());
 
         assert!(socket
-            .on_packet(|packet| {
+            .set_on_packet(|packet| {
                 println!("Received packet: {:?}", packet);
             })
             .is_ok());
 
         assert!(socket
-            .on_data(|data| {
+            .set_on_data(|data| {
                 println!("Received packet: {:?}", std::str::from_utf8(&data));
             })
             .is_ok());
@@ -643,18 +652,19 @@ mod test {
             .emit(Packet::new(
                 PacketId::Message,
                 Bytes::from_static(b"Hello World"),
-            ))
+            ),
+        false)
             .is_ok());
 
         assert!(socket
             .emit(Packet::new(
                 PacketId::Message,
                 Bytes::from_static(b"Hello World2"),
-            ))
+            ), false)
             .is_ok());
 
         assert!(socket
-            .emit(Packet::new(PacketId::Pong, Bytes::new()))
+            .emit(Packet::new(PacketId::Pong, Bytes::new()), false)
             .is_ok());
 
         sleep(Duration::from_secs(26));
@@ -663,28 +673,7 @@ mod test {
             .emit(Packet::new(
                 PacketId::Message,
                 Bytes::from_static(b"Hello World3"),
-            ))
+            ), false)
             .is_ok());
     }
-
-    #[test]
-    fn test_illegal_actions() {
-        let mut sut = EngineIOSocket::new(true, None, None);
-
-        assert!(sut
-            .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")))
-            .is_err());
-        assert!(sut.emit_binary_attachment(Bytes::from_static(b"")).is_err());
-
-        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
-
-        assert!(sut.bind(url).is_ok());
-
-        assert!(sut.on_open(|_| {}).is_err());
-        assert!(sut.on_close(|_| {}).is_err());
-        assert!(sut.on_packet(|_| {}).is_err());
-        assert!(sut.on_data(|_| {}).is_err());
-        assert!(sut.on_error(|_| {}).is_err());
-    }
 }
-*/

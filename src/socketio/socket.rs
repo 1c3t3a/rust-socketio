@@ -62,7 +62,7 @@ impl SocketIOSocket {
         opening_headers: Option<HeaderMap>,
     ) -> Self {
         SocketIOSocket {
-            engine_socket: Arc::new(Mutex::new(EngineIOSocket::new(tls_config, opening_headers))),
+            engine_socket: Arc::new(Mutex::new(EngineIOSocket::new(Some("socket.io/".to_owned()), tls_config, opening_headers))),
             host: Arc::new(address.into()),
             connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
