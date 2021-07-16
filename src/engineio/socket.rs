@@ -462,7 +462,9 @@ mod test {
     fn test_connection_polling() {
         let mut socket = TransportClient::new(true, None, None);
 
-        socket.open(SERVER_URL).unwrap();
+        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+
+        socket.open(url).unwrap();
 
         assert!(socket
             .emit(
@@ -498,8 +500,11 @@ mod test {
 
     #[test]
     fn test_connection_secure_ws_http() {
+        let host =
+            std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
+
         let mut headers = HeaderMap::new();
-        headers.insert(HOST, "localhost".parse().unwrap());
+        headers.insert(HOST, host.parse().unwrap());
         let mut socket = TransportClient::new(
             true,
             Some(
@@ -511,7 +516,10 @@ mod test {
             Some(headers),
         );
 
-        socket.open(SERVER_URL_SECURE).unwrap();
+        let url = std::env::var("ENGINE_IO_SECURE_SERVER")
+            .unwrap_or_else(|_| SERVER_URL_SECURE.to_owned());
+
+        socket.open(url).unwrap();
 
         assert!(socket
             .emit(
@@ -573,7 +581,9 @@ mod test {
 
         // test missing match arm in socket constructor
         let mut headers = HeaderMap::new();
-        headers.insert(HOST, "localhost".parse().unwrap());
+        let host =
+            std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
+        headers.insert(HOST, host.parse().unwrap());
 
         let _ = TransportClient::new(
             true,
