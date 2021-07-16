@@ -106,15 +106,13 @@ impl Transport for Transports {
 
     fn poll(&mut self, address: String) -> Result<Bytes> {
         match &*self.transport_type.read()? {
-            TransportTypes::Websocket => self
+            TransportTypes::Websocket => self.websocket.lock()?.as_mut().unwrap().poll(address),
+            TransportTypes::WebsocketSecure => self
                 .websocket_secure
                 .lock()?
                 .as_mut()
                 .unwrap()
                 .poll(address),
-            TransportTypes::WebsocketSecure => {
-                self.websocket.lock()?.as_mut().unwrap().poll(address)
-            }
             TransportTypes::Polling => self.polling.lock()?.as_mut().unwrap().poll(address),
         }
     }
