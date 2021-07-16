@@ -1,0 +1,30 @@
+version: '3'
+services:
+    node-engine-io-secure:
+        build:
+            context: ../ci
+        command: [ "node", "/test/engine-io-secure.js" ]
+        ports:
+            - "4202:4202"
+    node-engine-io:
+        build:
+            context: ../ci
+        command: [ "node", "/test/engine-io.js" ]
+        ports:
+            - "4201:4201"
+    node-socket-io:
+        build:
+            context: ../ci
+        command: [ "node", "/test/socket-io.js" ]
+        ports:
+            - "4200:4200"
+    rust-client:
+        image: mcr.microsoft.com/vscode/devcontainers/rust:0-1
+        command: /bin/sh -c "while sleep 10000d; do :; done"
+        volumes: 
+            - "..:/workspace/rust-socketio"
+        environment:
+            - "SOCKET_IO_SERVER=http://node-socket-io:4200"
+            - "ENGINE_IO_SERVER=http://node-engine-io:4201"
+            - "ENGINE_IO_SECURE_SERVER=https://node-engine-io-secure:4202"
+            - "ENGINE_IO_SECURE_HOST=node-engine-io-secure"

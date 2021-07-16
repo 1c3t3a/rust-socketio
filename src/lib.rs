@@ -481,7 +481,9 @@ mod test {
 
     #[test]
     fn it_works() {
-        let mut socket = Socket::new(SERVER_URL, None, None, None);
+        let url = std::env::var("SOCKET_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+
+        let mut socket = Socket::new(url, None, None, None);
 
         let result = socket.on(
             "test".into(),
@@ -530,13 +532,15 @@ mod test {
 
     #[test]
     fn test_builder() {
+        let url = std::env::var("SOCKET_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+
         // expect an illegal namespace
-        assert!(SocketBuilder::new(SERVER_URL)
+        assert!(SocketBuilder::new(url.clone())
             .set_namespace("illegal")
             .is_err());
 
         // test socket build logic
-        let socket_builder = SocketBuilder::new(SERVER_URL);
+        let socket_builder = SocketBuilder::new(url);
 
         let tls_connector = TlsConnector::builder()
             .use_sni(true)
