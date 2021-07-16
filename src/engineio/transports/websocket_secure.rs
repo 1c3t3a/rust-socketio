@@ -78,10 +78,10 @@ impl Transport for WebsocketSecureTransport {
     }
 
     fn poll(&mut self, _: String) -> Result<Bytes> {
-        let mut receiver = self.client.lock().unwrap();
+        let mut receiver = self.client.lock()?;
 
         // if this is a binary payload, we mark it as a message
-        let received_df = receiver.recv_dataframe().unwrap();
+        let received_df = receiver.recv_dataframe()?;
         match received_df.opcode {
             Opcode::Binary => {
                 let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
