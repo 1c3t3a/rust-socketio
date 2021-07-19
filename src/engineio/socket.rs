@@ -32,7 +32,11 @@ pub struct EngineIOSocket {
 
 impl EngineIOSocket {
     /// Creates an instance of `EngineIOSocket`.
-    pub fn new(root_path: Option<String>, tls_config: Option<TlsConnector>, opening_headers: Option<HeaderMap>) -> Self {
+    pub fn new(
+        root_path: Option<String>,
+        tls_config: Option<TlsConnector>,
+        opening_headers: Option<HeaderMap>,
+    ) -> Self {
         EngineIOSocket {
             transport: Arc::new(Mutex::new(TransportEmitter::new(
                 tls_config,
@@ -43,7 +47,7 @@ impl EngineIOSocket {
             last_pong: Arc::new(Mutex::new(Instant::now())),
             host_address: Arc::new(Mutex::new(None)),
             connection_data: Arc::new(RwLock::new(None)),
-            root_path: Arc::new(RwLock::new(root_path.unwrap_or("engine.io/".to_owned()))),
+            root_path: Arc::new(RwLock::new(root_path.unwrap_or("engine.io".to_owned()))),
         }
     }
 
@@ -95,10 +99,7 @@ impl EngineIOSocket {
             let mut address = Url::parse(&address).unwrap();
             drop(host_address);
 
-            address.set_path(
-                &(address.path().to_owned()
-                    + self.root_path.read()?[..].as_ref()),
-            );
+            address.set_path(&(address.path().to_owned() + self.root_path.read()?[..].as_ref()));
 
             let full_address = address
                 .query_pairs_mut()
@@ -452,11 +453,15 @@ mod test {
     use reqwest::header::HOST;
 
     use crate::engineio::packet::{Packet, PacketId};
+    use native_tls::Certificate;
+    use std::fs::File;
+    use std::io::Read;
 
     use super::*;
     /// The `engine.io` server for testing runs on port 4201
     const SERVER_URL: &str = "http://localhost:4201";
     const SERVER_URL_SECURE: &str = "https://localhost:4202";
+    const CERT_PATH: &str = "ci/cert/ca.crt";
 
     #[test]
     fn test_connection_polling() {
@@ -473,12 +478,14 @@ mod test {
             )
             .is_ok());
 
-        socket.set_on_data(|data| {
-            println!(
-                "Received: {:?}",
-                std::str::from_utf8(&data).expect("Error while decoding utf-8")
-            );
-        }).unwrap();
+        socket
+            .set_on_data(|data| {
+                println!(
+                    "Received: {:?}",
+                    std::str::from_utf8(&data).expect("Error while decoding utf-8")
+                );
+            })
+            .unwrap();
 
         // closes the connection
         assert!(socket
@@ -498,6 +505,18 @@ mod test {
         assert!(socket.poll_cycle().is_ok());
     }
 
+    fn get_tls_connector() -> Result<TlsConnector> {
+        let cert_path = std::env::var("CA_CERT_PATH").unwrap_or_else(|_| CERT_PATH.to_owned());
+        let mut cert_file = File::open(cert_path)?;
+        let mut buf = vec![];
+        cert_file.read_to_end(&mut buf)?;
+        let cert: Certificate = Certificate::from_pem(&buf[..]).unwrap();
+        Ok(TlsConnector::builder()
+            .add_root_certificate(cert)
+            .build()
+            .unwrap())
+    }
+
     #[test]
     fn test_connection_secure_ws_http() {
         let host =
@@ -505,16 +524,8 @@ mod test {
 
         let mut headers = HeaderMap::new();
         headers.insert(HOST, host.parse().unwrap());
-        let mut socket = EngineIOSocket::new(
-            None,
-            Some(
-                TlsConnector::builder()
-                    .danger_accept_invalid_certs(true)
-                    .build()
-                    .unwrap(),
-            ),
-            Some(headers),
-        );
+        let mut socket =
+            EngineIOSocket::new(None, Some(get_tls_connector().unwrap()), Some(headers));
 
         let url = std::env::var("ENGINE_IO_SECURE_SERVER")
             .unwrap_or_else(|_| SERVER_URL_SECURE.to_owned());
@@ -528,12 +539,14 @@ mod test {
             )
             .is_ok());
 
-        socket.set_on_data(|data| {
-            println!(
-                "Received: {:?}",
-                std::str::from_utf8(&data).expect("Error while decoding utf-8")
-            );
-        }).unwrap();
+        socket
+            .set_on_data(|data| {
+                println!(
+                    "Received: {:?}",
+                    std::str::from_utf8(&data).expect("Error while decoding utf-8")
+                );
+            })
+            .unwrap();
 
         // closes the connection
         assert!(socket
@@ -607,7 +620,12 @@ mod test {
         assert!(sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
             .is_err());
-        assert!(sut.emit(Packet::new(PacketId::Message, Bytes::from_static(b"")), true).is_err());
+        assert!(sut
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"")),
+                true
+            )
+            .is_err());
 
         let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
 
@@ -649,18 +667,17 @@ mod test {
         assert!(socket.bind(url).is_ok());
 
         assert!(socket
-            .emit(Packet::new(
-                PacketId::Message,
-                Bytes::from_static(b"Hello World"),
-            ),
-        false)
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"Hello World"),),
+                false
+            )
             .is_ok());
 
         assert!(socket
-            .emit(Packet::new(
-                PacketId::Message,
-                Bytes::from_static(b"Hello World2"),
-            ), false)
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"Hello World2"),),
+                false
+            )
             .is_ok());
 
         assert!(socket
@@ -670,10 +687,10 @@ mod test {
         sleep(Duration::from_secs(26));
 
         assert!(socket
-            .emit(Packet::new(
-                PacketId::Message,
-                Bytes::from_static(b"Hello World3"),
-            ), false)
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"Hello World3"),),
+                false
+            )
             .is_ok());
     }
 }
