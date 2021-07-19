@@ -47,7 +47,7 @@ impl EngineIOSocket {
             last_pong: Arc::new(Mutex::new(Instant::now())),
             host_address: Arc::new(Mutex::new(None)),
             connection_data: Arc::new(RwLock::new(None)),
-            root_path: Arc::new(RwLock::new(root_path.unwrap_or("engine.io".to_owned()))),
+            root_path: Arc::new(RwLock::new(root_path.unwrap_or_else(|| "engine.io".to_owned()))),
         }
     }
 
