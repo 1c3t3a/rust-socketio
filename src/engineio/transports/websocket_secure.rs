@@ -11,6 +11,7 @@ use websocket::{
     sync::stream::{TcpStream, TlsStream},
     ws::dataframe::DataFrame,
     ClientBuilder as WsClientBuilder, Message,
+    header::Headers
 };
 
 pub(super) struct WebsocketSecureTransport {
@@ -19,9 +20,10 @@ pub(super) struct WebsocketSecureTransport {
 
 impl WebsocketSecureTransport {
     /// Creates an instance of `TransportClient`.
-    pub fn new(address: String, tls_config: Option<TlsConnector>) -> Self {
+    pub fn new(address: String, tls_config: Option<TlsConnector>, headers: Headers) -> Self {
         let client = WsClientBuilder::new(address[..].as_ref())
             .unwrap()
+            .custom_headers(&headers)
             .connect_secure(tls_config)
             .unwrap();
 

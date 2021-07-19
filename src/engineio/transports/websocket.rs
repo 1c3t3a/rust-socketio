@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use websocket::{
     dataframe::Opcode, receiver::Reader, sync::stream::TcpStream, sync::Writer,
     ws::dataframe::DataFrame, ClientBuilder as WsClientBuilder, Message,
+    header::Headers
 };
 
 pub(super) struct WebsocketTransport {
@@ -16,9 +17,10 @@ pub(super) struct WebsocketTransport {
 
 impl WebsocketTransport {
     /// Creates an instance of `TransportClient`.
-    pub fn new(address: String) -> Self {
+    pub fn new(address: String, headers: Headers) -> Self {
         let client = WsClientBuilder::new(address[..].as_ref())
             .unwrap()
+            .custom_headers(&headers)
             .connect_insecure()
             .unwrap();
 

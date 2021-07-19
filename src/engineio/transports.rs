@@ -9,6 +9,7 @@ use bytes::Bytes;
 use native_tls::TlsConnector;
 use reqwest::header::HeaderMap;
 use std::sync::{Arc, Mutex, RwLock};
+use ::websocket::header::Headers;
 
 pub trait Transport {
     /// Sends a packet to the server. This optionally handles sending of a
@@ -32,6 +33,7 @@ pub struct Transports {
     websocket: Arc<Mutex<Option<WebsocketTransport>>>,
     polling: Arc<Mutex<Option<PollingTransport>>>,
     tls_config: Arc<Mutex<Option<TlsConnector>>>,
+    opening_headers: Arc<Mutex<Option<HeaderMap>>>,
     transport_type: Arc<RwLock<TransportTypes>>,
 }
 
@@ -42,16 +44,17 @@ impl Transports {
             websocket: Arc::new(Mutex::new(None)),
             polling: Arc::new(Mutex::new(Some(PollingTransport::new(
                 tls_config.clone(),
-                opening_headers,
+                opening_headers.clone(),
             )))),
             tls_config: Arc::new(Mutex::new(tls_config)),
             transport_type: Arc::new(RwLock::new(TransportTypes::Polling)),
+            opening_headers: Arc::new(Mutex::new(opening_headers)),
         }
     }
 
     pub(super) fn upgrade_websocket(&mut self, address: String) -> Result<()> {
         if self.websocket_secure.lock()?.is_none() {
-            *self.websocket.lock()? = Some(WebsocketTransport::new(address));
+            *self.websocket.lock()? = Some(WebsocketTransport::new(address, self.get_ws_headers()));
             self.websocket.lock()?.as_ref().unwrap().probe()?;
             *self.transport_type.write()? = TransportTypes::Websocket;
             Ok(())
@@ -65,6 +68,7 @@ impl Transports {
             *self.websocket_secure.lock()? = Some(WebsocketSecureTransport::new(
                 address,
                 self.tls_config.lock()?.clone(),
+                self.get_ws_headers(),
             ));
             self.websocket_secure.lock()?.as_ref().unwrap().probe()?;
             *self.transport_type.write()? = TransportTypes::WebsocketSecure;
@@ -72,6 +76,15 @@ impl Transports {
         } else {
             Err(Error::TransportExists())
         }
+    }
+
+    fn get_ws_headers(&self) -> Headers {
+        let mut headers = Headers::new();
+        // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection procedure
+        for (key, val) in self.opening_headers.lock().unwrap().as_ref().unwrap() {
+            headers.append_raw(key.to_string(), val.as_bytes().to_owned());
+        }
+        headers
     }
 
     pub(super) fn get_transport_name(&self) -> Result<&'static str> {
