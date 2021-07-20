@@ -112,7 +112,6 @@ use crate::socketio::socket::SocketIOSocket;
 pub type Socket = SocketIOSocket;
 pub type SocketBuilder = crate::socketio::SocketBuilder;
 
-
 #[cfg(test)]
 mod test {
 

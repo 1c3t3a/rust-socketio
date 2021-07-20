@@ -304,7 +304,6 @@ impl SocketIOSocket {
         }
     }
 
-
     /// Sends a message to the server but `alloc`s an `ack` to check whether the
     /// server responded in a given timespan. This message takes an event, which
     /// could either be one of the common events like "message" or "error" or a
@@ -355,7 +354,8 @@ impl SocketIOSocket {
         let id = thread_rng().gen_range(0..999);
         let default = String::from("/");
         let nsp = self.nsp.as_ref().as_ref().unwrap_or(&default);
-        let socket_packet = self.build_packet_for_payload(data.into(), event.into(), nsp, Some(id))?;
+        let socket_packet =
+            self.build_packet_for_payload(data.into(), event.into(), nsp, Some(id))?;
 
         let ack = Ack {
             id,
@@ -496,7 +496,7 @@ impl SocketIOSocket {
         let error_callback = move |msg| {
             if let Some(function) = clone_self.get_event_callback(&Event::Error) {
                 let mut lock = function.1.write().unwrap();
-                lock(Payload::String(msg),  clone_self.clone());
+                lock(Payload::String(msg), clone_self.clone());
                 drop(lock)
             }
         };
