@@ -1,8 +1,8 @@
 use super::{event::Event, payload::Payload, Socket};
+use crate::client::Client;
 use crate::error::{Error, Result};
 use native_tls::TlsConnector;
 use reqwest::header::{HeaderMap, HeaderValue, IntoHeaderName};
-use crate::client::Client;
 
 type SocketCallback = dyn FnMut(Payload, Socket) + 'static + Sync + Send;
 
@@ -184,11 +184,7 @@ impl SocketBuilder {
     /// assert!(result.is_ok());
     /// ```
     pub fn connect(self) -> Result<Socket> {
-        let mut socket = Socket::new(
-            self.namespace,
-            self.tls_config,
-            self.opening_headers,
-        );
+        let mut socket = Socket::new(self.namespace, self.tls_config, self.opening_headers);
         if let Some(callbacks) = self.on {
             for (event, callback) in callbacks {
                 socket.on(event, Box::new(callback)).unwrap();

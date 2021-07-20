@@ -4,7 +4,7 @@ use crate::{
     client::Client,
     engineio::{
         packet::{Packet as EnginePacket, PacketId as EnginePacketId},
-        socket::{EngineIOSocket, EngineClient},
+        socket::{EngineClient, EngineIOSocket},
         transport_emitter::EventEmitter,
     },
     Socket,
@@ -513,7 +513,6 @@ impl SocketIOSocket {
 }
 
 impl Client for SocketIOSocket {
-    
     /// Connects to the server. This includes a connection of the underlying
     /// engine.io client and afterwards an opening socket.io request.
     fn connect<T: Into<String>>(&mut self, address: T) -> Result<()> {
