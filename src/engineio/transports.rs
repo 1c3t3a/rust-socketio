@@ -5,11 +5,11 @@ use self::polling::PollingTransport;
 use self::websocket::WebsocketTransport;
 use self::websocket_secure::WebsocketSecureTransport;
 use crate::error::{Error, Result};
+use ::websocket::header::Headers;
 use bytes::Bytes;
 use native_tls::TlsConnector;
 use reqwest::header::HeaderMap;
 use std::sync::{Arc, Mutex, RwLock};
-use ::websocket::header::Headers;
 
 pub trait Transport {
     /// Sends a packet to the server. This optionally handles sending of a

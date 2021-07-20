@@ -122,9 +122,7 @@ pub fn decode_payload(payload: Bytes) -> Result<Vec<Packet>> {
         }
     }
     // push the last packet as well
-    vec.push(Packet::decode(
-        payload.slice(last_index..payload.len()),
-    )?);
+    vec.push(Packet::decode(payload.slice(last_index..payload.len()))?);
 
     Ok(vec)
 }

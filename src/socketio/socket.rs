@@ -1,18 +1,19 @@
 use crate::error::{Error, Result};
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
 use crate::{
+    client::Client,
     engineio::{
         packet::{Packet as EnginePacket, PacketId as EnginePacketId},
         socket::EngineIOSocket,
         transport_emitter::EventEmitter,
     },
     Socket,
-    client::Client
 };
 use bytes::Bytes;
 use native_tls::TlsConnector;
 use rand::{thread_rng, Rng};
 use reqwest::header::HeaderMap;
+use std::thread;
 use std::{
     fmt::Debug,
     sync::{atomic::Ordering, RwLock},
@@ -21,7 +22,6 @@ use std::{
     sync::{atomic::AtomicBool, Arc, Mutex},
     time::{Duration, Instant},
 };
-use std::thread;
 
 use super::{event::Event, payload::Payload};
 
@@ -93,7 +93,6 @@ impl SocketIOSocket {
     /// engine.io client and afterwards an opening socket.io request.
     pub fn connect(&mut self) -> Result<()> {
         self.setup_callbacks()?;
-
 
         if self.connected.load(Ordering::Acquire) {
             return Err(Error::IllegalActionAfterOpen);

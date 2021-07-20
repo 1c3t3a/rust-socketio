@@ -45,7 +45,9 @@ impl EngineIOSocket {
             last_pong: Arc::new(Mutex::new(Instant::now())),
             host_address: Arc::new(Mutex::new(None)),
             connection_data: Arc::new(RwLock::new(None)),
-            root_path: Arc::new(RwLock::new(root_path.unwrap_or_else(|| "engine.io".to_owned()))),
+            root_path: Arc::new(RwLock::new(
+                root_path.unwrap_or_else(|| "engine.io".to_owned()),
+            )),
         }
     }
 
@@ -69,7 +71,8 @@ impl EngineIOSocket {
             let mut address = Url::parse(&address).unwrap();
             drop(host_address);
 
-            address.set_path(&(address.path().to_owned() + self.root_path.read()?[..].as_ref() + "/"));
+            address
+                .set_path(&(address.path().to_owned() + self.root_path.read()?[..].as_ref() + "/"));
 
             let full_address = address
                 .query_pairs_mut()
@@ -245,8 +248,7 @@ impl Client for EngineIOSocket {
 
             let response = self.transport.lock()?.poll(full_address.to_string())?;
 
-            let handshake: Result<HandshakePacket> =
-                Packet::decode(response.clone())?.try_into();
+            let handshake: Result<HandshakePacket> = Packet::decode(response.clone())?.try_into();
 
             // the response contains the handshake data
             if let Ok(conn_data) = handshake {

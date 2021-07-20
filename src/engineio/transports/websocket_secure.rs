@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex};
 use websocket::{
     client::sync::Client as WsClient,
     dataframe::Opcode,
+    header::Headers,
     sync::stream::{TcpStream, TlsStream},
     ws::dataframe::DataFrame,
     ClientBuilder as WsClientBuilder, Message,
-    header::Headers
 };
 
 pub(super) struct WebsocketSecureTransport {
@@ -47,9 +47,7 @@ impl WebsocketSecureTransport {
 
         // expect to receive a probe packet
         let message = client.recv_message()?;
-        if message.take_payload()
-            != Packet::new(PacketId::Pong, Bytes::from("probe")).encode()
-        {
+        if message.take_payload() != Packet::new(PacketId::Pong, Bytes::from("probe")).encode() {
             return Err(Error::HandshakeError("Error".to_owned()));
         }
 
