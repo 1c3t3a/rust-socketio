@@ -691,7 +691,7 @@ mod test {
             .emit(Packet::new(PacketId::Pong, Bytes::new()), false)
             .is_ok());
 
-        sleep(Duration::from_secs(26));
+        sleep(Duration::from_secs(2));
 
         assert!(socket
             .emit(
