@@ -301,7 +301,15 @@ impl Client for EngineIOSocket {
             Err(error)
         }
     }
+}
 
+/// EngineSocket related functions that use client side logic
+pub trait EngineClient {
+    fn poll_cycle(&self) -> Result<()>;
+}
+
+impl EngineClient for EngineIOSocket {
+    
     /// Performs the server long polling procedure as long as the client is
     /// connected. This should run separately at all time to ensure proper
     /// response handling from the server.
