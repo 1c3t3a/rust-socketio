@@ -246,7 +246,7 @@ impl Client for EngineIOSocket {
             let response = self.transport.lock()?.poll(full_address.to_string())?;
 
             let handshake: Result<HandshakePacket> =
-                Packet::decode_packet(response.clone())?.try_into();
+                Packet::decode(response.clone())?.try_into();
 
             // the response contains the handshake data
             if let Ok(conn_data) = handshake {

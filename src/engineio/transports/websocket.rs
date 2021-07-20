@@ -42,14 +42,14 @@ impl WebsocketTransport {
         // the content `probe`
         sender.send_message(&Message::binary(Cow::Borrowed(
             Packet::new(PacketId::Ping, Bytes::from("probe"))
-                .encode_packet()
+                .encode()
                 .as_ref(),
         )))?;
 
         // expect to receive a probe packet
         let message = receiver.recv_message()?;
         if message.take_payload()
-            != Packet::new(PacketId::Pong, Bytes::from("probe")).encode_packet()
+            != Packet::new(PacketId::Pong, Bytes::from("probe")).encode()
         {
             return Err(Error::HandshakeError("Error".to_owned()));
         }
@@ -58,7 +58,7 @@ impl WebsocketTransport {
         // packet without any payload
         sender.send_message(&Message::binary(Cow::Borrowed(
             Packet::new(PacketId::Upgrade, Bytes::from(""))
-                .encode_packet()
+                .encode()
                 .as_ref(),
         )))?;
 

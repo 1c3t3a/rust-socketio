@@ -54,7 +54,7 @@ impl Packet {
     }
 
     /// Decodes a single `Packet` from an `u8` byte stream.
-    pub(super) fn decode_packet(bytes: Bytes) -> Result<Self> {
+    pub(super) fn decode(bytes: Bytes) -> Result<Self> {
         if bytes.is_empty() {
             return Err(Error::EmptyPacket);
         }
@@ -86,7 +86,7 @@ impl Packet {
 
     /// Encodes a `Packet` into an `u8` byte stream.
     #[inline]
-    pub(super) fn encode_packet(self) -> Bytes {
+    pub(super) fn encode(self) -> Bytes {
         let mut result = BytesMut::with_capacity(self.data.len() + 1);
         result.put((self.packet_id as u8).to_string().as_bytes());
         result.put(self.data);
@@ -117,12 +117,12 @@ pub fn decode_payload(payload: Bytes) -> Result<Vec<Packet>> {
 
     for i in 0..payload.len() {
         if *payload.get(i).unwrap() as char == SEPARATOR {
-            vec.push(Packet::decode_packet(payload.slice(last_index..i))?);
+            vec.push(Packet::decode(payload.slice(last_index..i))?);
             last_index = i + 1;
         }
     }
     // push the last packet as well
-    vec.push(Packet::decode_packet(
+    vec.push(Packet::decode(
         payload.slice(last_index..payload.len()),
     )?);
 
@@ -136,7 +136,7 @@ pub fn encode_payload(packets: Vec<Packet>) -> Bytes {
     let mut buf = BytesMut::new();
     for packet in packets {
         // at the moment no base64 encoding is used
-        buf.extend(Packet::encode_packet(packet));
+        buf.extend(Packet::encode(packet));
         buf.put_u8(SEPARATOR as u8);
     }
 
@@ -187,7 +187,7 @@ mod tests {
         assert_eq!(packet.data, Bytes::from_static(b"Hello World"));
 
         let data = Bytes::from_static(b"1Hello World");
-        assert_eq!(Packet::encode_packet(packet), data);
+        assert_eq!(Packet::encode(packet), data);
     }
 
     #[test]
