@@ -13,7 +13,7 @@ type SocketCallback = dyn FnMut(Payload, Socket) + 'static + Sync + Send;
 pub struct SocketBuilder {
     address: String,
     on: Option<Vec<(Event, Box<SocketCallback>)>>,
-    namespace: Option<String>,
+    nsp: Option<String>,
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
 }
@@ -54,7 +54,7 @@ impl SocketBuilder {
         Self {
             address: address.into(),
             on: None,
-            namespace: None,
+            nsp: None,
             tls_config: None,
             opening_headers: None,
         }
@@ -67,7 +67,7 @@ impl SocketBuilder {
         if !nsp.starts_with('/') {
             return Err(Error::IllegalNamespace(nsp));
         }
-        self.namespace = Some(nsp);
+        self.nsp = Some(nsp);
         Ok(self)
     }
 
@@ -184,7 +184,7 @@ impl SocketBuilder {
     /// assert!(result.is_ok());
     /// ```
     pub fn connect(self) -> Result<Socket> {
-        let mut socket = Socket::new(self.namespace, self.tls_config, self.opening_headers);
+        let mut socket = Socket::new(self.nsp, self.tls_config, self.opening_headers);
         if let Some(callbacks) = self.on {
             for (event, callback) in callbacks {
                 socket.on(event, Box::new(callback)).unwrap();
