@@ -184,7 +184,6 @@ impl SocketBuilder {
     /// ```
     pub fn connect(self) -> Result<Socket> {
         let mut socket = Socket::new(
-            self.address,
             self.namespace,
             self.tls_config,
             self.opening_headers,
@@ -194,7 +193,7 @@ impl SocketBuilder {
                 socket.on(event, Box::new(callback)).unwrap();
             }
         }
-        socket.connect()?;
+        socket.connect(self.address)?;
         Ok(socket)
     }
 }

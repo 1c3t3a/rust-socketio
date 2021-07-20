@@ -44,7 +44,6 @@ pub struct Ack {
 #[derive(Clone)]
 pub struct SocketIOSocket {
     engine_socket: Arc<Mutex<EngineIOSocket>>,
-    host: Arc<String>,
     connected: Arc<AtomicBool>,
     on: Arc<Vec<EventCallback>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
@@ -57,8 +56,7 @@ pub struct SocketIOSocket {
 
 impl SocketIOSocket {
     /// Creates an instance of `SocketIOSocket`.
-    pub fn new<T: Into<String>>(
-        address: T,
+    pub fn new(
         nsp: Option<String>,
         tls_config: Option<TlsConnector>,
         opening_headers: Option<HeaderMap>,
@@ -69,7 +67,6 @@ impl SocketIOSocket {
                 tls_config,
                 opening_headers,
             ))),
-            host: Arc::new(address.into()),
             connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
@@ -93,7 +90,7 @@ impl SocketIOSocket {
 
     /// Connects to the server. This includes a connection of the underlying
     /// engine.io client and afterwards an opening socket.io request.
-    pub fn connect(&mut self) -> Result<()> {
+    pub fn connect(&mut self, address: String) -> Result<()> {
         self.setup_callbacks()?;
 
         if self.connected.load(Ordering::Acquire) {
@@ -102,7 +99,7 @@ impl SocketIOSocket {
 
         let mut engine_socket = self.engine_socket.lock()?;
 
-        engine_socket.open(self.host.as_ref().to_string())?;
+        engine_socket.open(address)?;
 
         let clone = engine_socket.clone();
 
@@ -624,9 +621,8 @@ impl Debug for Ack {
 
 impl Debug for SocketIOSocket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("SocketIOSocket(engine_socket: {:?}, host: {:?}, connected: {:?}, on: <defined callbacks>, outstanding_acks: {:?}, nsp: {:?})",
+        f.write_fmt(format_args!("SocketIOSocket(engine_socket: {:?}, connected: {:?}, on: <defined callbacks>, outstanding_acks: {:?}, nsp: {:?})",
             self.engine_socket,
-            self.host,
             self.connected,
             self.outstanding_acks,
             self.nsp,
@@ -646,7 +642,7 @@ mod test {
     fn it_works() {
         let url = std::env::var("SOCKET_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
 
-        let mut socket = SocketIOSocket::new(url, None, None, None);
+        let mut socket = SocketIOSocket::new(None, None, None);
 
         assert!(socket
             .on(
@@ -665,7 +661,7 @@ mod test {
 
         assert!(socket.on("Close".into(), Box::new(|_, _| {})).is_ok());
 
-        socket.connect().unwrap();
+        socket.connect(url).unwrap();
 
         let ack_callback = |message: Payload, _| {
             println!("Yehaa! My ack got acked?");
@@ -687,7 +683,7 @@ mod test {
 
     #[test]
     fn test_error_cases() {
-        let sut = SocketIOSocket::new("http://localhost:123", None, None, None);
+        let sut = SocketIOSocket::new(None, None, None);
 
         let packet = SocketPacket::new(
             SocketPacketId::Connect,
