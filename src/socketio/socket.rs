@@ -88,52 +88,6 @@ impl SocketIOSocket {
         Ok(())
     }
 
-    /// Disconnects this client from the server by sending a `socket.io` closing
-    /// packet.
-    /// # Example
-    /// ```rust
-    /// use rust_socketio::{SocketBuilder, Payload};
-    /// use serde_json::json;
-    ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
-    ///     .on("test", |payload: Payload, mut socket| {
-    ///         println!("Received: {:#?}", payload);
-    ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
-    ///      })
-    ///     .connect()
-    ///     .expect("connection failed");
-    ///
-    /// let json_payload = json!({"token": 123});
-    ///
-    /// socket.emit("foo", json_payload);
-    ///
-    /// // disconnect from the server
-    /// socket.disconnect();
-    ///
-    /// ```
-    pub fn disconnect(&mut self) -> Result<()> {
-        if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
-            return Err(Error::IllegalActionAfterOpen);
-        }
-
-        let disconnect_packet = SocketPacket::new(
-            SocketPacketId::Disconnect,
-            self.nsp
-                .as_ref()
-                .as_ref()
-                .unwrap_or(&String::from("/"))
-                .to_owned(),
-            None,
-            None,
-            None,
-            None,
-        );
-
-        self.send(&disconnect_packet)?;
-        self.connected.store(false, Ordering::Release);
-        Ok(())
-    }
-
     /// Sends a `socket.io` packet to the server using the `engine.io` client.
     pub fn send(&self, packet: &SocketPacket) -> Result<()> {
         if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
@@ -610,6 +564,52 @@ impl Client for SocketIOSocket {
         // later, the value will be updated
         self.connected.store(true, Ordering::Release);
         self.send(&open_packet)
+    }
+
+    /// Disconnects this client from the server by sending a `socket.io` closing
+    /// packet.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use serde_json::json;
+    ///
+    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    ///     .on("test", |payload: Payload, mut socket| {
+    ///         println!("Received: {:#?}", payload);
+    ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
+    ///      })
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    /// let json_payload = json!({"token": 123});
+    ///
+    /// socket.emit("foo", json_payload);
+    ///
+    /// // disconnect from the server
+    /// socket.disconnect();
+    ///
+    /// ```
+    fn disconnect(&mut self) -> Result<()> {
+        if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
+            return Err(Error::IllegalActionAfterOpen);
+        }
+
+        let disconnect_packet = SocketPacket::new(
+            SocketPacketId::Disconnect,
+            self.nsp
+                .as_ref()
+                .as_ref()
+                .unwrap_or(&String::from("/"))
+                .to_owned(),
+            None,
+            None,
+            None,
+            None,
+        );
+
+        self.send(&disconnect_packet)?;
+        self.connected.store(false, Ordering::Release);
+        Ok(())
     }
 }
 

@@ -301,6 +301,14 @@ impl Client for EngineIOSocket {
             Err(error)
         }
     }
+
+    /// Disconnects this client from the server by sending a `engine.io` closing
+    /// packet.
+    fn disconnect(&mut self) -> Result<()> {
+        let packet = Packet::new(PacketId::Close, Bytes::from_static(&[]));
+        self.connected.store(false, Ordering::Release);
+        self.emit(packet, false)
+    }
 }
 
 /// EngineSocket related functions that use client side logic
