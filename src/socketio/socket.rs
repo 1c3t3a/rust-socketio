@@ -307,7 +307,7 @@ impl SocketIOSocket {
             Ok(finalized_packet)
         } else {
             // this is a normal packet, so decode it
-            SocketPacket::decode_bytes(&socket_bytes)
+            SocketPacket::decode(&socket_bytes)
         };
 
         if let Ok(socket_packet) = decoded_packet {

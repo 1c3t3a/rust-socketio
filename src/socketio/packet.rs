@@ -119,7 +119,7 @@ impl Packet {
     /// binary data, instead the socket is responsible for handling
     /// this member. This is done because the attachment is usually
     /// send in another packet.
-    pub fn decode_bytes<'a>(payload: &'a Bytes) -> Result<Self> {
+    pub fn decode<'a>(payload: &'a Bytes) -> Result<Self> {
         let mut i = 0;
         let packet_id = u8_to_packet_id(*payload.first().ok_or(Error::EmptyPacket)?)?;
 
@@ -255,7 +255,7 @@ mod test {
     /// https://github.com/socketio/socket.io-protocol
     fn test_decode() {
         let payload = Bytes::from_static(b"0{\"token\":\"123\"}");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::decode(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -271,7 +271,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"0/admin,{\"token\":\"123\"}");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::decode(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -287,7 +287,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"1/admin,");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::decode(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -303,7 +303,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"2[\"hello\",1]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::decode(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -319,7 +319,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"2/admin,456[\"project:delete\",123]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::decode(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -335,7 +335,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"3/admin,456[]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::decode(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -351,7 +351,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"4/admin,{\"message\":\"Not authorized\"}");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::decode(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -367,7 +367,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"51-[\"hello\",{\"_placeholder\":true,\"num\":0}]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::decode(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -385,7 +385,7 @@ mod test {
         let payload = Bytes::from_static(
             b"51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]",
         );
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::decode(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -401,7 +401,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"61-/admin,456[{\"_placeholder\":true,\"num\":0}]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::decode(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
