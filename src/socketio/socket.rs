@@ -88,58 +88,6 @@ impl SocketIOSocket {
         Ok(())
     }
 
-    /// Connects to the server. This includes a connection of the underlying
-    /// engine.io client and afterwards an opening socket.io request.
-    pub fn connect(&mut self, address: String) -> Result<()> {
-        self.setup_callbacks()?;
-
-        if self.connected.load(Ordering::Acquire) {
-            return Err(Error::IllegalActionAfterOpen);
-        }
-
-        let mut engine_socket = self.engine_socket.lock()?;
-
-        engine_socket.connect(address)?;
-
-        let clone = engine_socket.clone();
-
-        drop(engine_socket);
-        thread::spawn(move || {
-            // tries to restart a poll cycle whenever a 'normal' error occurs,
-            // it just panics on network errors, in case the poll cycle returned
-            // `Result::Ok`, the server receives a close frame so it's safe to
-            // terminate
-            loop {
-                match clone.poll_cycle() {
-                    Ok(_) => break,
-                    e @ Err(Error::HttpError(_)) | e @ Err(Error::ReqwestError(_)) => {
-                        panic!("{}", e.unwrap_err())
-                    }
-                    _ => (),
-                }
-            }
-        });
-
-        // construct the opening packet
-        let open_packet = SocketPacket::new(
-            SocketPacketId::Connect,
-            self.nsp
-                .as_ref()
-                .as_ref()
-                .unwrap_or(&String::from("/"))
-                .to_owned(),
-            None,
-            None,
-            None,
-            None,
-        );
-
-        // store the connected value as true, if the connection process fails
-        // later, the value will be updated
-        self.connected.store(true, Ordering::Release);
-        self.send(&open_packet)
-    }
-
     /// Disconnects this client from the server by sending a `socket.io` closing
     /// packet.
     /// # Example
@@ -607,6 +555,61 @@ impl SocketIOSocket {
 
     fn is_engineio_connected(&self) -> Result<bool> {
         self.engine_socket.lock()?.is_connected()
+    }
+}
+
+impl Client for SocketIOSocket {
+    
+    /// Connects to the server. This includes a connection of the underlying
+    /// engine.io client and afterwards an opening socket.io request.
+    fn connect<T: Into<String>>(&mut self, address: T) -> Result<()> {
+        self.setup_callbacks()?;
+
+        if self.connected.load(Ordering::Acquire) {
+            return Err(Error::IllegalActionAfterOpen);
+        }
+
+        let mut engine_socket = self.engine_socket.lock()?;
+
+        engine_socket.connect(address.into())?;
+
+        let clone = engine_socket.clone();
+
+        drop(engine_socket);
+        thread::spawn(move || {
+            // tries to restart a poll cycle whenever a 'normal' error occurs,
+            // it just panics on network errors, in case the poll cycle returned
+            // `Result::Ok`, the server receives a close frame so it's safe to
+            // terminate
+            loop {
+                match clone.poll_cycle() {
+                    Ok(_) => break,
+                    e @ Err(Error::HttpError(_)) | e @ Err(Error::ReqwestError(_)) => {
+                        panic!("{}", e.unwrap_err())
+                    }
+                    _ => (),
+                }
+            }
+        });
+
+        // construct the opening packet
+        let open_packet = SocketPacket::new(
+            SocketPacketId::Connect,
+            self.nsp
+                .as_ref()
+                .as_ref()
+                .unwrap_or(&String::from("/"))
+                .to_owned(),
+            None,
+            None,
+            None,
+            None,
+        );
+
+        // store the connected value as true, if the connection process fails
+        // later, the value will be updated
+        self.connected.store(true, Ordering::Release);
+        self.send(&open_packet)
     }
 }
 

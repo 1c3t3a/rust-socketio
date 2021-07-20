@@ -123,6 +123,7 @@ mod test {
     use reqwest::header::{ACCEPT_ENCODING, HOST};
     use serde_json::json;
     use std::time::Duration;
+    use crate::client::Client;
     const SERVER_URL: &str = "http://localhost:4200";
 
     #[test]
