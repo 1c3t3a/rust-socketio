@@ -78,7 +78,9 @@ impl SocketIOSocket {
         }
     }
 
-    /// Registers a new event with some callback function `F`.
+    /// Registers a new callback for a certain event. This returns an
+    /// `Error::IllegalActionAfterOpen` error if the callback is registered
+    /// after a call to the `connect` method.
     pub fn on<F>(&mut self, event: Event, callback: Box<F>) -> Result<()>
     where
         F: FnMut(Payload, Socket) + 'static + Sync + Send,
@@ -141,8 +143,29 @@ impl SocketIOSocket {
         self.send(&open_packet)
     }
 
-    /// Disconnects from the server by sending a socket.io `Disconnect` packet. This results
-    /// in the underlying engine.io transport to get closed as well.
+    /// Disconnects this client from the server by sending a `socket.io` closing
+    /// packet.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use serde_json::json;
+    ///
+    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    ///     .on("test", |payload: Payload, mut socket| {
+    ///         println!("Received: {:#?}", payload);
+    ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
+    ///      })
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    /// let json_payload = json!({"token": 123});
+    ///
+    /// socket.emit("foo", json_payload);
+    ///
+    /// // disconnect from the server
+    /// socket.disconnect();
+    ///
+    /// ```
     pub fn disconnect(&mut self) -> Result<()> {
         if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
             return Err(Error::IllegalActionAfterOpen);
@@ -193,14 +216,39 @@ impl SocketIOSocket {
         self.engine_socket.lock()?.emit(engine_packet, true)
     }
 
-    /// Emits to certain event with given data. The data needs to be JSON,
-    /// otherwise this returns an `InvalidJson` error.
-    pub fn emit(&self, event: Event, data: Payload) -> Result<()> {
+    /// Sends a message to the server using the underlying `engine.io` protocol.
+    /// This message takes an event, which could either be one of the common
+    /// events like "message" or "error" or a custom event like "foo". But be
+    /// careful, the data string needs to be valid JSON. It's recommended to use
+    /// a library like `serde_json` to serialize the data properly.
+    ///
+    /// # Example
+    /// ```
+    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use serde_json::json;
+    ///
+    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    ///     .on("test", |payload: Payload, mut socket| {
+    ///         println!("Received: {:#?}", payload);
+    ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
+    ///      })
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    /// let json_payload = json!({"token": 123});
+    ///
+    /// let result = socket.emit("foo", json_payload);
+    ///
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn emit<E: Into<Event>, P: Into<Payload>>(&self, event: E, data: P) -> Result<()> {
         let default = String::from("/");
         let nsp = self.nsp.as_ref().as_ref().unwrap_or(&default);
 
-        let is_string_packet = matches!(&data, &Payload::String(_));
-        let socket_packet = self.build_packet_for_payload(data, event, nsp, None)?;
+        let payload: Payload = data.into();
+
+        let is_string_packet = matches!(&payload, &Payload::String(_));
+        let socket_packet = self.build_packet_for_payload(payload, event.into(), nsp, None)?;
 
         if is_string_packet {
             self.send(&socket_packet)
@@ -256,13 +304,48 @@ impl SocketIOSocket {
         }
     }
 
-    /// Emits and requests an `ack`. The `ack` returns a `Arc<RwLock<Ack>>` to
-    /// acquire shared mutability. This `ack` will be changed as soon as the
-    /// server answered with an `ack`.
-    pub fn emit_with_ack<F>(
+
+    /// Sends a message to the server but `alloc`s an `ack` to check whether the
+    /// server responded in a given timespan. This message takes an event, which
+    /// could either be one of the common events like "message" or "error" or a
+    /// custom event like "foo", as well as a data parameter. But be careful,
+    /// in case you send a [`Payload::String`], the string needs to be valid JSON.
+    /// It's even recommended to use a library like serde_json to serialize the data properly.
+    /// It also requires a timeout `Duration` in which the client needs to answer.
+    /// If the ack is acked in the correct timespan, the specified callback is
+    /// called. The callback consumes a [`Payload`] which represents the data send
+    /// by the server.
+    ///
+    /// # Example
+    /// ```
+    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use serde_json::json;
+    /// use std::time::Duration;
+    /// use std::thread::sleep;
+    ///
+    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    ///
+    ///
+    /// let ack_callback = |message: Payload, _| {
+    ///     match message {
+    ///         Payload::String(str) => println!("{}", str),
+    ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
+    ///    }    
+    /// };
+    ///
+    /// let payload = json!({"token": 123});
+    /// socket.emit_with_ack("foo", payload, Duration::from_secs(2), ack_callback).unwrap();
+    ///
+    /// sleep(Duration::from_secs(2));
+    /// ```
+    pub fn emit_with_ack<F, E: Into<Event>, P: Into<Payload>>(
         &mut self,
-        event: Event,
-        data: Payload,
+        event: E,
+        data: P,
         timeout: Duration,
         callback: F,
     ) -> Result<()>
@@ -272,7 +355,7 @@ impl SocketIOSocket {
         let id = thread_rng().gen_range(0..999);
         let default = String::from("/");
         let nsp = self.nsp.as_ref().as_ref().unwrap_or(&default);
-        let socket_packet = self.build_packet_for_payload(data, event, nsp, Some(id))?;
+        let socket_packet = self.build_packet_for_payload(data.into(), event.into(), nsp, Some(id))?;
 
         let ack = Ack {
             id,
@@ -324,9 +407,6 @@ impl SocketIOSocket {
                     if let Some(function) = clone_self.get_event_callback(&Event::Error) {
                         spawn_scoped!({
                             let mut lock = function.1.write().unwrap();
-                            let socket = Socket {
-                                transport: clone_self.clone(),
-                            };
                             lock(
                                 Payload::String(
                                     String::from("Received an ConnectError frame")
@@ -334,7 +414,7 @@ impl SocketIOSocket {
                                             String::from("\"No error message provided\"")
                                         }),
                                 ),
-                                socket,
+                                clone_self.clone(),
                             );
                             drop(lock);
                         });
@@ -389,20 +469,14 @@ impl SocketIOSocket {
                         if let Some(ref payload) = socket_packet.data {
                             spawn_scoped!({
                                 let mut function = ack.callback.write().unwrap();
-                                let socket = Socket {
-                                    transport: clone_self.clone(),
-                                };
-                                function(Payload::String(payload.to_owned()), socket);
+                                function(Payload::String(payload.to_owned()), clone_self.clone());
                                 drop(function);
                             });
                         }
                         if let Some(ref payload) = socket_packet.binary_data {
                             spawn_scoped!({
                                 let mut function = ack.callback.write().unwrap();
-                                let socket = Socket {
-                                    transport: clone_self.clone(),
-                                };
-                                function(Payload::Binary(payload.to_owned()), socket);
+                                function(Payload::Binary(payload.to_owned()), clone_self.clone());
                                 drop(function);
                             });
                         }
@@ -422,10 +496,7 @@ impl SocketIOSocket {
         let error_callback = move |msg| {
             if let Some(function) = clone_self.get_event_callback(&Event::Error) {
                 let mut lock = function.1.write().unwrap();
-                let socket = Socket {
-                    transport: clone_self.clone(),
-                };
-                lock(Payload::String(msg), socket);
+                lock(Payload::String(msg),  clone_self.clone());
                 drop(lock)
             }
         };
@@ -434,12 +505,9 @@ impl SocketIOSocket {
         let open_callback = move |_| {
             if let Some(function) = clone_self.get_event_callback(&Event::Connect) {
                 let mut lock = function.1.write().unwrap();
-                let socket = Socket {
-                    transport: clone_self.clone(),
-                };
                 lock(
                     Payload::String(String::from("Connection is opened")),
-                    socket,
+                    clone_self.clone(),
                 );
                 drop(lock)
             }
@@ -449,12 +517,9 @@ impl SocketIOSocket {
         let close_callback = move |_| {
             if let Some(function) = clone_self.get_event_callback(&Event::Close) {
                 let mut lock = function.1.write().unwrap();
-                let socket = Socket {
-                    transport: clone_self.clone(),
-                };
                 lock(
                     Payload::String(String::from("Connection is closed")),
-                    socket,
+                    clone_self.clone(),
                 );
                 drop(lock)
             }
@@ -485,10 +550,7 @@ impl SocketIOSocket {
             if let Some(function) = clone_self.get_event_callback(&event) {
                 spawn_scoped!({
                     let mut lock = function.1.write().unwrap();
-                    let socket = Socket {
-                        transport: clone_self.clone(),
-                    };
-                    lock(Payload::Binary(binary_payload), socket);
+                    lock(Payload::Binary(binary_payload), clone_self.clone());
                     drop(lock);
                 });
             }
@@ -521,9 +583,6 @@ impl SocketIOSocket {
                 if let Some(function) = clone_self.get_event_callback(&event) {
                     spawn_scoped!({
                         let mut lock = function.1.write().unwrap();
-                        let socket = Socket {
-                            transport: clone_self.clone(),
-                        };
                         // if the data doesn't contain an event type at position `1`, the event must be
                         // of the type `Message`, in that case the data must be on position one and
                         // unwrapping is safe
@@ -534,7 +593,7 @@ impl SocketIOSocket {
                                     .unwrap_or_else(|| contents.get(0).unwrap())
                                     .to_string(),
                             ),
-                            socket,
+                            clone_self.clone(),
                         );
                         drop(lock);
                     });
@@ -618,7 +677,7 @@ mod test {
 
         assert!(socket
             .emit_with_ack(
-                "test".into(),
+                "test",
                 Payload::String("123".to_owned()),
                 Duration::from_secs(10),
                 ack_callback

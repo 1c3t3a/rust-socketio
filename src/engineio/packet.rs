@@ -172,14 +172,14 @@ mod tests {
 
     #[test]
     fn test_packet_error() {
-        let err = Packet::decode_packet(BytesMut::with_capacity(10).freeze());
+        let err = Packet::decode(BytesMut::with_capacity(10).freeze());
         assert!(err.is_err())
     }
 
     #[test]
     fn test_is_reflexive() {
         let data = Bytes::from_static(b"1Hello World");
-        let packet = Packet::decode_packet(data).unwrap();
+        let packet = Packet::decode(data).unwrap();
 
         assert_eq!(packet.packet_id, PacketId::Close);
         assert_eq!(packet.data, Bytes::from_static(b"Hello World"));
@@ -192,7 +192,7 @@ mod tests {
     fn test_binary_packet() {
         // SGVsbG8= is the encoded string for 'Hello'
         let data = Bytes::from_static(b"bSGVsbG8=");
-        let packet = Packet::decode_packet(data).unwrap();
+        let packet = Packet::decode(data).unwrap();
 
         assert_eq!(packet.packet_id, PacketId::Message);
         assert_eq!(packet.data, Bytes::from_static(b"Hello"));
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_packet_id_conversion_and_incompl_packet() {
-        let sut = Packet::decode_packet(Bytes::from_static(b"4"));
+        let sut = Packet::decode(Bytes::from_static(b"4"));
         assert!(sut.is_err());
         let _sut = sut.unwrap_err();
         assert!(matches!(Error::IncompletePacket, _sut));
