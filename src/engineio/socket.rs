@@ -103,7 +103,7 @@ impl EngineIOSocket {
             let mut address = Url::parse(&address).unwrap();
             drop(host_address);
 
-            address.set_path(&(address.path().to_owned() + self.root_path.read()?[..].as_ref()));
+            address.set_path(&(address.path().to_owned() + self.root_path.read()?[..].as_ref() + "/"));
 
             let full_address = address
                 .query_pairs_mut()
