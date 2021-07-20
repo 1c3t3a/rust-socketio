@@ -23,6 +23,7 @@ use std::{
 pub struct EngineIOSocket {
     pub(super) transport: Arc<Mutex<TransportEmitter>>,
     pub connected: Arc<AtomicBool>,
+    bound: Arc<AtomicBool>,
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     host_address: Arc<Mutex<Option<String>>>,
@@ -43,6 +44,7 @@ impl EngineIOSocket {
                 opening_headers,
             ))),
             connected: Arc::new(AtomicBool::default()),
+            bound: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
             host_address: Arc::new(Mutex::new(None)),
@@ -58,6 +60,8 @@ impl EngineIOSocket {
             return Err(Error::IllegalActionAfterOpen);
         }
         self.open(address.into())?;
+
+        self.bound.store(true, Ordering::Release);
 
         let mut clone = self.clone();
         thread::spawn(move || {
@@ -219,7 +223,7 @@ impl EventEmitter for EngineIOSocket {
     where
         F: Fn(()) + 'static + Sync + Send,
     {
-        if self.connected.load(Ordering::Acquire) {
+        if self.bound.load(Ordering::Acquire) {
             Err(Error::IllegalActionAfterOpen)
         } else {
             self.transport.lock()?.set_on_open(function)
@@ -230,7 +234,7 @@ impl EventEmitter for EngineIOSocket {
     where
         F: Fn(String) + 'static + Sync + Send,
     {
-        if self.connected.load(Ordering::Acquire) {
+        if self.bound.load(Ordering::Acquire) {
             Err(Error::IllegalActionAfterOpen)
         } else {
             self.transport.lock()?.set_on_error(function)
@@ -241,7 +245,7 @@ impl EventEmitter for EngineIOSocket {
     where
         F: Fn(Packet) + 'static + Sync + Send,
     {
-        if self.connected.load(Ordering::Acquire) {
+        if self.bound.load(Ordering::Acquire) {
             Err(Error::IllegalActionAfterOpen)
         } else {
             self.transport.lock()?.set_on_packet(function)
@@ -252,7 +256,7 @@ impl EventEmitter for EngineIOSocket {
     where
         F: Fn(Bytes) + 'static + Sync + Send,
     {
-        if self.connected.load(Ordering::Acquire) {
+        if self.bound.load(Ordering::Acquire) {
             Err(Error::IllegalActionAfterOpen)
         } else {
             self.transport.lock()?.set_on_data(function)
@@ -263,7 +267,7 @@ impl EventEmitter for EngineIOSocket {
     where
         F: Fn(()) + 'static + Sync + Send,
     {
-        if self.connected.load(Ordering::Acquire) {
+        if self.bound.load(Ordering::Acquire) {
             Err(Error::IllegalActionAfterOpen)
         } else {
             self.transport.lock()?.set_on_close(function)
@@ -326,9 +330,12 @@ impl Client for EngineIOSocket {
                     spawn_scoped!(function(()));
                 }
                 drop(function);
+                drop(transport);
 
                 // set the last ping to now and set the connected state
                 *self.last_ping.lock()? = Instant::now();
+
+                let _test = self.transport.is_poisoned();
 
                 // emit a pong packet to keep trigger the ping cycle on the server
                 self.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;

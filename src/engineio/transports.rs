@@ -81,8 +81,10 @@ impl Transports {
     fn get_ws_headers(&self) -> Headers {
         let mut headers = Headers::new();
         // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection procedure
-        for (key, val) in self.opening_headers.lock().unwrap().as_ref().unwrap() {
-            headers.append_raw(key.to_string(), val.as_bytes().to_owned());
+        if self.opening_headers.lock().unwrap().as_ref().is_some() {
+            for (key, val) in self.opening_headers.lock().unwrap().as_ref().unwrap() {
+                headers.append_raw(key.to_string(), val.as_bytes().to_owned());
+            }
         }
         headers
     }
