@@ -7,6 +7,7 @@ use crate::{
         transport_emitter::EventEmitter,
     },
     Socket,
+    client::Client
 };
 use bytes::Bytes;
 use native_tls::TlsConnector;
@@ -20,6 +21,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc, Mutex},
     time::{Duration, Instant},
 };
+use std::thread;
 
 use super::{event::Event, payload::Payload};
 
@@ -92,9 +94,33 @@ impl SocketIOSocket {
     pub fn connect(&mut self) -> Result<()> {
         self.setup_callbacks()?;
 
-        self.engine_socket
-            .lock()?
-            .bind(self.host.as_ref().to_string())?;
+
+        if self.connected.load(Ordering::Acquire) {
+            return Err(Error::IllegalActionAfterOpen);
+        }
+
+        let mut engine_socket = self.engine_socket.lock()?;
+
+        engine_socket.open(self.host.as_ref().to_string())?;
+
+        let clone = engine_socket.clone();
+
+        drop(engine_socket);
+        thread::spawn(move || {
+            // tries to restart a poll cycle whenever a 'normal' error occurs,
+            // it just panics on network errors, in case the poll cycle returned
+            // `Result::Ok`, the server receives a close frame so it's safe to
+            // terminate
+            loop {
+                match clone.poll_cycle() {
+                    Ok(_) => break,
+                    e @ Err(Error::HttpError(_)) | e @ Err(Error::ReqwestError(_)) => {
+                        panic!("{}", e.unwrap_err())
+                    }
+                    _ => (),
+                }
+            }
+        });
 
         // construct the opening packet
         let open_packet = SocketPacket::new(

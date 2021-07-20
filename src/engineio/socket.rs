@@ -1,5 +1,3 @@
-use std::thread;
-
 use crate::client::Client;
 use crate::engineio::packet::{decode_payload, encode_payload, HandshakePacket, Packet, PacketId};
 use crate::engineio::transport_emitter::{EventEmitter, TransportEmitter};
@@ -23,7 +21,6 @@ use std::{
 pub struct EngineIOSocket {
     pub(super) transport: Arc<Mutex<TransportEmitter>>,
     pub connected: Arc<AtomicBool>,
-    bound: Arc<AtomicBool>,
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     host_address: Arc<Mutex<Option<String>>>,
@@ -44,43 +41,12 @@ impl EngineIOSocket {
                 opening_headers,
             ))),
             connected: Arc::new(AtomicBool::default()),
-            bound: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
             host_address: Arc::new(Mutex::new(None)),
             connection_data: Arc::new(RwLock::new(None)),
             root_path: Arc::new(RwLock::new(root_path.unwrap_or_else(|| "engine.io".to_owned()))),
         }
-    }
-
-    /// Binds the socket to a certain `address`. Attention! This doesn't allow
-    /// to configure callbacks afterwards.
-    pub fn bind<T: Into<String>>(&mut self, address: T) -> Result<()> {
-        if self.connected.load(Ordering::Acquire) {
-            return Err(Error::IllegalActionAfterOpen);
-        }
-        self.open(address.into())?;
-
-        self.bound.store(true, Ordering::Release);
-
-        let mut clone = self.clone();
-        thread::spawn(move || {
-            // tries to restart a poll cycle whenever a 'normal' error occurs,
-            // it just panics on network errors, in case the poll cycle returned
-            // `Result::Ok`, the server receives a close frame so it's safe to
-            // terminate
-            loop {
-                match clone.poll_cycle() {
-                    Ok(_) => break,
-                    e @ Err(Error::HttpError(_)) | e @ Err(Error::ReqwestError(_)) => {
-                        panic!("{}", e.unwrap_err())
-                    }
-                    _ => (),
-                }
-            }
-        });
-
-        Ok(())
     }
 
     /// This handles the upgrade from polling to websocket transport. Looking at the protocol
@@ -223,55 +189,35 @@ impl EventEmitter for EngineIOSocket {
     where
         F: Fn(()) + 'static + Sync + Send,
     {
-        if self.bound.load(Ordering::Acquire) {
-            Err(Error::IllegalActionAfterOpen)
-        } else {
-            self.transport.lock()?.set_on_open(function)
-        }
+        self.transport.lock()?.set_on_open(function)
     }
 
     fn set_on_error<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(String) + 'static + Sync + Send,
     {
-        if self.bound.load(Ordering::Acquire) {
-            Err(Error::IllegalActionAfterOpen)
-        } else {
-            self.transport.lock()?.set_on_error(function)
-        }
+        self.transport.lock()?.set_on_error(function)
     }
 
     fn set_on_packet<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(Packet) + 'static + Sync + Send,
     {
-        if self.bound.load(Ordering::Acquire) {
-            Err(Error::IllegalActionAfterOpen)
-        } else {
-            self.transport.lock()?.set_on_packet(function)
-        }
+        self.transport.lock()?.set_on_packet(function)
     }
 
     fn set_on_data<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(Bytes) + 'static + Sync + Send,
     {
-        if self.bound.load(Ordering::Acquire) {
-            Err(Error::IllegalActionAfterOpen)
-        } else {
-            self.transport.lock()?.set_on_data(function)
-        }
+        self.transport.lock()?.set_on_data(function)
     }
 
     fn set_on_close<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(()) + 'static + Sync + Send,
     {
-        if self.bound.load(Ordering::Acquire) {
-            Err(Error::IllegalActionAfterOpen)
-        } else {
-            self.transport.lock()?.set_on_close(function)
-        }
+        self.transport.lock()?.set_on_close(function)
     }
 }
 
@@ -357,7 +303,7 @@ impl Client for EngineIOSocket {
     /// Performs the server long polling procedure as long as the client is
     /// connected. This should run separately at all time to ensure proper
     /// response handling from the server.
-    fn poll_cycle(&mut self) -> Result<()> {
+    fn poll_cycle(&self) -> Result<()> {
         if !self.connected.load(Ordering::Acquire) {
             let error = Error::ActionBeforeOpen;
             self.call_error_callback(format!("{}", error))?;
@@ -621,7 +567,7 @@ mod test {
 
     #[test]
     fn test_illegal_actions() {
-        let mut sut = EngineIOSocket::new(None, None, None);
+        let sut = EngineIOSocket::new(None, None, None);
         assert!(sut.poll_cycle().is_err());
 
         assert!(sut
@@ -633,16 +579,6 @@ mod test {
                 true
             )
             .is_err());
-
-        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
-
-        assert!(sut.bind(url).is_ok());
-
-        assert!(sut.set_on_open(|_| {}).is_err());
-        assert!(sut.set_on_close(|_| {}).is_err());
-        assert!(sut.set_on_packet(|_| {}).is_err());
-        assert!(sut.set_on_data(|_| {}).is_err());
-        assert!(sut.set_on_error(|_| {}).is_err());
     }
 
     use std::{thread::sleep, time::Duration};
@@ -671,7 +607,7 @@ mod test {
 
         let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
 
-        assert!(socket.bind(url).is_ok());
+        assert!(socket.open(url).is_ok());
 
         assert!(socket
             .emit(
