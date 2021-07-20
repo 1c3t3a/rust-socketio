@@ -99,7 +99,7 @@ impl SocketIOSocket {
 
         let mut engine_socket = self.engine_socket.lock()?;
 
-        engine_socket.open(address)?;
+        engine_socket.connect(address)?;
 
         let clone = engine_socket.clone();
 

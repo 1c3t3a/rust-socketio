@@ -230,7 +230,7 @@ impl Client for EngineIOSocket {
     /// response. If the handshake data mentions a websocket upgrade possibility,
     /// we try to upgrade the connection. Afterwards a first Pong packet is sent
     /// to the server to trigger the Ping-cycle.
-    fn open<T: Into<String> + Clone>(&mut self, address: T) -> Result<()> {
+    fn connect<T: Into<String> + Clone>(&mut self, address: T) -> Result<()> {
         // build the query path, random_t is used to prevent browser caching
         let query_path = self.get_query_path()?;
 
@@ -432,7 +432,7 @@ mod test {
 
         let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
 
-        socket.open(url).unwrap();
+        socket.connect(url).unwrap();
 
         assert!(socket
             .emit(
@@ -493,7 +493,7 @@ mod test {
         let url = std::env::var("ENGINE_IO_SECURE_SERVER")
             .unwrap_or_else(|_| SERVER_URL_SECURE.to_owned());
 
-        socket.open(url).unwrap();
+        socket.connect(url).unwrap();
 
         assert!(socket
             .emit(
@@ -534,7 +534,7 @@ mod test {
         let mut sut = EngineIOSocket::new(None, None, None);
         let illegal_url = "this is illegal";
 
-        let _error = sut.open(illegal_url).expect_err("Error");
+        let _error = sut.connect(illegal_url).expect_err("Error");
         assert!(matches!(
             Error::InvalidUrl(String::from("this is illegal")),
             _error
@@ -543,7 +543,7 @@ mod test {
         let mut sut = EngineIOSocket::new(None, None, None);
         let invalid_protocol = "file:///tmp/foo";
 
-        let _error = sut.open(invalid_protocol).expect_err("Error");
+        let _error = sut.connect(invalid_protocol).expect_err("Error");
         assert!(matches!(
             Error::InvalidUrl(String::from("file://localhost:4200")),
             _error
@@ -617,7 +617,7 @@ mod test {
 
         let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
 
-        assert!(socket.open(url).is_ok());
+        assert!(socket.connect(url).is_ok());
 
         assert!(socket
             .emit(
