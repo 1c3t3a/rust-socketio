@@ -19,7 +19,7 @@ use std::{
     sync::{atomic::Ordering, RwLock},
 };
 use std::{
-    sync::{atomic::AtomicBool, Arc, Mutex},
+    sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant},
 };
 
@@ -43,7 +43,7 @@ pub struct Ack {
 /// Handles communication in the `socket.io` protocol.
 #[derive(Clone)]
 pub struct SocketIOSocket {
-    engine_socket: Arc<Mutex<EngineIOSocket>>,
+    engine_socket: Arc<RwLock<EngineIOSocket>>,
     connected: Arc<AtomicBool>,
     on: Arc<Vec<EventCallback>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
@@ -62,7 +62,7 @@ impl SocketIOSocket {
         opening_headers: Option<HeaderMap>,
     ) -> Self {
         SocketIOSocket {
-            engine_socket: Arc::new(Mutex::new(EngineIOSocket::new(
+            engine_socket: Arc::new(RwLock::new(EngineIOSocket::new(
                 Some("socket.io".to_owned()),
                 tls_config,
                 opening_headers,
@@ -97,7 +97,7 @@ impl SocketIOSocket {
         // the packet, encoded as an engine.io message packet
         let engine_packet = EnginePacket::new(EnginePacketId::Message, packet.encode());
 
-        self.engine_socket.lock()?.emit(engine_packet, false)
+        self.engine_socket.read()?.emit(engine_packet, false)
     }
 
     /// Sends a single binary attachment to the server. This method
@@ -112,7 +112,7 @@ impl SocketIOSocket {
         // the packet, encoded as an engine.io message packet
         let engine_packet = EnginePacket::new(EnginePacketId::Message, attachment);
 
-        self.engine_socket.lock()?.emit(engine_packet, true)
+        self.engine_socket.read()?.emit(engine_packet, true)
     }
 
     /// Sends a message to the server using the underlying `engine.io` protocol.
@@ -424,15 +424,15 @@ impl SocketIOSocket {
             }
         };
 
-        self.engine_socket.lock()?.set_on_open(open_callback)?;
+        self.engine_socket.write()?.set_on_open(open_callback)?;
 
-        self.engine_socket.lock()?.set_on_error(error_callback)?;
+        self.engine_socket.write()?.set_on_error(error_callback)?;
 
-        self.engine_socket.lock()?.set_on_close(close_callback)?;
+        self.engine_socket.write()?.set_on_close(close_callback)?;
 
         let clone_self = self.clone();
         self.engine_socket
-            .lock()?
+            .write()?
             .set_on_data(move |data| Self::handle_new_message(data, &clone_self))
     }
 
@@ -508,7 +508,7 @@ impl SocketIOSocket {
     }
 
     fn is_engineio_connected(&self) -> Result<bool> {
-        self.engine_socket.lock()?.is_connected()
+        self.engine_socket.read()?.is_connected()
     }
 }
 
@@ -522,20 +522,22 @@ impl Client for SocketIOSocket {
             return Err(Error::IllegalActionAfterOpen);
         }
 
-        let mut engine_socket = self.engine_socket.lock()?;
+        let mut engine_socket = self.engine_socket.write()?;
 
         engine_socket.connect(address.into())?;
 
-        let clone = engine_socket.clone();
-
         drop(engine_socket);
+
+        let clone = Arc::clone(&self.engine_socket);
+
         thread::spawn(move || {
+            let s = clone.read().unwrap().clone();
             // tries to restart a poll cycle whenever a 'normal' error occurs,
             // it just panics on network errors, in case the poll cycle returned
             // `Result::Ok`, the server receives a close frame so it's safe to
             // terminate
             loop {
-                match clone.poll_cycle() {
+                match s.poll_cycle() {
                     Ok(_) => break,
                     e @ Err(Error::HttpError(_)) | e @ Err(Error::ReqwestError(_)) => {
                         panic!("{}", e.unwrap_err())

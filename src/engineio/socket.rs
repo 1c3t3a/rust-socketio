@@ -19,7 +19,7 @@ use std::{
 /// it to register common callbacks.
 #[derive(Clone, Debug)]
 pub struct EngineIOSocket {
-    pub(super) transport: Arc<Mutex<TransportEmitter>>,
+    pub(super) transport: Arc<RwLock<TransportEmitter>>,
     pub connected: Arc<AtomicBool>,
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
@@ -36,7 +36,7 @@ impl EngineIOSocket {
         opening_headers: Option<HeaderMap>,
     ) -> Self {
         EngineIOSocket {
-            transport: Arc::new(Mutex::new(TransportEmitter::new(
+            transport: Arc::new(RwLock::new(TransportEmitter::new(
                 tls_config,
                 opening_headers,
             ))),
@@ -85,12 +85,12 @@ impl EngineIOSocket {
             match full_address.scheme() {
                 "https" => {
                     self.transport
-                        .lock()?
+                        .write()?
                         .upgrade_websocket_secure(full_address.to_string())?;
                 }
                 "http" => {
                     self.transport
-                        .lock()?
+                        .write()?
                         .upgrade_websocket(full_address.to_string())?;
                 }
                 _ => return Err(Error::InvalidUrl(full_address.to_string())),
@@ -126,7 +126,7 @@ impl EngineIOSocket {
 
         if let Err(error) = self
             .transport
-            .lock()?
+            .read()?
             .emit(address.to_string(), data, is_binary_att)
         {
             self.call_error_callback(error.to_string())?;
@@ -156,7 +156,7 @@ impl EngineIOSocket {
         let mut path = format!(
             "/{}/?EIO=4&transport={}&t={}",
             self.root_path.read()?,
-            self.transport.lock()?.get_transport_name()?,
+            self.transport.read()?.get_transport_name()?,
             self.get_hashed_time(),
         );
 
@@ -176,7 +176,7 @@ impl EngineIOSocket {
     /// Calls the error callback with a given message.
     #[inline]
     fn call_error_callback(&self, text: String) -> Result<()> {
-        let transport = self.transport.lock()?;
+        let transport = self.transport.read()?;
         let function = transport.on_error.read()?;
         if let Some(function) = function.as_ref() {
             spawn_scoped!(function(text));
@@ -192,35 +192,35 @@ impl EventEmitter for EngineIOSocket {
     where
         F: Fn(()) + 'static + Sync + Send,
     {
-        self.transport.lock()?.set_on_open(function)
+        self.transport.write()?.set_on_open(function)
     }
 
     fn set_on_error<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(String) + 'static + Sync + Send,
     {
-        self.transport.lock()?.set_on_error(function)
+        self.transport.write()?.set_on_error(function)
     }
 
     fn set_on_packet<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(Packet) + 'static + Sync + Send,
     {
-        self.transport.lock()?.set_on_packet(function)
+        self.transport.write()?.set_on_packet(function)
     }
 
     fn set_on_data<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(Bytes) + 'static + Sync + Send,
     {
-        self.transport.lock()?.set_on_data(function)
+        self.transport.write()?.set_on_data(function)
     }
 
     fn set_on_close<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(()) + 'static + Sync + Send,
     {
-        self.transport.lock()?.set_on_close(function)
+        self.transport.write()?.set_on_close(function)
     }
 }
 
@@ -246,7 +246,7 @@ impl Client for EngineIOSocket {
                 _ => return Err(Error::InvalidUrl(full_address.to_string())),
             }
 
-            let response = self.transport.lock()?.poll(full_address.to_string())?;
+            let response = self.transport.read()?.poll(full_address.to_string())?;
 
             let handshake: Result<HandshakePacket> = Packet::decode(response.clone())?.try_into();
 
@@ -272,7 +272,7 @@ impl Client for EngineIOSocket {
                 drop(connection_data);
 
                 // call the on_open callback
-                let transport = self.transport.lock()?;
+                let transport = self.transport.read()?;
                 let function = transport.on_open.read()?;
                 if let Some(function) = function.as_ref() {
                     spawn_scoped!(function(()));
@@ -348,7 +348,7 @@ impl EngineClient for EngineIOSocket {
             let address =
                 Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
             drop(host);
-            let mut transport = self.transport.lock()?;
+            let transport = self.transport.read()?;
             let data = transport.poll(address.to_string())?;
             drop(transport);
 
@@ -360,7 +360,7 @@ impl EngineClient for EngineIOSocket {
 
             for packet in packets {
                 {
-                    let transport = self.transport.lock()?;
+                    let transport = self.transport.read()?;
                     let on_packet = transport.on_packet.read()?;
                     // call the packet callback
                     if let Some(function) = on_packet.as_ref() {
@@ -371,7 +371,7 @@ impl EngineClient for EngineIOSocket {
                 // check for the appropriate action or callback
                 match packet.packet_id {
                     PacketId::Message => {
-                        let transport = self.transport.lock()?;
+                        let transport = self.transport.read()?;
                         let on_data = transport.on_data.read()?;
                         if let Some(function) = on_data.as_ref() {
                             spawn_scoped!(function(packet.data));
@@ -380,7 +380,7 @@ impl EngineClient for EngineIOSocket {
                     }
 
                     PacketId::Close => {
-                        let transport = self.transport.lock()?;
+                        let transport = self.transport.read()?;
                         let on_close = transport.on_close.read()?;
                         if let Some(function) = on_close.as_ref() {
                             spawn_scoped!(function(()));
