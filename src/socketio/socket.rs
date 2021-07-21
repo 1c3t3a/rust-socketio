@@ -571,6 +571,7 @@ impl Client for SocketIOSocket {
     /// ```rust
     /// use rust_socketio::{SocketBuilder, Payload};
     /// use serde_json::json;
+    /// use crate::rust_socketio::client::Client;
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200")
     ///     .on("test", |payload: Payload, mut socket| {

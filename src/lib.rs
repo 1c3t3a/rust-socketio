@@ -97,7 +97,7 @@ mod engineio;
 pub mod socketio;
 
 /// Contains Client trait
-mod client;
+pub mod client;
 
 /// Contains the error type which will be returned with every result in this
 /// crate. Handles all kinds of errors.
