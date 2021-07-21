@@ -174,7 +174,7 @@ mod test {
         socket.disconnect().unwrap();
         // assert!(socket.disconnect().is_ok());
 
-        sleep(Duration::from_secs(4));
+        sleep(Duration::from_secs(20));
     }
 
     #[test]
@@ -220,6 +220,6 @@ mod test {
             .emit_with_ack("binary", json!("pls ack"), Duration::from_secs(1), ack_cb,)
             .is_ok());
 
-        sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(20));
     }
 }
