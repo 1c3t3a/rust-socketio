@@ -151,7 +151,7 @@ impl Transport for TransportEmitter {
         self.transport.lock()?.emit(address, data, is_binary_att)
     }
 
-    fn poll(&mut self, address: String) -> Result<Bytes> {
+    fn poll(&self, address: String) -> Result<Bytes> {
         self.transport.lock()?.poll(address)
     }
 }

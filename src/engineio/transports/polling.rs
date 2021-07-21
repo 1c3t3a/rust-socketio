@@ -68,7 +68,7 @@ impl Transport for PollingTransport {
         Ok(())
     }
 
-    fn poll(&mut self, address: String) -> Result<Bytes> {
+    fn poll(&self, address: String) -> Result<Bytes> {
         // we won't use the shared client as this blocks the resource
         // in the long polling requests
         Ok(Client::new().get(address).send().unwrap().bytes().unwrap())

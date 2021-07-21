@@ -19,7 +19,7 @@ pub trait Transport {
     /// Performs the server long polling procedure as long as the client is
     /// connected. This should run separately at all time to ensure proper
     /// response handling from the server.
-    fn poll(&mut self, address: String) -> Result<Bytes>;
+    fn poll(&self, address: String) -> Result<Bytes>;
 }
 
 enum TransportTypes {
@@ -124,7 +124,7 @@ impl Transport for Transports {
         }
     }
 
-    fn poll(&mut self, address: String) -> Result<Bytes> {
+    fn poll(&self, address: String) -> Result<Bytes> {
         match &*self.transport_type.read()? {
             TransportTypes::Websocket => self.websocket.lock()?.as_mut().unwrap().poll(address),
             TransportTypes::WebsocketSecure => self

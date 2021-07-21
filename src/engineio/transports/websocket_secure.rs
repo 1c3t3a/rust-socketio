@@ -77,7 +77,7 @@ impl Transport for WebsocketSecureTransport {
         Ok(())
     }
 
-    fn poll(&mut self, _: String) -> Result<Bytes> {
+    fn poll(&self, _: String) -> Result<Bytes> {
         let mut receiver = self.client.lock()?;
 
         // if this is a binary payload, we mark it as a message
