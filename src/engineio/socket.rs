@@ -1,7 +1,7 @@
 use crate::client::Client;
 use crate::engineio::packet::{decode_payload, encode_payload, HandshakePacket, Packet, PacketId};
 use crate::engineio::transport_emitter::{EventEmitter, TransportEmitter};
-use crate::engineio::transports::{Transport, Transports};
+use crate::engineio::transports::Transport;
 use crate::error::{Error, Result};
 use adler32::adler32;
 use bytes::Bytes;
@@ -37,10 +37,8 @@ impl EngineIOSocket {
     ) -> Self {
         EngineIOSocket {
             transport: Arc::new(RwLock::new(TransportEmitter::new(
-                Transports::new(
-                    tls_config,
-                    opening_headers
-                ),
+                tls_config,
+                opening_headers,
             ))),
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
