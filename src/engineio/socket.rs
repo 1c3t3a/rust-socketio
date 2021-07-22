@@ -185,6 +185,30 @@ impl EngineIOSocket {
 
         Ok(())
     }
+
+    /// Polls for next payload
+    pub(crate) fn poll(&self) -> Result<Vec<Packet>> {
+        if self.connected.load(Ordering::Acquire) {
+            let query_path = self.get_query_path()?.to_owned();
+
+            let host = self.host_address.lock()?;
+            let address =
+                Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
+            drop(host);
+            let transport = self.transport.read()?;
+            let data = transport.poll(address.to_string())?;
+            drop(transport);
+
+            if data.is_empty() {
+                return Ok(vec![]);
+            }
+
+            let packets = decode_payload(data)?;
+            Ok(packets)
+        } else {
+            Err(Error::SocketClosed())
+        }
+    }
 }
 
 impl EventEmitter for EngineIOSocket {
@@ -342,21 +366,7 @@ impl EngineClient for EngineIOSocket {
         );
 
         while self.connected.load(Ordering::Acquire) {
-            let query_path = self.get_query_path()?.to_owned();
-
-            let host = self.host_address.lock()?;
-            let address =
-                Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
-            drop(host);
-            let transport = self.transport.read()?;
-            let data = transport.poll(address.to_string())?;
-            drop(transport);
-
-            if data.is_empty() {
-                return Ok(());
-            }
-
-            let packets = decode_payload(data)?;
+            let packets = self.poll()?;
 
             for packet in packets {
                 {
@@ -457,14 +467,6 @@ mod test {
             })
             .unwrap();
 
-        // closes the connection
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"CLOSE")),
-                false,
-            )
-            .is_ok());
-
         assert!(socket
             .emit(
                 Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
@@ -473,6 +475,45 @@ mod test {
             .is_ok());
 
         assert!(socket.poll_cycle().is_ok());
+    }
+
+    
+    #[test]
+    fn test_connection_polling_packets() -> Result<()> {
+        let mut socket = EngineIOSocket::new(None, None, None);
+
+        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+
+        socket.connect(url)?;
+
+        // Our testing server is set up to send hello client on startup
+        {
+            let expected = Packet::new(PacketId::Message, Bytes::from_static(b"hello client"));
+            let got = socket.poll()?.get(0).unwrap().clone();
+            assert_eq!(expected, got);
+        }
+
+        socket.emit(Packet::new(PacketId::Message, Bytes::from_static(b"respond")), false)?;
+        // Our testing server is set up to respond to messages "respond" with "Roger Roger"
+        {
+            let expected = Packet::new(PacketId::Message, Bytes::from_static(b"Roger Roger"));
+            let got = socket.poll()?.get(0).unwrap().clone();
+            assert_eq!(expected, got);
+        }
+
+        // Wait for server to ping us
+        {
+            let expected = Packet::new(PacketId::Ping, Bytes::from_static(b""));
+            let got = socket.poll()?.get(0).unwrap().clone();
+            assert_eq!(expected, got);
+        }
+        // Respond with pong (normally done in poll_cycle)
+        socket.emit(Packet::new(PacketId::Pong, Bytes::from_static(b"")), false)?;
+
+        socket.emit(Packet::new(PacketId::Close, Bytes::from_static(&[])), false)?;
+
+        Ok(())
+
     }
 
     fn get_tls_connector() -> Result<TlsConnector> {
@@ -517,14 +558,6 @@ mod test {
                 );
             })
             .unwrap();
-
-        // closes the connection
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"CLOSE")),
-                false,
-            )
-            .is_ok());
 
         assert!(socket
             .emit(

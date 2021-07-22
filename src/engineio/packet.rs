@@ -19,7 +19,7 @@ pub enum PacketId {
 }
 
 /// A `Packet` sent via the `engine.io` protocol.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Packet {
     pub packet_id: PacketId,
     pub data: Bytes,

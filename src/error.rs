@@ -51,6 +51,8 @@ pub enum Error {
     NoTransport(),
     #[error("That transport already exists")]
     TransportExists(),
+    #[error("The socket is closed")]
+    SocketClosed(),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
