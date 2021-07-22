@@ -23,17 +23,9 @@ server.on('connection', socket => {
         }
     });
 
-    /*
-        Not seeing log messages
-
-        socket.on('ping', () => {
-            console.log("Ping");
-        });
-
-        socket.on('pong', () => {
-            console.log("pong.");
-        });
-    */
+    socket.on('heartbeat', () => {
+        console.log("heartbeat");
+    });
 
     socket.on('error', message => {
         // Notify the client if there is an error so it's tests will fail
