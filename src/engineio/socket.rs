@@ -1,7 +1,7 @@
 use crate::client::Client;
 use crate::engineio::packet::{decode_payload, encode_payload, HandshakePacket, Packet, PacketId};
 use crate::engineio::transport_emitter::{EventEmitter, TransportEmitter};
-use crate::engineio::transports::Transport;
+use crate::engineio::transports::{Transport, Transports};
 use crate::error::{Error, Result};
 use adler32::adler32;
 use bytes::Bytes;
@@ -37,8 +37,10 @@ impl EngineIOSocket {
     ) -> Self {
         EngineIOSocket {
             transport: Arc::new(RwLock::new(TransportEmitter::new(
-                tls_config,
-                opening_headers,
+                Transports::new(
+                    tls_config,
+                    opening_headers
+                ),
             ))),
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
@@ -187,7 +189,7 @@ impl EngineIOSocket {
     }
 
     /// Polls for next payload
-    pub(crate) fn poll(&self) -> Result<Vec<Packet>> {
+    pub(crate) fn poll(&self) -> Result<Option<Vec<Packet>>> {
         if self.connected.load(Ordering::Acquire) {
             let query_path = self.get_query_path()?.to_owned();
 
@@ -200,11 +202,11 @@ impl EngineIOSocket {
             drop(transport);
 
             if data.is_empty() {
-                return Ok(vec![]);
+                return Ok(None);
             }
 
             let packets = decode_payload(data)?;
-            Ok(packets)
+            Ok(Some(packets))
         } else {
             Err(Error::SocketClosed())
         }
@@ -368,7 +370,11 @@ impl EngineClient for EngineIOSocket {
         while self.connected.load(Ordering::Acquire) {
             let packets = self.poll()?;
 
-            for packet in packets {
+            if packets.is_none() {
+                break;
+            }
+
+            for packet in packets.unwrap() {
                 {
                     let transport = self.transport.read()?;
                     let on_packet = transport.on_packet.read()?;
@@ -442,41 +448,6 @@ mod test {
     const SERVER_URL: &str = "http://localhost:4201";
     const SERVER_URL_SECURE: &str = "https://localhost:4202";
     const CERT_PATH: &str = "ci/cert/ca.crt";
-
-    #[test]
-    fn test_connection_polling() {
-        let mut socket = EngineIOSocket::new(None, None, None);
-
-        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
-
-        socket.connect(url).unwrap();
-
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
-                false,
-            )
-            .is_ok());
-
-        socket
-            .set_on_data(|data| {
-                println!(
-                    "Received: {:?}",
-                    std::str::from_utf8(&data).expect("Error while decoding utf-8")
-                );
-            })
-            .unwrap();
-
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
-                true
-            )
-            .is_ok());
-
-        assert!(socket.poll_cycle().is_ok());
-    }
-
     
     #[test]
     fn test_connection_polling_packets() -> Result<()> {
@@ -489,7 +460,7 @@ mod test {
         // Our testing server is set up to send hello client on startup
         {
             let expected = Packet::new(PacketId::Message, Bytes::from_static(b"hello client"));
-            let got = socket.poll()?.get(0).unwrap().clone();
+            let got = socket.poll()?.unwrap().get(0).unwrap().clone();
             assert_eq!(expected, got);
         }
 
@@ -497,14 +468,14 @@ mod test {
         // Our testing server is set up to respond to messages "respond" with "Roger Roger"
         {
             let expected = Packet::new(PacketId::Message, Bytes::from_static(b"Roger Roger"));
-            let got = socket.poll()?.get(0).unwrap().clone();
+            let got = socket.poll()?.unwrap().get(0).unwrap().clone();
             assert_eq!(expected, got);
         }
 
         // Wait for server to ping us
         {
             let expected = Packet::new(PacketId::Ping, Bytes::from_static(b""));
-            let got = socket.poll()?.get(0).unwrap().clone();
+            let got = socket.poll()?.unwrap().get(0).unwrap().clone();
             assert_eq!(expected, got);
         }
         // Respond with pong (normally done in poll_cycle)

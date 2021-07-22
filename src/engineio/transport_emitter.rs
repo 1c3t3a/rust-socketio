@@ -3,21 +3,21 @@ use crate::engineio::transports::Transport;
 use crate::engineio::transports::Transports;
 use crate::error::Result;
 use bytes::Bytes;
-use native_tls::TlsConnector;
-use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 /// Type of a `Callback` function. (Normal closures can be passed in here).
 type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
+
+pub type TransportEmitter = TransportEmitterGeneric<Transports>;
 
 /// A client which handles the plain transmission of packets in the `engine.io`
 /// protocol. Used by the wrapper `EngineSocket`. This struct also holds the
 /// callback functions.
 #[derive(Clone)]
-pub struct TransportEmitter {
-    transport: Arc<Mutex<Transports>>,
+pub struct TransportEmitterGeneric<T: Transport> {
+    transport: Arc<RwLock<T>>,
     pub on_error: Callback<String>,
     pub on_open: Callback<()>,
     pub on_close: Callback<()>,
@@ -63,11 +63,11 @@ pub trait EventEmitter {
         F: Fn(()) + 'static + Sync + Send;
 }
 
-impl TransportEmitter {
+impl<T: Transport> TransportEmitterGeneric<T> {
     /// Creates an instance of `Transport`.
-    pub fn new(tls_config: Option<TlsConnector>, opening_headers: Option<HeaderMap>) -> Self {
-        TransportEmitter {
-            transport: Arc::new(Mutex::new(Transports::new(tls_config, opening_headers))),
+    pub fn new(transport: T) -> Self {
+        TransportEmitterGeneric::<T> {
+            transport: Arc::new(RwLock::new(transport)),
             on_error: Arc::new(RwLock::new(None)),
             on_open: Arc::new(RwLock::new(None)),
             on_close: Arc::new(RwLock::new(None)),
@@ -75,21 +75,23 @@ impl TransportEmitter {
             on_packet: Arc::new(RwLock::new(None)),
         }
     }
+}
 
+impl TransportEmitterGeneric<Transports> {
     pub(super) fn upgrade_websocket(&mut self, address: String) -> Result<()> {
-        self.transport.lock()?.upgrade_websocket(address)
+        self.transport.write()?.upgrade_websocket(address)
     }
 
     pub(super) fn upgrade_websocket_secure(&mut self, address: String) -> Result<()> {
-        self.transport.lock()?.upgrade_websocket_secure(address)
+        self.transport.write()?.upgrade_websocket_secure(address)
     }
 
     pub(super) fn get_transport_name(&self) -> Result<&'static str> {
-        self.transport.lock()?.get_transport_name()
+        self.transport.write()?.get_transport_name()
     }
 }
 
-impl EventEmitter for TransportEmitter {
+impl<T: Transport> EventEmitter for TransportEmitterGeneric<T> {
     /// Registers an `on_open` callback.
     fn set_on_open<F>(&mut self, function: F) -> Result<()>
     where
@@ -146,21 +148,21 @@ impl EventEmitter for TransportEmitter {
     }
 }
 
-impl Transport for TransportEmitter {
+impl<T: Transport> Transport for TransportEmitterGeneric<T> {
     fn emit(&self, address: String, data: Bytes, is_binary_att: bool) -> Result<()> {
-        self.transport.lock()?.emit(address, data, is_binary_att)
+        self.transport.read()?.emit(address, data, is_binary_att)
     }
 
     fn poll(&self, address: String) -> Result<Bytes> {
-        self.transport.lock()?.poll(address)
+        self.transport.read()?.poll(address)
     }
 }
 
-impl Debug for TransportEmitter {
+impl Debug for TransportEmitterGeneric<Transports> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
             "TransportType({})",
-            self.transport.lock().unwrap().get_transport_name().unwrap()
+            self.transport.read().unwrap().get_transport_name().unwrap()
         ))
     }
 }
