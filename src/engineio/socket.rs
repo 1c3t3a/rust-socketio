@@ -1,7 +1,7 @@
 #![allow(unused)]
 use std::{ops::Deref, thread};
 
-use super::packet::{Packet, PacketId, HandshakePacket};
+use super::packet::{HandshakePacket, Packet, PacketId};
 use crate::engineio::transport::TransportClient;
 use crate::error::{Error, Result};
 use bytes::Bytes;

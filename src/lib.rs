@@ -116,8 +116,8 @@ mod test {
     use native_tls::TlsConnector;
     use reqwest::header::{ACCEPT_ENCODING, HOST};
     use serde_json::json;
-    use socketio::{payload::Payload};    
-    use std::{time::Duration};
+    use socketio::payload::Payload;
+    use std::time::Duration;
 
     const SERVER_URL: &str = "http://localhost:4200";
 
