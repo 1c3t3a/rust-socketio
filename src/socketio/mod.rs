@@ -5,3 +5,4 @@ mod packet;
 /// could be sent or received.
 pub mod payload;
 pub(crate) mod transport;
+pub mod socket;
