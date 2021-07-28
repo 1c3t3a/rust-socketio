@@ -30,7 +30,7 @@ pub enum Error {
     #[error("Called an action before the connection was established")]
     ActionBeforeOpen,
     #[error("string is not json serializable: {0}")]
-    InvalidJson(String),
+    InvalidJson(#[from] serde_json::Error),
     #[error("Did not receive an ack for id: {0}")]
     DidNotReceiveProperAck(i32),
     #[error("An illegal action (such as setting a callback after being connected) was triggered")]
