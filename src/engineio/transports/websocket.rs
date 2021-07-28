@@ -1,6 +1,6 @@
-use crate::engineio::packet::{Packet, PacketId};
-use crate::engineio::transport::Transport;
-use crate::error::{Error, Result};
+use crate::engineio::packet::PacketId;
+use crate::engineio::transport_new::Transport;
+use crate::error::Result;
 use bytes::{BufMut, Bytes, BytesMut};
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex, RwLock};
@@ -17,18 +17,18 @@ pub(crate) struct WebsocketTransport {
 
 impl WebsocketTransport {
     /// Creates an instance of `TransportClient`.
-    pub fn new(base_url: Url, headers: Headers) -> Self {
+    pub fn new(base_url: Url, headers: Option<Headers>) -> Self {
         let url = base_url
             .clone()
             .query_pairs_mut()
             .append_pair("transport", "websocket")
             .finish()
             .clone();
-        let client = WsClientBuilder::new(base_url[..].as_ref())
-            .unwrap()
-            .custom_headers(&headers)
-            .connect_insecure()
-            .unwrap();
+        let mut client_bulider = WsClientBuilder::new(base_url[..].as_ref()).unwrap();
+        if let Some(headers) = headers {
+            client_bulider = client_bulider.custom_headers(&headers);
+        }
+        let client = client_bulider.connect_insecure().unwrap();
 
         client.set_nonblocking(false).unwrap();
 
@@ -39,35 +39,6 @@ impl WebsocketTransport {
             receiver: Arc::new(Mutex::new(receiver)),
             base_url: Arc::new(RwLock::new(url.to_string())),
         }
-    }
-
-    pub(super) fn probe(&self) -> Result<()> {
-        let mut sender = self.sender.lock()?;
-        let mut receiver = self.receiver.lock()?;
-
-        // send the probe packet, the text `2probe` represents a ping packet with
-        // the content `probe`
-        sender.send_message(&Message::binary(Cow::Borrowed(
-            Packet::new(PacketId::Ping, Bytes::from("probe"))
-                .encode()
-                .as_ref(),
-        )))?;
-
-        // expect to receive a probe packet
-        let message = receiver.recv_message()?;
-        if message.take_payload() != Packet::new(PacketId::Pong, Bytes::from("probe")).encode() {
-            return Err(Error::InvalidPacket());
-        }
-
-        // finally send the upgrade request. the payload `5` stands for an upgrade
-        // packet without any payload
-        sender.send_message(&Message::binary(Cow::Borrowed(
-            Packet::new(PacketId::Upgrade, Bytes::from(""))
-                .encode()
-                .as_ref(),
-        )))?;
-
-        Ok(())
     }
 }
 
@@ -108,6 +79,22 @@ impl Transport for WebsocketTransport {
 
     fn set_base_url(&self, url: String) -> Result<()> {
         *self.base_url.write()? = url;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::str::FromStr;
+    #[test]
+    fn ws_transport_base_url() -> Result<()> {
+        let transport =
+            WebsocketTransport::new(Url::from_str(&"localhost".to_owned()).unwrap(), None);
+        assert_eq!(transport.base_url(), "localhost");
+        transport.set_base_url("127.0.0.1".to_owned());
+        assert_eq!(transport.base_url(), "127.0.0.1");
+        assert_ne!(transport.base_url(), "localhost");
         Ok(())
     }
 }

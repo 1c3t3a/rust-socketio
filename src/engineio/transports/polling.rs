@@ -1,4 +1,4 @@
-use crate::engineio::transport::Transport;
+use crate::engineio::transport_new::Transport;
 use crate::error::{Error, Result};
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
@@ -74,7 +74,7 @@ impl Transport for PollingTransport {
         drop(client);
 
         if status != 200 {
-            let error = Error::IncompleteHttp(status);
+            let error = Error::HttpError(status);
             return Err(error);
         }
 
@@ -91,6 +91,22 @@ impl Transport for PollingTransport {
 
     fn set_base_url(&self, base_url: String) -> Result<()> {
         *self.base_url.write()? = base_url;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::str::FromStr;
+    #[test]
+    fn polling_transport_base_url() -> Result<()> {
+        let transport =
+            PollingTransport::new(Url::from_str(&"localhost".to_owned()).unwrap(), None, None);
+        assert_eq!(transport.base_url(), "localhost");
+        transport.set_base_url("127.0.0.1".to_owned());
+        assert_eq!(transport.base_url(), "127.0.0.1");
+        assert_ne!(transport.base_url(), "localhost");
         Ok(())
     }
 }
