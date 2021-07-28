@@ -156,6 +156,9 @@ impl EngineSocket {
     where
         F: Fn(()) + 'static + Sync + Send,
     {
+        if self.is_connected()? {
+            return Err(Error::IllegalActionAfterOpen);
+        }
         let mut on_open = self.on_open.write()?;
         *on_open = Some(Box::new(function));
         drop(on_open);
@@ -167,6 +170,9 @@ impl EngineSocket {
     where
         F: Fn(String) + 'static + Sync + Send,
     {
+        if self.is_connected()? {
+            return Err(Error::IllegalActionAfterOpen);
+        }
         let mut on_error = self.on_error.write()?;
         *on_error = Some(Box::new(function));
         drop(on_error);
@@ -178,6 +184,9 @@ impl EngineSocket {
     where
         F: Fn(Packet) + 'static + Sync + Send,
     {
+        if self.is_connected()? {
+            return Err(Error::IllegalActionAfterOpen);
+        }
         let mut on_packet = self.on_packet.write()?;
         *on_packet = Some(Box::new(function));
         drop(on_packet);
@@ -189,6 +198,9 @@ impl EngineSocket {
     where
         F: Fn(Bytes) + 'static + Sync + Send,
     {
+        if self.is_connected()? {
+            return Err(Error::IllegalActionAfterOpen);
+        }
         let mut on_data = self.on_data.write()?;
         *on_data = Some(Box::new(function));
         drop(on_data);
@@ -200,6 +212,9 @@ impl EngineSocket {
     where
         F: Fn(()) + 'static + Sync + Send,
     {
+        if self.is_connected()? {
+            return Err(Error::IllegalActionAfterOpen);
+        }
         let mut on_close = self.on_close.write()?;
         *on_close = Some(Box::new(function));
         drop(on_close);
