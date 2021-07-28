@@ -20,12 +20,13 @@ use std::{
 };
 use websocket::{
     client::sync::Client as WsClient,
+    dataframe::Opcode,
     header::Headers,
+    receiver::Reader,
     sync::stream::{TcpStream, TlsStream},
-    ClientBuilder as WsClientBuilder,
-};
-use websocket::{
-    dataframe::Opcode, receiver::Reader, sync::Writer, ws::dataframe::DataFrame, Message,
+    sync::Writer,
+    ws::dataframe::DataFrame,
+    ClientBuilder as WsClientBuilder, Message,
 };
 
 /// Type of a `Callback` function. (Normal closures can be passed in here).
@@ -125,10 +126,7 @@ impl EngineSocket {
     /// Binds the socket to a certain `address`. Attention! This doesn't allow
     /// to configure callbacks afterwards.
     pub fn bind<T: Into<String>>(&mut self, address: T) -> Result<()> {
-        if self
-            .connected
-            .load(Ordering::Acquire)
-        {
+        if self.connected.load(Ordering::Acquire) {
             return Err(Error::IllegalActionAfterOpen);
         }
         self.open(address.into())?;
@@ -159,6 +157,9 @@ impl EngineSocket {
     where
         F: Fn(()) + 'static + Sync + Send,
     {
+        if self.is_connected()? {
+            return Err(Error::IllegalActionAfterOpen);
+        }
         let mut on_open = self.on_open.write()?;
         *on_open = Some(Box::new(function));
         drop(on_open);
@@ -170,6 +171,9 @@ impl EngineSocket {
     where
         F: Fn(String) + 'static + Sync + Send,
     {
+        if self.is_connected()? {
+            return Err(Error::IllegalActionAfterOpen);
+        }
         let mut on_error = self.on_error.write()?;
         *on_error = Some(Box::new(function));
         drop(on_error);
@@ -181,6 +185,9 @@ impl EngineSocket {
     where
         F: Fn(Packet) + 'static + Sync + Send,
     {
+        if self.is_connected()? {
+            return Err(Error::IllegalActionAfterOpen);
+        }
         let mut on_packet = self.on_packet.write()?;
         *on_packet = Some(Box::new(function));
         drop(on_packet);
@@ -192,6 +199,9 @@ impl EngineSocket {
     where
         F: Fn(Bytes) + 'static + Sync + Send,
     {
+        if self.is_connected()? {
+            return Err(Error::IllegalActionAfterOpen);
+        }
         let mut on_data = self.on_data.write()?;
         *on_data = Some(Box::new(function));
         drop(on_data);
@@ -203,6 +213,9 @@ impl EngineSocket {
     where
         F: Fn(()) + 'static + Sync + Send,
     {
+        if self.is_connected()? {
+            return Err(Error::IllegalActionAfterOpen);
+        }
         let mut on_close = self.on_close.write()?;
         *on_close = Some(Box::new(function));
         drop(on_close);
@@ -335,7 +348,6 @@ impl EngineSocket {
         Err(Error::HandshakeError("Error - invalid url".to_owned()))
     }
 
-    
     /// Converts between `reqwest::HeaderMap` and `websocket::Headers`, if they're currently set, if not
     /// An empty (allocation free) header map is returned.
     fn get_headers_from_header_map(&mut self) -> Headers {
@@ -692,9 +704,7 @@ impl EngineSocket {
 
     // Check if the underlying transport client is connected.
     pub(crate) fn is_connected(&self) -> Result<bool> {
-        Ok(self
-            .connected
-            .load(Ordering::Acquire))
+        Ok(self.connected.load(Ordering::Acquire))
     }
 }
 
@@ -739,7 +749,6 @@ impl Debug for EngineSocket {
     }
 }
 
-
 #[cfg(test)]
 mod test {
 
@@ -778,17 +787,17 @@ mod test {
         assert!(socket.bind(url).is_ok());
 
         assert!(socket
-            .emit(Packet::new(
-                PacketId::Message,
-                Bytes::from_static(b"Hello World"),
-            ), false)
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"Hello World"),),
+                false
+            )
             .is_ok());
 
         assert!(socket
-            .emit(Packet::new(
-                PacketId::Message,
-                Bytes::from_static(b"Hello World2"),
-            ), false)
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"Hello World2"),),
+                false
+            )
             .is_ok());
 
         assert!(socket
@@ -798,10 +807,10 @@ mod test {
         sleep(Duration::from_secs(26));
 
         assert!(socket
-            .emit(Packet::new(
-                PacketId::Message,
-                Bytes::from_static(b"Hello World3"),
-            ), false)
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"Hello World3"),),
+                false
+            )
             .is_ok());
     }
 
@@ -812,7 +821,12 @@ mod test {
         assert!(sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
             .is_err());
-        assert!(sut.emit(Packet::new(PacketId::Message, Bytes::from_static(b"")), true).is_err());
+        assert!(sut
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"")),
+                true
+            )
+            .is_err());
 
         let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
 
@@ -823,13 +837,13 @@ mod test {
         assert!(sut.on_packet(|_| {}).is_err());
         assert!(sut.on_data(|_| {}).is_err());
         assert!(sut.on_error(|_| {}).is_err());
-    
+
         let mut sut = EngineSocket::new(true, None, None);
         assert!(sut.poll_cycle().is_err());
     }
     use reqwest::header::HOST;
 
-    use crate::engineio::packet::{Packet};
+    use crate::engineio::packet::Packet;
 
     use super::*;
     /// The `engine.io` server for testing runs on port 4201

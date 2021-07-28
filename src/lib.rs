@@ -169,7 +169,7 @@ mod test {
         socket.disconnect().unwrap();
         // assert!(socket.disconnect().is_ok());
 
-        sleep(Duration::from_secs(4));
+        sleep(Duration::from_secs(10));
     }
 
     #[test]
