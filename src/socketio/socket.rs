@@ -1,9 +1,7 @@
-
-
+pub use super::{event::Event, payload::Payload};
 use crate::error::Error;
 use native_tls::TlsConnector;
 pub use reqwest::header::{HeaderMap, HeaderValue, IntoHeaderName};
-pub use super::{event::Event, payload::Payload};
 
 use crate::error::Result;
 use std::{time::Duration, vec};
