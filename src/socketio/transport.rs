@@ -211,9 +211,7 @@ impl TransportClient {
                 Some(1),
             )),
             Payload::String(str_data) => {
-                if serde_json::from_str::<serde_json::Value>(&str_data).is_err() {
-                    return Err(Error::InvalidJson(str_data));
-                }
+                serde_json::from_str::<serde_json::Value>(&str_data)?;
 
                 let payload = format!("[\"{}\",{}]", String::from(event), str_data);
 
