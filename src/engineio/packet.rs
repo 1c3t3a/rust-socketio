@@ -2,6 +2,8 @@ extern crate base64;
 use base64::{decode, encode};
 use bytes::{BufMut, Bytes, BytesMut};
 use std::char;
+use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
 
 use crate::error::{Error, Result};
 /// Enumeration of the `engine.io` `Packet` types.
@@ -38,6 +40,24 @@ const fn u8_to_packet_id(b: u8) -> Result<PacketId> {
         '5' => Ok(PacketId::Upgrade),
         '6' => Ok(PacketId::Noop),
         _ => Err(Error::InvalidPacketId(b)),
+    }
+}
+
+/// Data which gets exchanged in a handshake as defined by the server.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct HandshakePacket {
+    pub sid: String,
+    pub upgrades: Vec<String>,
+    #[serde(rename = "pingInterval")]
+    pub ping_interval: u64,
+    #[serde(rename = "pingTimeout")]
+    pub ping_timeout: u64,
+}
+
+impl TryInto<HandshakePacket> for Packet {
+    type Error = Error;
+    fn try_into(self) -> Result<HandshakePacket> {
+        Ok(serde_json::from_slice::<HandshakePacket>(self.data[..].as_ref())?)
     }
 }
 
