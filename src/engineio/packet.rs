@@ -57,7 +57,7 @@ pub struct HandshakePacket {
 impl TryInto<HandshakePacket> for Packet {
     type Error = Error;
     fn try_into(self) -> Result<HandshakePacket> {
-        Ok(serde_json::from_slice::<HandshakePacket>(self.data[..].as_ref())?)
+        Ok(serde_json::from_slice(self.data[..].as_ref())?)
     }
 }
 
