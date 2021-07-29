@@ -27,10 +27,15 @@ then
     openssl req -x509 -new -nodes -key ca.key -subj "/CN=${CA_NAME}/C=??/L=Varius" -out ca.crt
 fi
 
-echo "Generating server key"
-openssl genrsa -out server.key 4096
+if [ ! -f "server.key" ]
+then
+    echo "Generating server key"
+    openssl genrsa -out server.key 4096
+fi
 
-echo """
+if [ ! -f "csr.conf" ]
+then
+    echo """
 [ req ]
 default_bits = 4096
 prompt = no
@@ -54,9 +59,16 @@ DNS.1 = ${DOMAIN}
 DNS.2 = localhost
 IP.1 = ${IP}
 """ > csr.conf
+fi
 
-echo "Generating server signing request"
-openssl req -new -key server.key -out server.csr -config csr.conf
+if [ ! -f "server.csr" ]
+then
+    echo "Generating server signing request"
+    openssl req -new -key server.key -out server.csr -config csr.conf
+fi
 
-echo "Generating signed server certifcicate"
-openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -extfile csr.conf
+if [ ! -f "server.crt" ]
+then
+    echo "Generating signed server certifcicate"
+    openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -extfile csr.conf
+fi
