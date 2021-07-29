@@ -93,9 +93,8 @@ mod test {
     #[test]
     fn wss_transport_base_url() -> Result<()> {
         let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
-        let transport =
-            WebsocketSecureTransport::new(Url::from_str(&url[..]).unwrap(), None, None);
-        assert_eq!(transport.base_url()?, url.clone()+"/?transport=websocket");
+        let transport = WebsocketSecureTransport::new(Url::from_str(&url[..]).unwrap(), None, None);
+        assert_eq!(transport.base_url()?, url.clone() + "/?transport=websocket");
         transport.set_base_url("127.0.0.1".to_owned())?;
         // TODO: Change me to "127.0.0.1/?transport=websocket"
         assert_eq!(transport.base_url()?, "127.0.0.1");
