@@ -84,7 +84,8 @@ impl Transport for WebsocketSecureTransport {
         Ok(())
     }
 }
-
+/*
+//TODO: implement unit tests for base_url and integration via engineio
 #[cfg(test)]
 mod test {
     use super::*;
@@ -102,3 +103,4 @@ mod test {
         Ok(())
     }
 }
+*/
