@@ -149,7 +149,7 @@ impl TransportClient {
         // the packet, encoded as an engine.io message packet
         let engine_packet = EnginePacket::new(EnginePacketId::Message, packet.encode());
 
-        self.engine_socket.lock()?.emit(engine_packet)
+        self.engine_socket.lock()?.emit(engine_packet, false)
     }
 
     /// Sends a single binary attachment to the server. This method
@@ -163,7 +163,7 @@ impl TransportClient {
 
         self.engine_socket
             .lock()?
-            .emit_binary_attachment(attachment)
+            .emit(EnginePacket::new(EnginePacketId::Message, attachment), true)
     }
 
     /// Emits to certain event with given data. The data needs to be JSON,
