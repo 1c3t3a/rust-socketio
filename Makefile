@@ -4,9 +4,11 @@ build:
 	@cargo build --verbose
 
 test-fast:
+	@./ci/keygen.sh node-engine-io-secure 127.0.0.1
 	@cargo test --verbose --package rust_socketio --lib -- engineio::packet && cargo test --verbose --package rust_socketio --lib -- socketio::packet
 
 test-all:
+	@./ci/keygen.sh node-engine-io-secure 127.0.0.1
 	@cargo test --verbose 
 
 clippy:
