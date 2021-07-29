@@ -20,12 +20,13 @@ use std::{
 };
 use websocket::{
     client::sync::Client as WsClient,
+    dataframe::Opcode,
     header::Headers,
+    receiver::Reader,
     sync::stream::{TcpStream, TlsStream},
-    ClientBuilder as WsClientBuilder,
-};
-use websocket::{
-    dataframe::Opcode, receiver::Reader, sync::Writer, ws::dataframe::DataFrame, Message,
+    sync::Writer,
+    ws::dataframe::DataFrame,
+    ClientBuilder as WsClientBuilder, Message,
 };
 
 /// Type of a `Callback` function. (Normal closures can be passed in here).
