@@ -91,7 +91,7 @@ mod test {
     use std::str::FromStr;
     const SERVER_URL: &str = "http://localhost:4201";
     #[test]
-    fn polling_transport_base_url() -> Result<()> {
+    fn wss_transport_base_url() -> Result<()> {
         let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
         let transport =
             WebsocketSecureTransport::new(Url::from_str(&url[..]).unwrap(), None, None);
