@@ -90,10 +90,13 @@ mod test {
     const SERVER_URL: &str = "http://localhost:4201";
     #[test]
     fn ws_transport_base_url() -> Result<()> {
-        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned())+"/engine.io/?EIO=4";
-        let transport =
-            WebsocketTransport::new(Url::from_str(&url.replace("http://","ws://")[..]).unwrap(), None);
-        assert_eq!(transport.base_url()?, url.clone()+"?transport=websocket");
+        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned())
+            + "/engine.io/?EIO=4";
+        let transport = WebsocketTransport::new(
+            Url::from_str(&url.replace("http://", "ws://")[..]).unwrap(),
+            None,
+        );
+        assert_eq!(transport.base_url()?, url.clone() + "?transport=websocket");
         transport.set_base_url("127.0.0.1".to_owned())?;
         // TODO: Change me to "127.0.0.1/?transport=websocket"
         assert_eq!(transport.base_url()?, "127.0.0.1");

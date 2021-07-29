@@ -102,9 +102,9 @@ mod test {
     const SERVER_URL: &str = "http://localhost:4201";
     #[test]
     fn polling_transport_base_url() -> Result<()> {
-        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned())+"/engine.io/?transport=polling";
-        let transport =
-            PollingTransport::new(Url::from_str(&url[..]).unwrap(), None, None);
+        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned())
+            + "/engine.io/?transport=polling";
+        let transport = PollingTransport::new(Url::from_str(&url[..]).unwrap(), None, None);
         assert_eq!(transport.base_url()?, url.clone());
         transport.set_base_url("127.0.0.1".to_owned())?;
         // TODO: Change me to "127.0.0.1/?transport=polling"
