@@ -88,6 +88,7 @@ mod tests {
     /// This just tests the own implementations and relies on `thiserror` for the others.
     #[test]
     fn test_error_conversion() {
+        //TODO: create the errors and test all type conversions
         let mutex = Mutex::new(0);
         let _poison_error = Error::from(PoisonError::new(mutex.lock()));
         assert!(matches!(Error::InvalidPoisonedLock(), _poison_error));
