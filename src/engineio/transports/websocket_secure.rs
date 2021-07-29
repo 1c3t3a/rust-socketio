@@ -1,5 +1,5 @@
 use crate::engineio::packet::PacketId;
-use crate::engineio::transport_new::Transport;
+use crate::engineio::transport::Transport;
 use crate::error::Result;
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
