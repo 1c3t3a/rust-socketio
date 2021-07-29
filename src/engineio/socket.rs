@@ -1,7 +1,7 @@
 #![allow(unused)]
 use std::{ops::Deref, thread};
 
-use crate::engineio::packet::{decode_payload, encode_payload, Packet, PacketId};
+use crate::engineio::packet::{Packet, PacketId, Payload};
 use crate::error::{Error, Result};
 use adler32::adler32;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -28,6 +28,8 @@ use websocket::{
     ws::dataframe::DataFrame,
     ClientBuilder as WsClientBuilder, Message,
 };
+use std::convert::TryInto;
+use std::convert::TryFrom;
 
 /// Type of a `Callback` function. (Normal closures can be passed in here).
 type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
@@ -456,10 +458,10 @@ impl EngineSocket {
 
         // send a post request with the encoded payload as body
         // if this is a binary attachment, then send the raw bytes
-        let data = if is_binary_att {
+        let data: Bytes = if is_binary_att {
             packet.data
         } else {
-            encode_payload(vec![packet])
+            packet.into()
         };
 
         match &self.transport.as_ref() {
@@ -605,9 +607,9 @@ impl EngineSocket {
                 return Ok(());
             }
 
-            let packets = decode_payload(data)?;
+            let packets = Payload::try_from(data)?;
 
-            for packet in packets {
+            for packet in packets.as_vec() {
                 {
                     let on_packet = self.on_packet.read()?;
                     // call the packet callback
@@ -621,7 +623,7 @@ impl EngineSocket {
                     PacketId::Message => {
                         let on_data = self.on_data.read()?;
                         if let Some(function) = on_data.as_ref() {
-                            spawn_scoped!(function(packet.data));
+                            spawn_scoped!(function(packet.data.clone()));
                         }
                         drop(on_data);
                     }
@@ -651,6 +653,10 @@ impl EngineSocket {
                         unreachable!();
                     }
                     PacketId::Noop => (),
+                    PacketId::Base64 => {
+                        // Has no id, not possible to decode.
+                        unreachable!();
+                    }
                 }
             }
 
