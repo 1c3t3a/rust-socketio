@@ -4,3 +4,5 @@ Cargo.lock
 .idea
 ci/node_modules
 ci/package-lock.json
+ci/cert
+
