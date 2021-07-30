@@ -7,7 +7,7 @@ There are three different pipelines:
      If you'd like to trigger this manually, run `make checks` in the project root.
   *  Build and test: Builds the code and kicks of a docker container containing the socket.io and engine.io servers. Then the tests run against the servers. The servers code should not be changed as the clients' tests assume certain events to fire e.g. an ack gets acked or a certain namespace exists. Two servers are started:
       * An engine.io server with some callbacks that send normal string data.
-      * A _safe_ engine.io server with some callbacks that send normal string data. Safe means the server is built upon a tls certificate which can be found in the `cert/` folder. This server is used for tests using `wss://` and `https://`.
+      * A _safe_ engine.io server with some callbacks that send normal string data. Generate keys for TLS with `./ci/keygen.sh localhost 127.0.0.1`. This server is used for tests using `wss://` and `https://`.
       * A socket.io server which sends string and binary data, handles acks, etc.
   * Generate coverage: This action acts like the `Build and test` action, but generates a coverage report as well. Afterward the coverage report is uploaded to codecov.io.
     This action also collects the docker server logs and uploads them as an artifact.
