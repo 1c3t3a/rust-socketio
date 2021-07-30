@@ -44,6 +44,7 @@ pub enum Error {
     #[error("Did not receive an ack for id: {0}")]
     MissingAck(i32),
     #[error("An illegal action (such as setting a callback after being connected) was triggered")]
+    //TODO: make these impossible by using builders and immutable data.
     IllegalActionAfterOpen(),
     #[error("Specified namespace {0} is not valid")]
     IllegalNamespace(String),
