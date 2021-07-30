@@ -29,20 +29,24 @@ impl From<PacketId> for String {
     }
 }
 
-/// Converts a byte into the corresponding `PacketId`.
-#[inline]
-const fn u8_to_packet_id(b: u8) -> Result<PacketId> {
-    match b as char {
-        '0' => Ok(PacketId::Open),
-        '1' => Ok(PacketId::Close),
-        '2' => Ok(PacketId::Ping),
-        '3' => Ok(PacketId::Pong),
-        '4' => Ok(PacketId::Message),
-        '5' => Ok(PacketId::Upgrade),
-        '6' => Ok(PacketId::Noop),
-        _ => Err(Error::InvalidPacketId(b)),
+impl TryFrom<u8> for PacketId {
+    type Error = Error;
+    /// Converts a byte into the corresponding `PacketId`.
+    fn try_from(b: u8) -> Result<PacketId> {
+        
+        match b as char {
+            '0' => Ok(PacketId::Open),
+            '1' => Ok(PacketId::Close),
+            '2' => Ok(PacketId::Ping),
+            '3' => Ok(PacketId::Pong),
+            '4' => Ok(PacketId::Message),
+            '5' => Ok(PacketId::Upgrade),
+            '6' => Ok(PacketId::Noop),
+            _ => Err(Error::InvalidPacketId(b)),
+        }
     }
 }
+
 
 /// Data which gets exchanged in a handshake as defined by the server.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -95,7 +99,7 @@ impl TryFrom<Bytes> for Packet {
         let packet_id = if is_base64 {
             PacketId::Message
         } else {
-            u8_to_packet_id(*bytes.get(0).ok_or(Error::IncompletePacket())?)?
+            (*bytes.get(0).ok_or(Error::IncompletePacket())? as u8).try_into()?
         };
 
         if bytes.len() == 1 && packet_id == PacketId::Message {
@@ -212,14 +216,12 @@ mod tests {
     fn test_binary_packet() {
         // SGVsbG8= is the encoded string for 'Hello'
         let data = Bytes::from_static(b"bSGVsbG8=");
-        let packet = Packet::try_from(data).unwrap();
+        let packet = Packet::try_from(data.clone()).unwrap();
 
         assert_eq!(packet.packet_id, PacketId::Message);
         assert_eq!(packet.data, Bytes::from_static(b"Hello"));
 
-        let data = Bytes::from_static(b"bSGVsbG8=");
-        packet.packet_id = PacketId::Base64;
-        assert_eq!(Packet::from(packet), data);
+        assert_eq!(Bytes::from(packet), data);
     }
 
     #[test]
@@ -262,35 +264,35 @@ mod tests {
         let _sut = sut.unwrap_err();
         assert!(matches!(Error::IncompletePacket, _sut));
 
-        let sut = u8_to_packet_id(b'0');
+        let sut = PacketId::try_from(b'0');
         assert!(sut.is_ok());
         assert_eq!(sut.unwrap(), PacketId::Open);
 
-        let sut = u8_to_packet_id(b'1');
+        let sut = PacketId::try_from(b'1');
         assert!(sut.is_ok());
         assert_eq!(sut.unwrap(), PacketId::Close);
 
-        let sut = u8_to_packet_id(b'2');
+        let sut = PacketId::try_from(b'2');
         assert!(sut.is_ok());
         assert_eq!(sut.unwrap(), PacketId::Ping);
 
-        let sut = u8_to_packet_id(b'3');
+        let sut = PacketId::try_from(b'3');
         assert!(sut.is_ok());
         assert_eq!(sut.unwrap(), PacketId::Pong);
 
-        let sut = u8_to_packet_id(b'4');
+        let sut = PacketId::try_from(b'4');
         assert!(sut.is_ok());
         assert_eq!(sut.unwrap(), PacketId::Message);
 
-        let sut = u8_to_packet_id(b'5');
+        let sut = PacketId::try_from(b'5');
         assert!(sut.is_ok());
         assert_eq!(sut.unwrap(), PacketId::Upgrade);
 
-        let sut = u8_to_packet_id(b'6');
+        let sut = PacketId::try_from(b'6');
         assert!(sut.is_ok());
         assert_eq!(sut.unwrap(), PacketId::Noop);
 
-        let sut = u8_to_packet_id(42);
+        let sut = PacketId::try_from(42);
         assert!(sut.is_err());
         assert!(matches!(sut.unwrap_err(), Error::InvalidPacketId(42)));
     }
