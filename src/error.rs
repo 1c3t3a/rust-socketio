@@ -6,6 +6,7 @@ use std::num::ParseIntError;
 use std::str::Utf8Error;
 use thiserror::Error;
 use websocket::{client::ParseError, WebSocketError};
+use url::ParseError as UrlParseError;
 
 /// Enumeration of all possible errors in the `socket.io` context.
 #[derive(Error, Debug)]
@@ -28,6 +29,8 @@ pub enum Error {
     InvalidBase64(#[from] DecodeError),
     #[error("Invalid Url: {0}")]
     InvalidUrl(String),
+    #[error("Invalid Url during parsing")]
+    InvalidUrlDuringParsing(#[from] UrlParseError),
     #[error("Error during connection via http: {0}")]
     IncompleteResponseFromReqwest(#[from] ReqwestError),
     #[error("Network request returned with status code: {0}")]
