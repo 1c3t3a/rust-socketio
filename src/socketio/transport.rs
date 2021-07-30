@@ -551,12 +551,9 @@ mod test {
     use std::time::Duration;
 
     use super::*;
-    /// The socket.io server for testing runs on port 4200
-    const SERVER_URL: &str = "http://localhost:4200";
-
     #[test]
-    fn it_works() {
-        let url = std::env::var("SOCKET_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+    fn it_works() -> Result<()> {
+        let url = crate::socketio::test::socket_io_server()?;
 
         let mut socket = TransportClient::new(url, None, None, None);
 
@@ -595,6 +592,7 @@ mod test {
                 ack_callback
             )
             .is_ok());
+        Ok(())
     }
 
     #[test]
