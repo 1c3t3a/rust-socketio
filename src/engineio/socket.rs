@@ -9,8 +9,8 @@ use native_tls::TlsConnector;
 use reqwest::{
     blocking::{Client, ClientBuilder},
     header::HeaderMap,
-    Url,
 };
+use url::Url;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, time::SystemTime};
 use std::{fmt::Debug, sync::atomic::Ordering};
@@ -759,10 +759,8 @@ mod test {
 
     use super::*;
 
-    const SERVER_URL: &str = "http://localhost:4201";
-
     #[test]
-    fn test_basic_connection() {
+    fn test_basic_connection() -> Result<()> {
         let mut socket = EngineSocket::new(true, None, None);
 
         assert!(socket
@@ -783,7 +781,7 @@ mod test {
             })
             .is_ok());
 
-        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+        let url = crate::engineio::test::engine_io_server()?;
 
         assert!(socket.bind(url).is_ok());
 
@@ -813,10 +811,11 @@ mod test {
                 false
             )
             .is_ok());
+        Ok(())
     }
 
     #[test]
-    fn test_illegal_actions() {
+    fn test_illegal_actions() -> Result<()> {
         let mut sut = EngineSocket::new(true, None, None);
 
         assert!(sut
@@ -829,7 +828,7 @@ mod test {
             )
             .is_err());
 
-        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+            let url = crate::engineio::test::engine_io_server()?;
 
         assert!(sut.bind(url).is_ok());
 
@@ -841,20 +840,18 @@ mod test {
 
         let mut sut = EngineSocket::new(true, None, None);
         assert!(sut.poll_cycle().is_err());
+        Ok(())
     }
     use reqwest::header::HOST;
 
     use crate::engineio::packet::Packet;
 
     use super::*;
-    /// The `engine.io` server for testing runs on port 4201
-    const SERVER_URL_SECURE: &str = "https://localhost:4202";
-
     #[test]
-    fn test_connection_polling() {
+    fn test_connection_polling() -> Result<()> {
         let mut socket = EngineSocket::new(true, None, None);
 
-        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+        let url = crate::engineio::test::engine_io_server()?;
 
         socket.open(url).unwrap();
 
@@ -888,10 +885,12 @@ mod test {
             .is_ok());
 
         assert!(socket.poll_cycle().is_ok());
+
+        Ok(())
     }
 
     #[test]
-    fn test_connection_secure_ws_http() {
+    fn test_connection_secure_ws_http() -> Result<()> {
         let host =
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
 
@@ -908,8 +907,7 @@ mod test {
             Some(headers),
         );
 
-        let url = std::env::var("ENGINE_IO_SECURE_SERVER")
-            .unwrap_or_else(|_| SERVER_URL_SECURE.to_owned());
+        let url = crate::engineio::test::engine_io_server_secure()?;
 
         socket.open(url).unwrap();
 
@@ -943,6 +941,8 @@ mod test {
             .is_ok());
 
         assert!(socket.poll_cycle().is_ok());
+
+        Ok(())
     }
 
     #[test]
