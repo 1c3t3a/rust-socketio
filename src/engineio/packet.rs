@@ -1,4 +1,5 @@
 extern crate base64;
+use std::ops::Index;
 use base64::{decode, encode};
 use bytes::{BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
@@ -133,20 +134,18 @@ impl From<Packet> for Bytes {
     }
 }
 
-pub struct Payload {
-    packets: Vec<Packet>,
-}
+pub struct Payload(Vec<Packet>);
 
 impl Payload {
     // see https://en.wikipedia.org/wiki/Delimiter#ASCII_delimited_text
     const SEPARATOR: char = '\x1e';
 
     pub fn new(packets: Vec<Packet>) -> Self {
-        Payload { packets }
+        Payload(packets)
     }
 
-    pub fn as_vec(&self) -> &Vec<Packet> {
-        &self.packets
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
@@ -167,7 +166,7 @@ impl TryFrom<Bytes> for Payload {
         // push the last packet as well
         vec.push(Packet::try_from(payload.slice(last_index..payload.len()))?);
 
-        Ok(Payload { packets: vec })
+        Ok(Payload(vec))
     }
 }
 
@@ -178,7 +177,7 @@ impl TryFrom<Payload> for Bytes {
     /// `\x30`.
     fn try_from(packets: Payload) -> Result<Self> {
         let mut buf = BytesMut::new();
-        for packet in packets.as_vec() {
+        for packet in packets {
             // at the moment no base64 encoding is used
             buf.extend(Bytes::from(packet.clone()));
             buf.put_u8(Payload::SEPARATOR as u8);
@@ -187,6 +186,22 @@ impl TryFrom<Payload> for Bytes {
         // remove the last separator
         let _ = buf.split_off(buf.len() - 1);
         Ok(buf.freeze())
+    }
+}
+
+// This exposes a vec specific type (IntoIter)
+impl IntoIterator for Payload {
+    type Item = Packet;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+    fn into_iter(self) -> <Self as std::iter::IntoIterator>::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl Index<usize> for Payload {
+    type Output = Packet;
+    fn index(&self, index: usize) -> &Packet {
+        &self.0[index]
     }
 }
 
@@ -229,10 +244,10 @@ mod tests {
         let data = Bytes::from_static(b"1Hello\x1e1HelloWorld");
         let packets = Payload::try_from(data)?;
 
-        assert_eq!(packets.as_vec()[0].packet_id, PacketId::Close);
-        assert_eq!(packets.as_vec()[0].data, Bytes::from_static(b"Hello"));
-        assert_eq!(packets.as_vec()[1].packet_id, PacketId::Close);
-        assert_eq!(packets.as_vec()[1].data, Bytes::from_static(b"HelloWorld"));
+        assert_eq!(packets[0].packet_id, PacketId::Close);
+        assert_eq!(packets[0].data, Bytes::from_static(b"Hello"));
+        assert_eq!(packets[1].packet_id, PacketId::Close);
+        assert_eq!(packets[1].data, Bytes::from_static(b"HelloWorld"));
 
         let data = "1Hello\x1e1HelloWorld".to_owned().into_bytes();
         assert_eq!(Bytes::try_from(packets).unwrap(), data);
@@ -245,13 +260,13 @@ mod tests {
         let data = Bytes::from_static(b"bSGVsbG8=\x1ebSGVsbG9Xb3JsZA==\x1ebSGVsbG8=");
         let packets = Payload::try_from(data).unwrap();
 
-        assert!(packets.as_vec().len() == 3);
-        assert_eq!(packets.as_vec()[0].packet_id, PacketId::Message);
-        assert_eq!(packets.as_vec()[0].data, Bytes::from_static(b"Hello"));
-        assert_eq!(packets.as_vec()[1].packet_id, PacketId::Message);
-        assert_eq!(packets.as_vec()[1].data, Bytes::from_static(b"HelloWorld"));
-        assert_eq!(packets.as_vec()[2].packet_id, PacketId::Message);
-        assert_eq!(packets.as_vec()[2].data, Bytes::from_static(b"Hello"));
+        assert!(packets.len() == 3);
+        assert_eq!(packets[0].packet_id, PacketId::Message);
+        assert_eq!(packets[0].data, Bytes::from_static(b"Hello"));
+        assert_eq!(packets[1].packet_id, PacketId::Message);
+        assert_eq!(packets[1].data, Bytes::from_static(b"HelloWorld"));
+        assert_eq!(packets[2].packet_id, PacketId::Message);
+        assert_eq!(packets[2].data, Bytes::from_static(b"Hello"));
 
         let data = Bytes::from_static(b"4Hello\x1e4HelloWorld\x1e4Hello");
         assert_eq!(Bytes::try_from(packets).unwrap(), data);
