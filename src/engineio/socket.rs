@@ -609,7 +609,7 @@ impl EngineSocket {
 
             let packets = Payload::try_from(data)?;
 
-            for packet in packets.as_vec() {
+            for packet in packets {
                 {
                     let on_packet = self.on_packet.read()?;
                     // call the packet callback
@@ -623,7 +623,7 @@ impl EngineSocket {
                     PacketId::Message => {
                         let on_data = self.on_data.read()?;
                         if let Some(function) = on_data.as_ref() {
-                            spawn_scoped!(function(packet.data.clone()));
+                            spawn_scoped!(function(packet.data));
                         }
                         drop(on_data);
                     }
