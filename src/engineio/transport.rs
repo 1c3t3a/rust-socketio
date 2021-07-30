@@ -1,3 +1,5 @@
+use std::fmt::Formatter;
+use std::fmt::Debug;
 use crate::error::Result;
 use adler32::adler32;
 use bytes::{Buf, Bytes};
@@ -49,5 +51,15 @@ impl Write for dyn Transport {
     fn flush(&mut self) -> std::result::Result<(), std::io::Error> {
         // We are always flushed.
         Ok(())
+    }
+}
+
+impl Debug for dyn Transport {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!(
+            "Transport(base_url: {:?}, address: {:?})",
+            self.base_url(),
+            self.address()
+        ))
     }
 }

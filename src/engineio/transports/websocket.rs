@@ -1,6 +1,7 @@
+use crate::engineio::packet::Packet;
 use crate::engineio::packet::PacketId;
 use crate::engineio::transport::Transport;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use bytes::{BufMut, Bytes, BytesMut};
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex, RwLock};
@@ -18,13 +19,14 @@ pub(crate) struct WebsocketTransport {
 impl WebsocketTransport {
     /// Creates an instance of `TransportClient`.
     pub fn new(base_url: Url, headers: Option<Headers>) -> Self {
-        let url = base_url
+        let mut url = base_url
             .clone()
             .query_pairs_mut()
             .append_pair("transport", "websocket")
             .finish()
             .clone();
-        let mut client_bulider = WsClientBuilder::new(base_url[..].as_ref()).unwrap();
+            url.set_scheme("ws").unwrap();
+        let mut client_bulider = WsClientBuilder::new(url[..].as_ref()).unwrap();
         if let Some(headers) = headers {
             client_bulider = client_bulider.custom_headers(&headers);
         }
@@ -39,6 +41,34 @@ impl WebsocketTransport {
             receiver: Arc::new(Mutex::new(receiver)),
             base_url: Arc::new(RwLock::new(url.to_string())),
         }
+    }
+
+    /// Sends probe packet to ensure connection is valid, then sends upgrade
+    /// request
+    pub(crate) fn upgrade(&self) -> Result<()> {
+        let mut sender = self.sender.lock()?;
+        let mut receiver = self.receiver.lock()?;
+
+        // send the probe packet, the text `2probe` represents a ping packet with
+        // the content `probe`
+        sender.send_message(&Message::binary(Cow::Borrowed(
+            Packet::new(PacketId::Ping, Bytes::from("probe")).encode_packet().as_ref(),
+        )))?;
+
+        // expect to receive a probe packet
+        let message = receiver.recv_message()?;
+        if message.take_payload() != Packet::new(PacketId::Pong, Bytes::from("probe")).encode_packet()
+        {
+            return Err(Error::InvalidPacket);
+        }
+
+        // finally send the upgrade request. the payload `5` stands for an upgrade
+        // packet without any payload
+        sender.send_message(&Message::binary(Cow::Borrowed(
+            Packet::new(PacketId::Upgrade, Bytes::from("")).encode_packet().as_ref(),
+        )))?;
+
+        Ok(())
     }
 }
 

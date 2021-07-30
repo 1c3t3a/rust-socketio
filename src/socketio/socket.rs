@@ -198,12 +198,13 @@ impl SocketBuilder {
     /// assert!(result.is_ok());
     /// ```
     pub fn connect(self) -> Result<Socket> {
+        //TODO: Add check for empty path and set to /socket.io/
         let mut socket = Socket::new(
             self.address,
             self.namespace,
             self.tls_config,
             self.opening_headers,
-        );
+        )?;
         if let Some(callbacks) = self.on {
             for (event, callback) in callbacks {
                 socket.on(event, Box::new(callback)).unwrap();
@@ -224,10 +225,10 @@ impl Socket {
         namespace: Option<String>,
         tls_config: Option<TlsConnector>,
         opening_headers: Option<HeaderMap>,
-    ) -> Self {
-        Socket {
-            transport: TransportClient::new(address, namespace, tls_config, opening_headers),
-        }
+    ) -> Result<Self> {
+        Ok(Socket {
+            transport: TransportClient::new(address, namespace, tls_config, opening_headers)?,
+        })
     }
 
     /// Registers a new callback for a certain event. This returns an
