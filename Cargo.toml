@@ -26,4 +26,4 @@ thiserror = "1.0"
 native-tls = "0.2.7"
 
 [dev-dependencies]
-cargo-tarpaulin = "0.18.0"
+cargo-tarpaulin = "0.18.0-alpha3"
