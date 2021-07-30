@@ -3,7 +3,7 @@ cd $(dirname $0)
 
 if [ "$1" = "" ] || [ "$2" = "" ]
 then
-    echo "Usage: keygen.sh [DOMIAN] [IP]"
+    echo "Usage: keygen.sh [DOMAIN] [IP]"
     exit 1
 fi
 

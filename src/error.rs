@@ -29,7 +29,7 @@ pub enum Error {
     #[error("Invalid Url: {0}")]
     InvalidUrl(String),
     #[error("Error during connection via http: {0}")]
-    IncompleteResponceFromReqwest(#[from] ReqwestError),
+    IncompleteResponseFromReqwest(#[from] ReqwestError),
     #[error("Network request returned with status code: {0}")]
     IncompleteHttp(u16),
     #[error("Got illegal handshake response: {0}")]
@@ -47,11 +47,11 @@ pub enum Error {
     #[error("A lock was poisoned")]
     InvalidPoisonedLock(),
     #[error("Got a websocket error: {0}")]
-    IncompleteResponceFromWebsocket(#[from] WebSocketError),
+    IncompleteResponseFromWebsocket(#[from] WebSocketError),
     #[error("Error while parsing the url for the websocket connection: {0}")]
     InvalidWebsocketURL(#[from] ParseError),
     #[error("Got an IO-Error: {0}")]
-    IcompleteIo(#[from] IoError),
+    IncompleteIo(#[from] IoError),
     #[error("The socket is closed")]
     IllegalActionAfterClose(),
     #[error("Error while parsing an integer")]
