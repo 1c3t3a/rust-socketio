@@ -22,7 +22,8 @@
         "bungcip.better-toml",
         "vadimcn.vscode-lldb",
         "mutantdino.resourcemonitor",
-        "eamodio.gitlens"
+        "eamodio.gitlens",
+        "streetsidesoftware.code-spell-checker"
     ],
 
     // Use 'forwardPorts' to make a list of ports inside the container available locally.
