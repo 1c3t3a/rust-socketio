@@ -51,7 +51,7 @@ pub enum Error {
     #[error("Error while parsing the url for the websocket connection: {0}")]
     InvalidWebsocketURL(#[from] ParseError),
     #[error("Got an IO-Error: {0}")]
-    IcompleteIo(#[from] IoError),
+    IncompleteIo(#[from] IoError),
     #[error("The socket is closed")]
     IllegalActionAfterClose(),
     #[error("Error while parsing an integer")]
