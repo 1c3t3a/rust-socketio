@@ -1,8 +1,8 @@
 on:
   push:
-    branches: [main]
+    branches: [main, refactoring]
   pull_request:
-    branches: [main]
+    branches: [main, refactoring]
 
 name: generate coverage
 
