@@ -121,12 +121,12 @@ impl Packet {
     /// send in another packet.
     pub fn decode_bytes<'a>(payload: &'a Bytes) -> Result<Self> {
         let mut i = 0;
-        let packet_id = u8_to_packet_id(*payload.first().ok_or(Error::EmptyPacket)?)?;
+        let packet_id = u8_to_packet_id(*payload.first().ok_or(Error::EmptyPacket())?)?;
 
         let attachments = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
             let start = i + 1;
 
-            while payload.get(i).ok_or(Error::IncompletePacket)? != &b'-' && i < payload.len() {
+            while payload.get(i).ok_or(Error::IncompletePacket())? != &b'-' && i < payload.len() {
                 i += 1;
             }
             Some(
@@ -142,15 +142,15 @@ impl Packet {
             None
         };
 
-        let nsp: &'a str = if payload.get(i + 1).ok_or(Error::IncompletePacket)? == &b'/' {
+        let nsp: &'a str = if payload.get(i + 1).ok_or(Error::IncompletePacket())? == &b'/' {
             let mut start = i + 1;
-            while payload.get(i).ok_or(Error::IncompletePacket)? != &b',' && i < payload.len() {
+            while payload.get(i).ok_or(Error::IncompletePacket())? != &b',' && i < payload.len() {
                 i += 1;
             }
             let len = i - start;
             payload
                 .read_with(&mut start, Str::Len(len))
-                .map_err(|_| Error::IncompletePacket)?
+                .map_err(|_| Error::IncompletePacket())?
         } else {
             "/"
         };
@@ -159,7 +159,7 @@ impl Packet {
         let id = if (*next as char).is_digit(10) && i < payload.len() {
             let start = i + 1;
             i += 1;
-            while (*payload.get(i).ok_or(Error::IncompletePacket)? as char).is_digit(10)
+            while (*payload.get(i).ok_or(Error::IncompletePacket())? as char).is_digit(10)
                 && i < payload.len()
             {
                 i += 1;

@@ -24,3 +24,6 @@ byte = "0.2.4"
 websocket = "0.26.2"
 thiserror = "1.0"
 native-tls = "0.2.7"
+
+[dev-dependencies]
+cargo-tarpaulin = "0.18.0-alpha3"

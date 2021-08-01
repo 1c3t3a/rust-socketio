@@ -119,7 +119,7 @@ impl TransportClient {
     /// in the underlying engine.io transport to get closed as well.
     pub fn disconnect(&mut self) -> Result<()> {
         if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
-            return Err(Error::IllegalActionAfterOpen);
+            return Err(Error::IllegalActionAfterOpen());
         }
 
         let disconnect_packet = SocketPacket::new(
@@ -143,7 +143,7 @@ impl TransportClient {
     /// Sends a `socket.io` packet to the server using the `engine.io` client.
     pub fn send(&self, packet: &SocketPacket) -> Result<()> {
         if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
-            return Err(Error::IllegalActionAfterOpen);
+            return Err(Error::IllegalActionAfterOpen());
         }
 
         // the packet, encoded as an engine.io message packet
@@ -158,7 +158,7 @@ impl TransportClient {
     /// `attachments` field.
     fn send_binary_attachment(&self, attachment: Bytes) -> Result<()> {
         if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
-            return Err(Error::ActionBeforeOpen);
+            return Err(Error::IllegalActionBeforeOpen());
         }
 
         self.engine_socket
