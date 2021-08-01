@@ -19,7 +19,9 @@ services:
         ports:
             - "4200:4200"
     rust-client:
-        image: mcr.microsoft.com/vscode/devcontainers/rust:0-1
+        build: 
+            context: .. 
+            dockerfile: ./.devcontainer/Dockerfile
         command: /bin/sh -c "while sleep 10000d; do :; done"
         volumes: 
             - "..:/workspace/rust-socketio"
