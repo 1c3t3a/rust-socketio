@@ -141,7 +141,7 @@ impl EngineSocket {
             loop {
                 match s.poll_cycle() {
                     Ok(_) => break,
-                    e @ Err(Error::IncompleteHttp(_)) | e @ Err(Error::IncompleteResponceFromReqwest(_)) => {
+                    e @ Err(Error::IncompleteHttp(_)) | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
                         panic!("{}", e.unwrap_err())
                     }
                     _ => (),

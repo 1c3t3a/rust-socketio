@@ -74,7 +74,7 @@ impl Transport for PollingTransport {
         drop(client);
 
         if status != 200 {
-            let error = Error::HttpError(status);
+            let error = Error::IncompleteHttp(status);
             return Err(error);
         }
 
