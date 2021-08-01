@@ -80,12 +80,6 @@ impl From<Error> for std::io::Error {
     }
 }
 
-impl From<Error> for std::io::Error {
-    fn from(err: Error) -> std::io::Error {
-        std::io::Error::new(std::io::ErrorKind::Other, err)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::{Mutex, PoisonError};
