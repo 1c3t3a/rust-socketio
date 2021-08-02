@@ -10,7 +10,6 @@ use reqwest::{
     blocking::{Client, ClientBuilder},
     header::HeaderMap,
 };
-use url::Url;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, time::SystemTime};
 use std::{fmt::Debug, sync::atomic::Ordering};
@@ -18,6 +17,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
+use url::Url;
 use websocket::{
     client::sync::Client as WsClient,
     dataframe::Opcode,
@@ -828,7 +828,7 @@ mod test {
             )
             .is_err());
 
-            let url = crate::engineio::test::engine_io_server()?;
+        let url = crate::engineio::test::engine_io_server()?;
 
         assert!(sut.bind(url).is_ok());
 
