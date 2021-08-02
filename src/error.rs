@@ -5,8 +5,8 @@ use std::io::Error as IoError;
 use std::num::ParseIntError;
 use std::str::Utf8Error;
 use thiserror::Error;
-use websocket::{client::ParseError, WebSocketError};
 use url::ParseError as UrlParseError;
+use websocket::{client::ParseError, WebSocketError};
 
 /// Enumeration of all possible errors in the `socket.io` context.
 #[derive(Error, Debug)]
