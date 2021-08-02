@@ -677,7 +677,7 @@ impl EngineSocket {
     fn get_query_path(&self) -> Result<String> {
         // build the base path
         let mut path = format!(
-            "/{}/?EIO=4&transport={}&t={}",
+            "{}/?EIO=4&transport={}&t={}",
             if self.engine_io_mode.load(Ordering::Relaxed) {
                 "engine.io"
             } else {
@@ -883,6 +883,8 @@ mod test {
                 true
             )
             .is_ok());
+
+        //assert!(socket.emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false).is_ok());
 
         assert!(socket.poll_cycle().is_ok());
 
