@@ -955,7 +955,7 @@ mod test {
             thread::sleep(Duration::from_secs(5));
             sut.close();
         });
-    
+
         assert!(socket.poll_cycle().is_ok());
 
         Ok(())
