@@ -368,11 +368,11 @@ mod test {
     use std::thread::sleep;
 
     use super::*;
+    use crate::socketio::payload::Payload;
     use bytes::Bytes;
     use native_tls::TlsConnector;
     use reqwest::header::{ACCEPT_ENCODING, HOST};
     use serde_json::json;
-    use crate::socketio::payload::Payload;
     use std::time::Duration;
 
     #[test]
