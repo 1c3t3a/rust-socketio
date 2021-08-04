@@ -381,7 +381,7 @@ mod test {
     fn socket_io_integration() -> Result<()> {
         let url = crate::socketio::test::socket_io_server()?;
 
-        let mut socket = Socket::new(url, None, None, None);
+        let mut socket = Socket::new(url, None, None, None)?;
 
         let result = socket.on(
             "test".into(),
