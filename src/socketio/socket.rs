@@ -49,7 +49,8 @@ impl SocketBuilder {
     ///            }
     /// };
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    //TODO: Remove trailing slash when URL parsing is properly handled.
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("test", callback)
@@ -98,7 +99,7 @@ impl SocketBuilder {
     ///            }
     /// };
     ///
-    /// let socket = SocketBuilder::new("http://localhost:4200")
+    /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("test", callback)
@@ -129,7 +130,7 @@ impl SocketBuilder {
     ///            .build()
     ///            .expect("Found illegal configuration");
     ///
-    /// let socket = SocketBuilder::new("http://localhost:4200")
+    /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
@@ -151,7 +152,7 @@ impl SocketBuilder {
     /// use reqwest::header::{ACCEPT_ENCODING};
     ///
     ///
-    /// let socket = SocketBuilder::new("http://localhost:4200")
+    /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
@@ -182,7 +183,7 @@ impl SocketBuilder {
     /// use serde_json::json;
     ///
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("error", |err, _| eprintln!("Socket error!: {:#?}", err))
@@ -257,7 +258,7 @@ impl Socket {
     /// use rust_socketio::{SocketBuilder, Payload};
     /// use serde_json::json;
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .on("test", |payload: Payload, mut socket| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
@@ -287,7 +288,7 @@ impl Socket {
     /// use rust_socketio::{SocketBuilder, Payload};
     /// use serde_json::json;
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .on("test", |payload: Payload, mut socket| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
@@ -325,7 +326,7 @@ impl Socket {
     /// use std::time::Duration;
     /// use std::thread::sleep;
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
     ///     .connect()
     ///     .expect("connection failed");
@@ -359,5 +360,120 @@ impl Socket {
     {
         self.transport
             .emit_with_ack(event.into(), data.into(), timeout, callback)
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use std::thread::sleep;
+
+    use super::*;
+    use crate::socketio::payload::Payload;
+    use bytes::Bytes;
+    use native_tls::TlsConnector;
+    use reqwest::header::{ACCEPT_ENCODING, HOST};
+    use serde_json::json;
+    use std::time::Duration;
+
+    #[test]
+    fn socket_io_integration() -> Result<()> {
+        let url = crate::socketio::test::socket_io_server()?;
+
+        let mut socket = Socket::new(url, None, None, None);
+
+        let result = socket.on(
+            "test".into(),
+            Box::new(|msg, _| match msg {
+                Payload::String(str) => println!("Received string: {}", str),
+                Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
+            }),
+        );
+        assert!(result.is_ok());
+
+        let result = socket.connect();
+        assert!(result.is_ok());
+
+        let payload = json!({"token": 123});
+        let result = socket.emit("test", Payload::String(payload.to_string()));
+
+        assert!(result.is_ok());
+
+        let ack_callback = move |message: Payload, mut socket_: Socket| {
+            let result = socket_.emit(
+                "test",
+                Payload::String(json!({"got ack": true}).to_string()),
+            );
+            assert!(result.is_ok());
+
+            println!("Yehaa! My ack got acked?");
+            if let Payload::String(str) = message {
+                println!("Received string Ack");
+                println!("Ack data: {}", str);
+            }
+        };
+
+        let ack = socket.emit_with_ack(
+            "test",
+            Payload::String(payload.to_string()),
+            Duration::from_secs(2),
+            ack_callback,
+        );
+        assert!(ack.is_ok());
+
+        socket.disconnect().unwrap();
+        // assert!(socket.disconnect().is_ok());
+
+        sleep(Duration::from_secs(10));
+
+        Ok(())
+    }
+
+    #[test]
+    fn socket_io_builder_integration() -> Result<()> {
+        let url = crate::socketio::test::socket_io_server()?;
+
+        // expect an illegal namespace
+        assert!(SocketBuilder::new(url.clone())
+            .set_namespace("illegal")
+            .is_err());
+
+        // test socket build logic
+        let socket_builder = SocketBuilder::new(url);
+
+        let tls_connector = TlsConnector::builder()
+            .use_sni(true)
+            .build()
+            .expect("Found illegal configuration");
+
+        let socket = socket_builder
+            .set_namespace("/")
+            .expect("Error!")
+            .set_tls_config(tls_connector)
+            .set_opening_header(HOST, "localhost".parse().unwrap())
+            .set_opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
+            .on("test", |str, _| println!("Received: {:#?}", str))
+            .on("message", |payload, _| println!("{:#?}", payload))
+            .connect();
+
+        assert!(socket.is_ok());
+
+        let mut socket = socket.unwrap();
+        assert!(socket.emit("message", json!("Hello World")).is_ok());
+
+        assert!(socket.emit("binary", Bytes::from_static(&[46, 88])).is_ok());
+
+        let ack_cb = |payload, _| {
+            println!("Yehaa the ack got acked");
+            println!("With data: {:#?}", payload);
+        };
+
+        assert!(socket
+            .emit_with_ack("binary", json!("pls ack"), Duration::from_secs(1), ack_cb,)
+            .is_ok());
+
+        sleep(Duration::from_secs(5));
+
+        Ok(())
     }
 }

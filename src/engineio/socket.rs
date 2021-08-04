@@ -9,7 +9,6 @@ use native_tls::TlsConnector;
 use reqwest::{
     blocking::{Client, ClientBuilder},
     header::HeaderMap,
-    Url,
 };
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, time::SystemTime};
@@ -18,6 +17,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
+use url::Url;
 use websocket::{
     client::sync::Client as WsClient,
     dataframe::Opcode,
@@ -220,6 +220,12 @@ impl EngineSocket {
         let mut on_close = self.on_close.write()?;
         *on_close = Some(Box::new(function));
         drop(on_close);
+        Ok(())
+    }
+
+    pub fn close(&mut self) -> Result<()> {
+        self.emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)?;
+        self.connected.store(false, Ordering::Release);
         Ok(())
     }
 
@@ -590,6 +596,11 @@ impl EngineSocket {
                 }
             };
 
+            // Double check that we have not disconnected since last loop.
+            if !self.connected.load(Ordering::Acquire) {
+                break;
+            }
+
             if data.is_empty() {
                 return Ok(());
             }
@@ -677,7 +688,7 @@ impl EngineSocket {
     fn get_query_path(&self) -> Result<String> {
         // build the base path
         let mut path = format!(
-            "/{}/?EIO=4&transport={}&t={}",
+            "{}/?EIO=4&transport={}&t={}",
             if self.engine_io_mode.load(Ordering::Relaxed) {
                 "engine.io"
             } else {
@@ -759,10 +770,8 @@ mod test {
 
     use super::*;
 
-    const SERVER_URL: &str = "http://localhost:4201";
-
     #[test]
-    fn test_basic_connection() {
+    fn test_basic_connection() -> Result<()> {
         let mut socket = EngineSocket::new(true, None, None);
 
         assert!(socket
@@ -783,7 +792,7 @@ mod test {
             })
             .is_ok());
 
-        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+        let url = crate::engineio::test::engine_io_server()?;
 
         assert!(socket.bind(url).is_ok());
 
@@ -813,10 +822,11 @@ mod test {
                 false
             )
             .is_ok());
+        Ok(())
     }
 
     #[test]
-    fn test_illegal_actions() {
+    fn test_illegal_actions() -> Result<()> {
         let mut sut = EngineSocket::new(true, None, None);
 
         assert!(sut
@@ -829,7 +839,7 @@ mod test {
             )
             .is_err());
 
-        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+        let url = crate::engineio::test::engine_io_server()?;
 
         assert!(sut.bind(url).is_ok());
 
@@ -840,21 +850,20 @@ mod test {
         assert!(sut.on_error(|_| {}).is_err());
 
         let mut sut = EngineSocket::new(true, None, None);
+
         assert!(sut.poll_cycle().is_err());
+        Ok(())
     }
     use reqwest::header::HOST;
 
     use crate::engineio::packet::Packet;
 
     use super::*;
-    /// The `engine.io` server for testing runs on port 4201
-    const SERVER_URL_SECURE: &str = "https://localhost:4202";
-
     #[test]
-    fn test_connection_polling() {
+    fn test_connection_polling() -> Result<()> {
         let mut socket = EngineSocket::new(true, None, None);
 
-        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+        let url = crate::engineio::test::engine_io_server()?;
 
         socket.open(url).unwrap();
 
@@ -872,14 +881,6 @@ mod test {
             );
         }))));
 
-        // closes the connection
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"CLOSE")),
-                false,
-            )
-            .is_ok());
-
         assert!(socket
             .emit(
                 Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
@@ -887,11 +888,19 @@ mod test {
             )
             .is_ok());
 
+        let mut sut = socket.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(5));
+            sut.close();
+        });
+
         assert!(socket.poll_cycle().is_ok());
+
+        Ok(())
     }
 
     #[test]
-    fn test_connection_secure_ws_http() {
+    fn test_connection_secure_ws_http() -> Result<()> {
         let host =
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
 
@@ -908,8 +917,7 @@ mod test {
             Some(headers),
         );
 
-        let url = std::env::var("ENGINE_IO_SECURE_SERVER")
-            .unwrap_or_else(|_| SERVER_URL_SECURE.to_owned());
+        let url = crate::engineio::test::engine_io_server_secure()?;
 
         socket.open(url).unwrap();
 
@@ -942,7 +950,15 @@ mod test {
             )
             .is_ok());
 
+        let mut sut = socket.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(5));
+            sut.close();
+        });
+
         assert!(socket.poll_cycle().is_ok());
+
+        Ok(())
     }
 
     #[test]
