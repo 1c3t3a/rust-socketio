@@ -87,7 +87,7 @@ impl EngineIoSocketBuilder {
             .query_pairs_mut()
             .append_pair("sid", &handshake.sid[..])
             .finish();
-
+    
         Ok((handshake, url.clone()))
     }
 
@@ -99,7 +99,7 @@ impl EngineIoSocketBuilder {
             PollingTransport::new(url.clone(), self.tls_config.clone(), self.headers.clone());
 
         // If we can't upgrade or upgrade fails use polling
-        return Ok(EngineIoSocket::new(transport, handshake));
+        Ok(EngineIoSocket::new(transport, handshake))
     }
 
     pub fn build_websocket(&self) -> Result<EngineIoSocket<WebsocketTransport>> {
@@ -631,9 +631,7 @@ mod test {
                 .unwrap(),
         );
         builder = builder.set_headers(headers);
-        let mut socket = builder.build()?;
-
-        let url = crate::engineio::test::engine_io_server_secure()?;
+        let mut socket = builder.build_websocket_secure()?;
 
         socket.connect().unwrap();
 
