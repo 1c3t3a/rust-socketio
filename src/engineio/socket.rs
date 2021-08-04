@@ -28,7 +28,7 @@ type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
 /// An `engine.io` socket which manages a connection with the server and allows
 /// it to register common callbacks.
 #[derive(Clone)]
-pub struct EngineIoSocket<T: Transport> {
+pub struct EngineIoSocket<T: Transport + Sync + Send> {
     transport: Arc<T>,
     //TODO: Store these in a map
     pub on_error: Callback<String>,
@@ -187,7 +187,7 @@ impl EngineIoSocketBuilder {
     }
 }
 
-impl<T: Transport> EngineIoSocket<T> {
+impl<T: Transport + Sync + Send> EngineIoSocket<T> {
     pub fn new(transport: T, handshake: HandshakePacket) -> Self {
         EngineIoSocket {
             on_error: Arc::new(RwLock::new(None)),
