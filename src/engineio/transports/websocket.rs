@@ -27,11 +27,11 @@ impl WebsocketTransport {
             .finish()
             .clone();
         url.set_scheme("ws").unwrap();
-        let mut client_bulider = WsClientBuilder::new(url[..].as_ref()).unwrap();
+        let mut client_builder = WsClientBuilder::new(url[..].as_ref()).unwrap();
         if let Some(headers) = headers {
-            client_bulider = client_bulider.custom_headers(&headers);
+            client_builder = client_builder.custom_headers(&headers);
         }
-        let client = client_bulider.connect_insecure().unwrap();
+        let client = client_builder.connect_insecure().unwrap();
 
         client.set_nonblocking(false).unwrap();
 
