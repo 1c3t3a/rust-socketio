@@ -11,21 +11,37 @@ use crate::error::{Error, Result};
 /// Enumeration of the `engine.io` `Packet` types.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum PacketId {
-    Open = 0,
-    Close = 1,
-    Ping = 2,
-    Pong = 3,
-    Message = 4,
-    Upgrade = 5,
-    Noop = 6,
-    Base64,
+    Open,
+    Close,
+    Ping,
+    Pong,
+    Message,
+    // A type of message that is base64 encoded
+    MessageBase64,
+    Upgrade,
+    Noop,
 }
 
 impl From<PacketId> for String {
     fn from(packet: PacketId) -> Self {
         match packet {
-            PacketId::Base64 => "b".to_owned(),
+            PacketId::MessageBase64 => "b".to_owned(),
             _ => (packet as u8).to_string(),
+        }
+    }
+}
+
+impl From<PacketId> for u8 {
+    fn from(packet_id: PacketId) -> Self {
+        match packet_id {
+            PacketId::Open => 0,
+            PacketId::Close => 1,
+            PacketId::Ping => 2,
+            PacketId::Pong => 3,
+            PacketId::Message => 4,
+            PacketId::MessageBase64 => 4,
+            PacketId::Upgrade => 5,
+            PacketId::Noop => 6
         }
     }
 }
@@ -98,7 +114,7 @@ impl TryFrom<Bytes> for Packet {
 
         // only 'messages' packets could be encoded
         let packet_id = if is_base64 {
-            PacketId::Message
+            PacketId::MessageBase64
         } else {
             (*bytes.get(0).ok_or(Error::IncompletePacket())? as u8).try_into()?
         };
@@ -125,7 +141,7 @@ impl From<Packet> for Bytes {
     fn from(packet: Packet) -> Self {
         let mut result = BytesMut::with_capacity(packet.data.len() + 1);
         result.put(String::from(packet.packet_id).as_bytes());
-        if packet.packet_id == PacketId::Base64 {
+        if packet.packet_id == PacketId::MessageBase64 {
             result.extend(encode(packet.data).into_bytes());
         } else {
             result.put(packet.data);
