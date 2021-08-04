@@ -2,16 +2,17 @@ use crate::engineio::transport::Transport;
 use crate::error::{Error, Result};
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
-use reqwest::Url;
+use url::Url;
 use reqwest::{
     blocking::{Client, ClientBuilder},
     header::HeaderMap,
 };
 use std::sync::{Arc, Mutex, RwLock};
 
+#[derive(Debug, Clone)]
 pub(crate) struct PollingTransport {
     client: Arc<Mutex<Client>>,
-    base_url: Arc<RwLock<String>>,
+    base_url: Arc<RwLock<Url>>,
 }
 
 impl PollingTransport {
@@ -44,7 +45,7 @@ impl PollingTransport {
 
         PollingTransport {
             client: Arc::new(Mutex::new(client)),
-            base_url: Arc::new(RwLock::new(url.to_string())),
+            base_url: Arc::new(RwLock::new(url)),
         }
     }
 }
@@ -85,11 +86,11 @@ impl Transport for PollingTransport {
         Ok(Client::new().get(self.address()?).send()?.bytes()?)
     }
 
-    fn base_url(&self) -> Result<String> {
+    fn base_url(&self) -> Result<Url> {
         Ok(self.base_url.read()?.clone())
     }
 
-    fn set_base_url(&self, base_url: String) -> Result<()> {
+    fn set_base_url(&self, base_url: Url) -> Result<()> {
         *self.base_url.write()? = base_url;
         Ok(())
     }

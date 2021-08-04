@@ -10,10 +10,11 @@ use websocket::{
     sync::Writer, ws::dataframe::DataFrame, ClientBuilder as WsClientBuilder, Message,
 };
 
+#[derive(Clone)]
 pub(crate) struct WebsocketTransport {
     sender: Arc<Mutex<Writer<TcpStream>>>,
     receiver: Arc<Mutex<Reader<TcpStream>>>,
-    base_url: Arc<RwLock<String>>,
+    base_url: Arc<RwLock<url::Url>>,
 }
 
 impl WebsocketTransport {
@@ -39,7 +40,8 @@ impl WebsocketTransport {
         WebsocketTransport {
             sender: Arc::new(Mutex::new(sender)),
             receiver: Arc::new(Mutex::new(receiver)),
-            base_url: Arc::new(RwLock::new(url.to_string())),
+            // SAFTEY: already a URL parsing can't fail
+            base_url: Arc::new(RwLock::new(url::Url::parse(&url.to_string()).unwrap())),
         }
     }
 
@@ -103,11 +105,11 @@ impl Transport for WebsocketTransport {
         }
     }
 
-    fn base_url(&self) -> Result<String> {
+    fn base_url(&self) -> Result<url::Url> {
         Ok(self.base_url.read()?.clone())
     }
 
-    fn set_base_url(&self, url: String) -> Result<()> {
+    fn set_base_url(&self, url: url::Url) -> Result<()> {
         *self.base_url.write()? = url;
         Ok(())
     }
