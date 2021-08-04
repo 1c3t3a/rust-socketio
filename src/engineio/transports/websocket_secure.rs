@@ -18,7 +18,7 @@ use websocket::{
 };
 
 #[derive(Clone)]
-pub(crate) struct WebsocketSecureTransport {
+pub struct WebsocketSecureTransport {
     client: Arc<Mutex<WsClient<TlsStream<TcpStream>>>>,
     base_url: Arc<RwLock<url::Url>>,
 }

@@ -10,7 +10,7 @@ use reqwest::{
 use std::sync::{Arc, Mutex, RwLock};
 
 #[derive(Debug, Clone)]
-pub(crate) struct PollingTransport {
+pub struct PollingTransport {
     client: Arc<Mutex<Client>>,
     base_url: Arc<RwLock<Url>>,
 }

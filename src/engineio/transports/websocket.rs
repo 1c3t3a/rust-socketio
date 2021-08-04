@@ -11,7 +11,7 @@ use websocket::{
 };
 
 #[derive(Clone)]
-pub(crate) struct WebsocketTransport {
+pub struct WebsocketTransport {
     sender: Arc<Mutex<Writer<TcpStream>>>,
     receiver: Arc<Mutex<Reader<TcpStream>>>,
     base_url: Arc<RwLock<url::Url>>,
