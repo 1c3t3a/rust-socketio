@@ -10,6 +10,7 @@ use reqwest::{
 };
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
+use std::thread::sleep;
 use std::convert::TryInto;
 use std::{borrow::Cow, time::SystemTime};
 use std::{fmt::Debug, sync::atomic::Ordering};
@@ -409,6 +410,9 @@ impl<T: Transport> Socket<T> {
                 // set current state to not connected and stop polling
                 self.connected.store(false, Ordering::Release);
             }
+
+            // Sleep for a little while in between loops so any emits can send.
+            sleep(Duration::from_secs(1));
         }
         Ok(())
     }

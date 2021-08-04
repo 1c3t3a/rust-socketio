@@ -81,14 +81,15 @@ impl WebsocketSecureTransport {
 
 impl Transport for WebsocketSecureTransport {
     fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()> {
-        let mut writer = self.client.lock()?;
-
         let message = if is_binary_att {
             Message::binary(Cow::Borrowed(data.as_ref()))
         } else {
             Message::text(Cow::Borrowed(std::str::from_utf8(data.as_ref())?))
         };
+
+        let mut writer = self.client.lock()?;
         writer.send_message(&message)?;
+        drop(writer);
 
         Ok(())
     }
@@ -98,6 +99,7 @@ impl Transport for WebsocketSecureTransport {
 
         // if this is a binary payload, we mark it as a message
         let received_df = receiver.recv_dataframe()?;
+        drop(receiver);
         match received_df.opcode {
             Opcode::Binary => {
                 let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
