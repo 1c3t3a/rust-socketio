@@ -63,6 +63,13 @@ impl TryFrom<u8> for PacketId {
     }
 }
 
+/// A `Packet` sent via the `engine.io` protocol.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Packet {
+    pub packet_id: PacketId,
+    pub data: Bytes,
+}
+
 /// Data which gets exchanged in a handshake as defined by the server.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct HandshakePacket {
@@ -81,12 +88,6 @@ impl TryFrom<Packet> for HandshakePacket {
     }
 }
 
-/// A `Packet` sent via the `engine.io` protocol.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Packet {
-    pub packet_id: PacketId,
-    pub data: Bytes,
-}
 
 impl Packet {
     /// Creates a new `Packet`.
