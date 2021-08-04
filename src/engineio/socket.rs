@@ -529,14 +529,18 @@ mod test {
             .emit(Packet::new(PacketId::Pong, Bytes::new()), false)
             .is_ok());
 
-        sleep(Duration::from_secs(26));
-
         assert!(socket
             .emit(
                 Packet::new(PacketId::Message, Bytes::from_static(b"Hello World3"),),
                 false
             )
             .is_ok());
+
+        let mut sut = socket.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(5));
+            sut.close().unwrap();
+        });
 
         assert!(socket.poll_cycle().is_ok());
         Ok(())
@@ -564,6 +568,12 @@ mod test {
         assert!(sut.on_packet(|_| {}).is_err());
         assert!(sut.on_data(|_| {}).is_err());
         assert!(sut.on_error(|_| {}).is_err());
+
+        let mut socket = sut.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(5));
+            socket.close().unwrap();
+        });
 
         assert!(sut.poll_cycle().is_ok());
 
