@@ -607,7 +607,7 @@ mod test {
         let mut sut = socket.clone();
         thread::spawn(move || {
             thread::sleep(Duration::from_secs(5));
-            sut.close();
+            sut.close().unwrap();
         });
 
         assert!(socket.poll_cycle().is_ok());
@@ -669,7 +669,7 @@ mod test {
         let mut sut = socket.clone();
         thread::spawn(move || {
             thread::sleep(Duration::from_secs(5));
-            sut.close();
+            sut.close().unwrap();
         });
 
         assert!(socket.poll_cycle().is_ok());
