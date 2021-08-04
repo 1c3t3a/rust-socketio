@@ -4,6 +4,7 @@ use crate::engineio::transport::Transport;
 use crate::error::{Error, Result};
 use bytes::{BufMut, Bytes, BytesMut};
 use std::borrow::Cow;
+use std::str::from_utf8;
 use std::sync::{Arc, Mutex, RwLock};
 use websocket::{
     client::Url, dataframe::Opcode, header::Headers, receiver::Reader, sync::stream::TcpStream,
@@ -53,11 +54,11 @@ impl WebsocketTransport {
 
         // send the probe packet, the text `2probe` represents a ping packet with
         // the content `probe`
-        sender.send_message(&Message::binary(Cow::Borrowed(
-            Packet::new(PacketId::Ping, Bytes::from("probe"))
-                .encode_packet()
-                .as_ref(),
-        )))?;
+        sender.send_message(&Message::text(Cow::Borrowed(from_utf8(
+            &Packet::new(PacketId::Ping, Bytes::from("probe")).encode_packet(),
+        )?)))?;
+
+        std::thread::sleep(std::time::Duration::from_secs(10));
 
         // expect to receive a probe packet
         let message = receiver.recv_message()?;
@@ -69,11 +70,9 @@ impl WebsocketTransport {
 
         // finally send the upgrade request. the payload `5` stands for an upgrade
         // packet without any payload
-        sender.send_message(&Message::binary(Cow::Borrowed(
-            Packet::new(PacketId::Upgrade, Bytes::from(""))
-                .encode_packet()
-                .as_ref(),
-        )))?;
+        sender.send_message(&Message::text(Cow::Borrowed(from_utf8(
+            &Packet::new(PacketId::Upgrade, Bytes::from("")).encode_packet(),
+        )?)))?;
 
         Ok(())
     }

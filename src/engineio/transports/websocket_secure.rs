@@ -6,6 +6,7 @@ use crate::error::Result;
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
 use std::borrow::Cow;
+use std::str::from_utf8;
 use std::sync::{Arc, Mutex, RwLock};
 use websocket::{
     client::sync::Client as WsClient,
@@ -55,27 +56,24 @@ impl WebsocketSecureTransport {
 
         // send the probe packet, the text `2probe` represents a ping packet with
         // the content `probe`
-        client.send_message(&Message::binary(Cow::Borrowed(
-            Packet::new(PacketId::Ping, Bytes::from("probe"))
-                .encode_packet()
-                .as_ref(),
-        )))?;
+        client.send_message(&Message::text(Cow::Borrowed(from_utf8(
+            &Packet::new(PacketId::Ping, Bytes::from("probe")).encode_packet(),
+        )?)))?;
 
         // expect to receive a probe packet
         let message = client.recv_message()?;
         let payload = message.take_payload();
-        let packet = Packet::decode_packet(Bytes::from(payload.clone()));
-        if payload != Packet::new(PacketId::Pong, Bytes::from("probe")).encode_packet() {
+        if Packet::decode_packet(Bytes::from(payload.clone()))?
+            != Packet::new(PacketId::Pong, Bytes::from("probe"))
+        {
             return Err(Error::InvalidPacket());
         }
 
         // finally send the upgrade request. the payload `5` stands for an upgrade
         // packet without any payload
-        client.send_message(&Message::binary(Cow::Borrowed(
-            Packet::new(PacketId::Upgrade, Bytes::from(""))
-                .encode_packet()
-                .as_ref(),
-        )))?;
+        client.send_message(&Message::text(Cow::Borrowed(from_utf8(
+            &Packet::new(PacketId::Upgrade, Bytes::from("")).encode_packet(),
+        )?)))?;
 
         Ok(())
     }
