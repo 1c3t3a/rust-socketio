@@ -27,10 +27,10 @@ pub enum Error {
     InvalidUtf8(#[from] Utf8Error),
     #[error("An error occurred while encoding/decoding base64: {0}")]
     InvalidBase64(#[from] DecodeError),
-    #[error("Invalid Url: {0}")]
-    InvalidUrl(String),
     #[error("Invalid Url during parsing")]
-    InvalidUrlDuringParsing(#[from] UrlParseError),
+    InvalidUrl(#[from] UrlParseError),
+    #[error("Invalid Url Scheme: {0}")]
+    InvalidUrlScheme(String),
     #[error("Error during connection via http: {0}")]
     IncompleteResponseFromReqwest(#[from] ReqwestError),
     #[error("Network request returned with status code: {0}")]
