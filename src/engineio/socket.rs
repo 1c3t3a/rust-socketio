@@ -87,7 +87,7 @@ impl EngineIoSocketBuilder {
             .query_pairs_mut()
             .append_pair("sid", &handshake.sid[..])
             .finish();
-    
+
         Ok((handshake, url.clone()))
     }
 

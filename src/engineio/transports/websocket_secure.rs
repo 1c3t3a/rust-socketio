@@ -65,9 +65,7 @@ impl WebsocketSecureTransport {
         let message = client.recv_message()?;
         let payload = message.take_payload();
         let packet = Packet::decode_packet(Bytes::from(payload.clone()));
-        if payload
-            != Packet::new(PacketId::Pong, Bytes::from("probe")).encode_packet()
-        {
+        if payload != Packet::new(PacketId::Pong, Bytes::from("probe")).encode_packet() {
             return Err(Error::InvalidPacket());
         }
 
