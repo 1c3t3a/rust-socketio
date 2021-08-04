@@ -86,7 +86,7 @@ impl EngineIoSocketBuilder {
         let url = url
             .query_pairs_mut()
             .append_pair("sid", &handshake.sid[..])
-            .finish();
+            .finish(); 
 
         Ok((handshake, url.clone()))
     }
@@ -632,6 +632,55 @@ mod test {
         );
         builder = builder.set_headers(headers);
         let mut socket = builder.build_websocket_secure()?;
+
+        socket.connect().unwrap();
+
+        assert!(socket
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
+                false,
+            )
+            .is_ok());
+
+        socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
+            println!(
+                "Received: {:?}",
+                std::str::from_utf8(&data).expect("Error while decoding utf-8")
+            );
+        }))));
+
+        // closes the connection
+        assert!(socket
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"CLOSE")),
+                false,
+            )
+            .is_ok());
+
+        assert!(socket
+            .emit(
+                Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
+                true
+            )
+            .is_ok());
+
+        let mut sut = socket.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(5));
+            sut.close().unwrap();
+        });
+
+        assert!(socket.poll_cycle().is_ok());
+        Ok(())
+    }
+
+
+    #[test]
+    fn test_connection_ws_http() -> Result<()> {
+        let url = crate::engineio::test::engine_io_server()?;
+
+        let builder = EngineIoSocketBuilder::new(url);
+        let mut socket = builder.build_websocket()?;
 
         socket.connect().unwrap();
 
