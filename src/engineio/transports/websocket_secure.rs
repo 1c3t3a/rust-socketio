@@ -33,7 +33,7 @@ impl WebsocketSecureTransport {
             .finish()
             .clone();
         url.set_scheme("wss").unwrap();
-        let mut client_builder = WsClientBuilder::new(base_url[..].as_ref()).unwrap();
+        let mut client_builder = WsClientBuilder::new(url[..].as_ref()).unwrap();
         if let Some(headers) = headers {
             client_builder = client_builder.custom_headers(&headers);
         }
@@ -63,7 +63,9 @@ impl WebsocketSecureTransport {
 
         // expect to receive a probe packet
         let message = client.recv_message()?;
-        if message.take_payload()
+        let payload = message.take_payload();
+        let packet = Packet::decode_packet(Bytes::from(payload.clone()));
+        if payload
             != Packet::new(PacketId::Pong, Bytes::from("probe")).encode_packet()
         {
             return Err(Error::InvalidPacket());
