@@ -26,7 +26,7 @@ impl From<PacketId> for String {
     fn from(packet: PacketId) -> Self {
         match packet {
             PacketId::MessageBase64 => "b".to_owned(),
-            _ => (packet as u8).to_string(),
+            _ => (u8::from(packet)).to_string(),
         }
     }
 }
@@ -249,7 +249,7 @@ mod tests {
         let data = Bytes::from_static(b"bSGVsbG8=");
         let packet = Packet::try_from(data.clone()).unwrap();
 
-        assert_eq!(packet.packet_id, PacketId::Message);
+        assert_eq!(packet.packet_id, PacketId::MessageBase64);
         assert_eq!(packet.data, Bytes::from_static(b"Hello"));
 
         assert_eq!(Bytes::from(packet), data);
@@ -274,17 +274,16 @@ mod tests {
     #[test]
     fn test_binary_payload() {
         let data = Bytes::from_static(b"bSGVsbG8=\x1ebSGVsbG9Xb3JsZA==\x1ebSGVsbG8=");
-        let packets = Payload::try_from(data).unwrap();
+        let packets = Payload::try_from(data.clone()).unwrap();
 
         assert!(packets.len() == 3);
-        assert_eq!(packets[0].packet_id, PacketId::Message);
+        assert_eq!(packets[0].packet_id, PacketId::MessageBase64);
         assert_eq!(packets[0].data, Bytes::from_static(b"Hello"));
-        assert_eq!(packets[1].packet_id, PacketId::Message);
+        assert_eq!(packets[1].packet_id, PacketId::MessageBase64);
         assert_eq!(packets[1].data, Bytes::from_static(b"HelloWorld"));
-        assert_eq!(packets[2].packet_id, PacketId::Message);
+        assert_eq!(packets[2].packet_id, PacketId::MessageBase64);
         assert_eq!(packets[2].data, Bytes::from_static(b"Hello"));
 
-        let data = Bytes::from_static(b"4Hello\x1e4HelloWorld\x1e4Hello");
         assert_eq!(Bytes::try_from(packets).unwrap(), data);
     }
 
