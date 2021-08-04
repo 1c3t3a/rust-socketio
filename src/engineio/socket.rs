@@ -191,7 +191,7 @@ impl<T: Transport> Socket<T> {
         }
     }
 
-    /// Registers an `on_open` callback.
+    /// Registers the `on_open` callback.
     pub fn on_open<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(()) + 'static + Sync + Send,
@@ -205,7 +205,7 @@ impl<T: Transport> Socket<T> {
         Ok(())
     }
 
-    /// Registers an `on_error` callback.
+    /// Registers the `on_error` callback.
     pub fn on_error<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(String) + 'static + Sync + Send,
@@ -219,7 +219,7 @@ impl<T: Transport> Socket<T> {
         Ok(())
     }
 
-    /// Registers an `on_packet` callback.
+    /// Registers the `on_packet` callback.
     pub fn on_packet<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(Packet) + 'static + Sync + Send,
@@ -233,7 +233,7 @@ impl<T: Transport> Socket<T> {
         Ok(())
     }
 
-    /// Registers an `on_data` callback.
+    /// Registers the `on_data` callback.
     pub fn on_data<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(Bytes) + 'static + Sync + Send,
@@ -247,7 +247,7 @@ impl<T: Transport> Socket<T> {
         Ok(())
     }
 
-    /// Registers an `on_close` callback.
+    /// Registers the `on_close` callback.
     pub fn on_close<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(()) + 'static + Sync + Send,

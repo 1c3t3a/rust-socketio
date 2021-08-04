@@ -62,7 +62,7 @@ pub enum Error {
     InvalidInteger(#[from] ParseIntError),
     #[error("Missing URL")]
     MissingUrl(),
-    #[error("Server did not allow upgrating to websockets")]
+    #[error("Server did not allow upgrading to websockets")]
     IllegalWebsocketUpgrade(),
 }
 
