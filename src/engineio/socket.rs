@@ -28,7 +28,7 @@ type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
 /// An `engine.io` socket which manages a connection with the server and allows
 /// it to register common callbacks.
 #[derive(Clone)]
-pub struct EngineIoSocket<T: Transport> {
+pub struct Socket<T: Transport> {
     transport: Arc<T>,
     //TODO: Store these in a map
     pub on_error: Callback<String>,
@@ -42,15 +42,15 @@ pub struct EngineIoSocket<T: Transport> {
     connection_data: Arc<HandshakePacket>,
 }
 
-pub struct EngineIoSocketBuilder {
+pub struct SocketBuilder {
     url: Url,
     tls_config: Option<TlsConnector>,
     headers: Option<HeaderMap>,
 }
 
-impl EngineIoSocketBuilder {
+impl SocketBuilder {
     pub fn new(url: Url) -> Self {
-        EngineIoSocketBuilder {
+        SocketBuilder {
             url,
             headers: None,
             tls_config: None,
@@ -91,7 +91,7 @@ impl EngineIoSocketBuilder {
         Ok((handshake, url.clone()))
     }
 
-    pub fn build(&self) -> Result<EngineIoSocket<PollingTransport>> {
+    pub fn build(&self) -> Result<Socket<PollingTransport>> {
         let (handshake, url) = self._build()?;
 
         // Make a polling transport with new sid
@@ -99,10 +99,10 @@ impl EngineIoSocketBuilder {
             PollingTransport::new(url.clone(), self.tls_config.clone(), self.headers.clone());
 
         // If we can't upgrade or upgrade fails use polling
-        Ok(EngineIoSocket::new(transport, handshake))
+        Ok(Socket::new(transport, handshake))
     }
 
-    pub fn build_websocket(&self) -> Result<EngineIoSocket<WebsocketTransport>> {
+    pub fn build_websocket(&self) -> Result<Socket<WebsocketTransport>> {
         let (handshake, url) = self._build()?;
 
         // SAFTEY: Already a Url
@@ -119,7 +119,7 @@ impl EngineIoSocketBuilder {
                 "http" => {
                     let transport = WebsocketTransport::new(url, self.get_ws_headers()?);
                     transport.upgrade()?;
-                    Ok(EngineIoSocket::<WebsocketTransport>::new(
+                    Ok(Socket::<WebsocketTransport>::new(
                         transport, handshake,
                     ))
                 }
@@ -130,7 +130,7 @@ impl EngineIoSocketBuilder {
         }
     }
 
-    pub fn build_websocket_secure(&self) -> Result<EngineIoSocket<WebsocketSecureTransport>> {
+    pub fn build_websocket_secure(&self) -> Result<Socket<WebsocketSecureTransport>> {
         let (handshake, url) = self._build()?;
 
         // SAFTEY: Already a Url
@@ -151,7 +151,7 @@ impl EngineIoSocketBuilder {
                         self.get_ws_headers()?,
                     );
                     transport.upgrade()?;
-                    Ok(EngineIoSocket::new(transport, handshake))
+                    Ok(Socket::new(transport, handshake))
                 }
                 _ => Err(Error::InvalidUrlScheme(url.scheme().to_string())),
             }
@@ -175,9 +175,9 @@ impl EngineIoSocketBuilder {
     }
 }
 
-impl<T: Transport> EngineIoSocket<T> {
+impl<T: Transport> Socket<T> {
     pub fn new(transport: T, handshake: HandshakePacket) -> Self {
-        EngineIoSocket {
+        Socket {
             on_error: Arc::new(RwLock::new(None)),
             on_open: Arc::new(RwLock::new(None)),
             on_close: Arc::new(RwLock::new(None)),
@@ -439,7 +439,7 @@ impl<T: Transport> EngineIoSocket<T> {
     }
 }
 
-impl<T: Transport> Debug for EngineIoSocket<T> {
+impl<T: Transport> Debug for Socket<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
             "EngineSocket(transport: ?, on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, connection_data: {:?})",
@@ -489,7 +489,7 @@ mod test {
     #[test]
     fn test_basic_connection() -> Result<()> {
         let url = crate::engineio::test::engine_io_server()?;
-        let mut socket = EngineIoSocketBuilder::new(url).build()?;
+        let mut socket = SocketBuilder::new(url).build()?;
 
         assert!(socket
             .on_open(|_| {
@@ -549,7 +549,7 @@ mod test {
     #[test]
     fn test_illegal_actions() -> Result<()> {
         let url = crate::engineio::test::engine_io_server()?;
-        let mut sut = EngineIoSocketBuilder::new(url.clone()).build()?;
+        let mut sut = SocketBuilder::new(url.clone()).build()?;
 
         assert!(sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
@@ -577,7 +577,7 @@ mod test {
 
         assert!(sut.poll_cycle().is_ok());
 
-        let sut = EngineIoSocketBuilder::new(url).build()?;
+        let sut = SocketBuilder::new(url).build()?;
         assert!(sut.poll_cycle().is_err());
 
         Ok(())
@@ -589,7 +589,7 @@ mod test {
     #[test]
     fn test_connection_polling() -> Result<()> {
         let url = crate::engineio::test::engine_io_server()?;
-        let mut socket = EngineIoSocketBuilder::new(url).build()?;
+        let mut socket = SocketBuilder::new(url).build()?;
 
         socket.connect().unwrap();
 
@@ -633,7 +633,7 @@ mod test {
 
         let mut headers = HeaderMap::new();
         headers.insert(HOST, host.parse().unwrap());
-        let mut builder = EngineIoSocketBuilder::new(url);
+        let mut builder = SocketBuilder::new(url);
         builder = builder.set_tls_config(
             TlsConnector::builder()
                 .danger_accept_invalid_certs(true)
@@ -688,7 +688,7 @@ mod test {
     fn test_connection_ws_http() -> Result<()> {
         let url = crate::engineio::test::engine_io_server()?;
 
-        let builder = EngineIoSocketBuilder::new(url);
+        let builder = SocketBuilder::new(url);
         let mut socket = builder.build_websocket()?;
 
         socket.connect().unwrap();
@@ -741,12 +741,12 @@ mod test {
 
         let invalid_protocol = "file:///tmp/foo";
         assert!(
-            EngineIoSocketBuilder::new(Url::parse(&invalid_protocol).unwrap())
+            SocketBuilder::new(Url::parse(&invalid_protocol).unwrap())
                 .build()
                 .is_err()
         );
 
-        let sut = EngineIoSocketBuilder::new(url.clone()).build()?;
+        let sut = SocketBuilder::new(url.clone()).build()?;
         let _error = sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
             .expect_err("error");
@@ -758,7 +758,7 @@ mod test {
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
         headers.insert(HOST, host.parse().unwrap());
 
-        let _ = EngineIoSocketBuilder::new(url.clone())
+        let _ = SocketBuilder::new(url.clone())
             .set_tls_config(
                 TlsConnector::builder()
                     .danger_accept_invalid_certs(true)
@@ -766,7 +766,7 @@ mod test {
                     .unwrap(),
             )
             .build()?;
-        let _ = EngineIoSocketBuilder::new(url)
+        let _ = SocketBuilder::new(url)
             .set_headers(headers)
             .build()?;
         Ok(())

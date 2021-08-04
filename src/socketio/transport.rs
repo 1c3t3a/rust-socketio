@@ -1,10 +1,10 @@
-use crate::engineio::socket::EngineIoSocketBuilder;
+use crate::engineio::socket::SocketBuilder as EngineIoSocketBuilder;
 use crate::error::{Error, Result};
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
 use crate::{
     engineio::{
         packet::{Packet as EnginePacket, PacketId as EnginePacketId},
-        socket::EngineIoSocket,
+        socket::Socket as EngineIoSocket,
         transports::polling::PollingTransport as EnginePollingTransport,
     },
     Socket,
