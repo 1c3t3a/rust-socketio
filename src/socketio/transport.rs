@@ -13,7 +13,7 @@ use bytes::Bytes;
 use native_tls::TlsConnector;
 use rand::{thread_rng, Rng};
 use reqwest::header::HeaderMap;
-use reqwest::Url;
+use url::Url;
 use std::thread;
 use std::{
     fmt::Debug,
@@ -46,7 +46,7 @@ pub struct Ack {
 pub struct TransportClient {
     // TODO: Allow for dynamic typing here when refactoring socket.io
     engine_socket: Arc<RwLock<EngineIoSocket<EnginePollingTransport>>>,
-    host: Arc<String>,
+    host: Arc<Url>,
     connected: Arc<AtomicBool>,
     on: Arc<Vec<EventCallback>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
@@ -65,9 +65,14 @@ impl TransportClient {
         tls_config: Option<TlsConnector>,
         opening_headers: Option<HeaderMap>,
     ) -> Result<Self> {
-        let address: String = address.into();
+        let mut url: Url = Url::parse(&address.into())?;
+
+        if url.path() == "/" {
+            url.set_path("/socket.io/");
+        }
+
         let mut engine_socket_builder =
-            EngineIoSocketBuilder::new(Url::parse(&address.clone()).unwrap());
+            EngineIoSocketBuilder::new(url.clone());
         if let Some(tls_config) = tls_config {
             // SAFETY: Checked is_some
             engine_socket_builder = engine_socket_builder.set_tls_config(tls_config);
@@ -78,7 +83,7 @@ impl TransportClient {
         }
         Ok(TransportClient {
             engine_socket: Arc::new(RwLock::new(engine_socket_builder.build()?)),
-            host: Arc::new(address),
+            host: Arc::new(url),
             connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
@@ -103,15 +108,17 @@ impl TransportClient {
     pub fn connect(&mut self) -> Result<()> {
         self.setup_callbacks()?;
 
+        self.engine_socket.write()?.connect()?;
+
         // TODO: refactor me
-        let engineio_socket = self.engine_socket.clone();
+        let engine_socket = self.engine_socket.clone();
         thread::spawn(move || {
             // tries to restart a poll cycle whenever a 'normal' error occurs,
             // it just panics on network errors, in case the poll cycle returned
             // `Result::Ok`, the server receives a close frame so it's safe to
             // terminate
             loop {
-                match engineio_socket.read().unwrap().poll_cycle() {
+                match engine_socket.read().unwrap().poll_cycle() {
                     Ok(_) => break,
                     e @ Err(Error::IncompleteHttp(_))
                     | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
@@ -170,7 +177,7 @@ impl TransportClient {
     /// Sends a `socket.io` packet to the server using the `engine.io` client.
     pub fn send(&self, packet: &SocketPacket) -> Result<()> {
         if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
-            return Err(Error::IllegalActionAfterOpen());
+            return Err(Error::IllegalActionBeforeOpen());
         }
 
         // the packet, encoded as an engine.io message packet
@@ -624,20 +631,8 @@ mod test {
 
     #[test]
     fn test_error_cases() -> Result<()> {
-        let sut = TransportClient::new("http://localhost:123", None, None, None)?;
-
-        let packet = SocketPacket::new(
-            SocketPacketId::Connect,
-            "/".to_owned(),
-            None,
-            None,
-            None,
-            None,
-        );
-        assert!(sut.send(&packet).is_err());
-        assert!(sut
-            .send_binary_attachment(Bytes::from_static(b"Hallo"))
-            .is_err());
+        let result = TransportClient::new("http://localhost:123", None, None, None);
+        assert!(result.is_err());
         Ok(())
     }
 }
