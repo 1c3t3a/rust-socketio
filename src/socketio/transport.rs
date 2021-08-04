@@ -13,7 +13,6 @@ use bytes::Bytes;
 use native_tls::TlsConnector;
 use rand::{thread_rng, Rng};
 use reqwest::header::HeaderMap;
-use url::Url;
 use std::thread;
 use std::{
     fmt::Debug,
@@ -23,6 +22,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant},
 };
+use url::Url;
 
 use super::{event::Event, payload::Payload};
 
@@ -71,8 +71,7 @@ impl TransportClient {
             url.set_path("/socket.io/");
         }
 
-        let mut engine_socket_builder =
-            EngineIoSocketBuilder::new(url.clone());
+        let mut engine_socket_builder = EngineIoSocketBuilder::new(url.clone());
         if let Some(tls_config) = tls_config {
             // SAFETY: Checked is_some
             engine_socket_builder = engine_socket_builder.set_tls_config(tls_config);

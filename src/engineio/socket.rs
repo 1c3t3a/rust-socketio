@@ -86,7 +86,7 @@ impl EngineIoSocketBuilder {
         let url = url
             .query_pairs_mut()
             .append_pair("sid", &handshake.sid[..])
-            .finish(); 
+            .finish();
 
         Ok((handshake, url.clone()))
     }
@@ -683,7 +683,6 @@ mod test {
         assert!(socket.poll_cycle().is_ok());
         Ok(())
     }
-
 
     #[test]
     fn test_connection_ws_http() -> Result<()> {
