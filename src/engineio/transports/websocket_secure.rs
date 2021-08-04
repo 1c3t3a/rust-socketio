@@ -61,7 +61,7 @@ impl WebsocketSecureTransport {
         let message = client.recv_message()?;
         if message.take_payload() != Packet::new(PacketId::Pong, Bytes::from("probe")).encode_packet()
         {
-            return Err(Error::InvalidPacket);
+            return Err(Error::InvalidPacket());
         }
 
         // finally send the upgrade request. the payload `5` stands for an upgrade

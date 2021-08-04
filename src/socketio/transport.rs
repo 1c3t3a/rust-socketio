@@ -110,7 +110,7 @@ impl TransportClient {
             loop {
                 match engineio_socket.read().unwrap().poll_cycle() {
                     Ok(_) => break,
-                    e @ Err(Error::HttpError(_)) | e @ Err(Error::ReqwestError(_)) => {
+                    e @ Err(Error::IncompleteHttp(_)) | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
                         panic!("{}", e.unwrap_err())
                     }
                     _ => (),
