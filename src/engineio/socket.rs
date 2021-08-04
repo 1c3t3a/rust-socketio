@@ -1,10 +1,8 @@
 use crate::engineio::transport::Transport;
-use std::thread;
 
 use crate::engineio::packet::{Packet, PacketId, Payload, HandshakePacket};
 use super::transports::{polling::PollingTransport, websocket::WebsocketTransport, websocket_secure::WebsocketSecureTransport};
 use crate::error::{Error, Result};
-use adler32::adler32;
 use bytes::{Bytes};
 use native_tls::TlsConnector;
 use reqwest::{
@@ -75,7 +73,7 @@ impl EngineIoSocketBuilder {
     pub fn build(&self) -> Result<EngineIoSocket> {
 
         let mut url = self.url.clone();
-        let mut url = url
+        let url = url
             .query_pairs_mut()
             .append_pair("EIO", "4")
             .finish();
@@ -402,32 +400,6 @@ impl EngineIoSocket {
         Ok(())
     }
 
-    /// Binds the socket to a certain `address`. Attention! This doesn't allow
-    /// to configure callbacks afterwards.
-    pub fn bind(mut self) -> Result<()> {
-        if self.connected.load(Ordering::Acquire) {
-            return Err(Error::IllegalActionAfterOpen());
-        }
-        self.connect()?;
-
-        thread::spawn(move || {
-            // tries to restart a poll cycle whenever a 'normal' error occurs,
-            // it just panics on network errors, in case the poll cycle returned
-            // `Result::Ok`, the server receives a close frame so it's safe to
-            // terminate
-            loop {
-                match self.poll_cycle() {
-                    Ok(_) => break,
-                    e @ Err(Error::IncompleteHttp(_)) | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
-                        panic!("{}", e.unwrap_err())
-                    }
-                    _ => (),
-                }
-            }
-        });
-        Ok(())
-    }
-
     // Check if the underlying transport client is connected.
     pub(crate) fn is_connected(&self) -> Result<bool> {
         Ok(self.connected.load(Ordering::Acquire))
@@ -540,7 +512,7 @@ mod test {
             )
             .is_ok());
 
-        assert!(socket.bind().is_ok());
+        assert!(socket.poll_cycle().is_ok());
         Ok(())
     }
 
@@ -567,7 +539,7 @@ mod test {
         assert!(sut.on_data(|_| {}).is_err());
         assert!(sut.on_error(|_| {}).is_err());
 
-        assert!(sut.bind().is_ok());
+        assert!(sut.poll_cycle().is_ok());
 
         let sut = EngineIoSocketBuilder::new(url).build()?;
         assert!(sut.poll_cycle().is_err());
