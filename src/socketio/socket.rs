@@ -49,7 +49,8 @@ impl SocketBuilder {
     ///            }
     /// };
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    //TODO: Remove trailing slash when URL parsing is properly handled.
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("test", callback)
@@ -98,7 +99,7 @@ impl SocketBuilder {
     ///            }
     /// };
     ///
-    /// let socket = SocketBuilder::new("http://localhost:4200")
+    /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("test", callback)
@@ -129,7 +130,7 @@ impl SocketBuilder {
     ///            .build()
     ///            .expect("Found illegal configuration");
     ///
-    /// let socket = SocketBuilder::new("http://localhost:4200")
+    /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
@@ -151,7 +152,7 @@ impl SocketBuilder {
     /// use reqwest::header::{ACCEPT_ENCODING};
     ///
     ///
-    /// let socket = SocketBuilder::new("http://localhost:4200")
+    /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
@@ -182,7 +183,7 @@ impl SocketBuilder {
     /// use serde_json::json;
     ///
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .set_namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("error", |err, _| eprintln!("Socket error!: {:#?}", err))
@@ -257,7 +258,7 @@ impl Socket {
     /// use rust_socketio::{SocketBuilder, Payload};
     /// use serde_json::json;
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .on("test", |payload: Payload, mut socket| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
@@ -287,7 +288,7 @@ impl Socket {
     /// use rust_socketio::{SocketBuilder, Payload};
     /// use serde_json::json;
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .on("test", |payload: Payload, mut socket| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
@@ -325,7 +326,7 @@ impl Socket {
     /// use std::time::Duration;
     /// use std::thread::sleep;
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
     ///     .connect()
     ///     .expect("connection failed");
