@@ -28,7 +28,7 @@ type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
 /// An `engine.io` socket which manages a connection with the server and allows
 /// it to register common callbacks.
 #[derive(Clone)]
-pub struct EngineIoSocket<T: Transport + Sync + Send> {
+pub struct EngineIoSocket<T: Transport> {
     transport: Arc<T>,
     //TODO: Store these in a map
     pub on_error: Callback<String>,
@@ -187,7 +187,7 @@ impl EngineIoSocketBuilder {
     }
 }
 
-impl<T: Transport + Sync + Send> EngineIoSocket<T> {
+impl<T: Transport> EngineIoSocket<T> {
     pub fn new(transport: T, handshake: HandshakePacket) -> Self {
         EngineIoSocket {
             on_error: Arc::new(RwLock::new(None)),
@@ -558,7 +558,7 @@ mod test {
     #[test]
     fn test_illegal_actions() -> Result<()> {
         let url = crate::engineio::test::engine_io_server()?;
-        let mut sut = EngineIoSocketBuilder::new(url).build()?;
+        let mut sut = EngineIoSocketBuilder::new(url.clone()).build()?;
 
         assert!(sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
@@ -697,7 +697,7 @@ mod test {
         let invalid_protocol = "file:///tmp/foo";
         assert!(EngineIoSocketBuilder::new(Url::parse(&invalid_protocol).unwrap()).build().is_err());
 
-        let sut = EngineIoSocketBuilder::new(url).build()?;
+        let sut = EngineIoSocketBuilder::new(url.clone()).build()?;
         let _error = sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
             .expect_err("error");
@@ -709,7 +709,7 @@ mod test {
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
         headers.insert(HOST, host.parse().unwrap());
 
-        let _ = EngineIoSocketBuilder::new(url).set_tls_config(TlsConnector::builder()
+        let _ = EngineIoSocketBuilder::new(url.clone()).set_tls_config(TlsConnector::builder()
         .danger_accept_invalid_certs(true)
         .build()
         .unwrap()).build()?;
