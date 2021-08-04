@@ -3,7 +3,7 @@ use crate::engineio::transport::Transport;
 use crate::engineio::packet::{Packet, PacketId, Payload, HandshakePacket};
 use super::transports::{polling::PollingTransport, websocket::WebsocketTransport, websocket_secure::WebsocketSecureTransport};
 use crate::error::{Error, Result};
-use bytes::{Bytes};
+use bytes::Bytes;
 use native_tls::TlsConnector;
 use reqwest::{
     header::HeaderMap,
@@ -45,7 +45,7 @@ pub struct EngineIoSocket<T: Transport> {
 pub struct EngineIoSocketBuilder {
     url: Url,
     tls_config: Option<TlsConnector>,
-    headers: Option<HeaderMap>
+    headers: Option<HeaderMap>,
 }
 
 impl EngineIoSocketBuilder {
@@ -53,27 +53,23 @@ impl EngineIoSocketBuilder {
         EngineIoSocketBuilder {
             url,
             headers: None,
-            tls_config: None
+            tls_config: None,
         }
     }
 
     pub fn set_tls_config(mut self, tls_config: TlsConnector) -> Self {
-        self.tls_config=Some(tls_config);
+        self.tls_config = Some(tls_config);
         self
     }
 
     pub fn set_headers(mut self, headers: HeaderMap) -> Self {
-        self.headers=Some(headers);
+        self.headers = Some(headers);
         self
     }
 
     fn _build(&self) -> Result<(HandshakePacket, Url)> {
-
         let mut url = self.url.clone();
-        let url = url
-            .query_pairs_mut()
-            .append_pair("EIO", "4")
-            .finish();
+        let url = url.query_pairs_mut().append_pair("EIO", "4").finish();
 
         // No path add engine.io
         if url.path() == "/" {
@@ -81,11 +77,8 @@ impl EngineIoSocketBuilder {
         }
 
         // Start with polling transport
-        let transport = PollingTransport::new(
-            url.clone(),
-            self.tls_config.clone(),
-            self.headers.clone(),
-        );
+        let transport =
+            PollingTransport::new(url.clone(), self.tls_config.clone(), self.headers.clone());
 
         let handshake: HandshakePacket = Packet::try_from(transport.poll()?)?.try_into()?;
 
@@ -99,22 +92,17 @@ impl EngineIoSocketBuilder {
     }
 
     pub fn build(&self) -> Result<EngineIoSocket<PollingTransport>> {
-
         let (handshake, url) = self._build()?;
 
         // Make a polling transport with new sid
-        let transport = PollingTransport::new(
-            url.clone(),
-            self.tls_config.clone(),
-            self.headers.clone(),
-        );
+        let transport =
+            PollingTransport::new(url.clone(), self.tls_config.clone(), self.headers.clone());
 
         // If we can't upgrade or upgrade fails use polling
         return Ok(EngineIoSocket::new(transport, handshake));
     }
 
     pub fn build_websocket(&self) -> Result<EngineIoSocket<WebsocketTransport>> {
-        
         let (handshake, url) = self._build()?;
 
         // SAFTEY: Already a Url
@@ -131,7 +119,9 @@ impl EngineIoSocketBuilder {
                 "http" => {
                     let transport = WebsocketTransport::new(url, self.get_ws_headers()?);
                     transport.upgrade()?;
-                    Ok(EngineIoSocket::<WebsocketTransport>::new(transport, handshake))
+                    Ok(EngineIoSocket::<WebsocketTransport>::new(
+                        transport, handshake,
+                    ))
                 }
                 _ => Err(Error::InvalidUrlScheme(url.scheme().to_string())),
             }
@@ -141,7 +131,6 @@ impl EngineIoSocketBuilder {
     }
 
     pub fn build_websocket_secure(&self) -> Result<EngineIoSocket<WebsocketSecureTransport>> {
-        
         let (handshake, url) = self._build()?;
 
         // SAFTEY: Already a Url
@@ -170,7 +159,6 @@ impl EngineIoSocketBuilder {
             Err(Error::IllegalWebsocketUpgrade())
         }
     }
-
 
     /// Converts Reqwest headers to Websocket headers
     fn get_ws_headers(&self) -> Result<Option<Headers>> {
@@ -301,7 +289,6 @@ impl<T: Transport> EngineIoSocket<T> {
         Ok(())
     }
 
-
     /// Sends a packet to the server. This optionally handles sending of a
     /// socketio binary attachment via the boolean attribute `is_binary_att`.
     //TODO: Add a new PacketId to send raw binary so is_binary_att can be removed.
@@ -357,7 +344,7 @@ impl<T: Transport> EngineIoSocket<T> {
         let mut last_ping = *self.last_ping.lock()?;
         // the time after we assume the server to be timed out
         let server_timeout = Duration::from_millis(
-            self.connection_data.ping_timeout + self.connection_data.ping_interval
+            self.connection_data.ping_timeout + self.connection_data.ping_interval,
         );
 
         while self.connected.load(Ordering::Acquire) {
@@ -632,15 +619,17 @@ mod test {
     fn test_connection_secure_ws_http() -> Result<()> {
         let host =
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
-            let url = crate::engineio::test::engine_io_server_secure()?;
+        let url = crate::engineio::test::engine_io_server_secure()?;
 
         let mut headers = HeaderMap::new();
         headers.insert(HOST, host.parse().unwrap());
         let mut builder = EngineIoSocketBuilder::new(url);
-        builder = builder.set_tls_config(TlsConnector::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .unwrap());
+        builder = builder.set_tls_config(
+            TlsConnector::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
+                .unwrap(),
+        );
         builder = builder.set_headers(headers);
         let mut socket = builder.build()?;
 
@@ -695,7 +684,11 @@ mod test {
         assert!(Url::parse(&illegal_url).is_err());
 
         let invalid_protocol = "file:///tmp/foo";
-        assert!(EngineIoSocketBuilder::new(Url::parse(&invalid_protocol).unwrap()).build().is_err());
+        assert!(
+            EngineIoSocketBuilder::new(Url::parse(&invalid_protocol).unwrap())
+                .build()
+                .is_err()
+        );
 
         let sut = EngineIoSocketBuilder::new(url.clone()).build()?;
         let _error = sut
@@ -709,11 +702,17 @@ mod test {
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
         headers.insert(HOST, host.parse().unwrap());
 
-        let _ = EngineIoSocketBuilder::new(url.clone()).set_tls_config(TlsConnector::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .unwrap()).build()?;
-        let _ = EngineIoSocketBuilder::new(url).set_headers(headers).build()?;
+        let _ = EngineIoSocketBuilder::new(url.clone())
+            .set_tls_config(
+                TlsConnector::builder()
+                    .danger_accept_invalid_certs(true)
+                    .build()
+                    .unwrap(),
+            )
+            .build()?;
+        let _ = EngineIoSocketBuilder::new(url)
+            .set_headers(headers)
+            .build()?;
         Ok(())
     }
 }

@@ -1,6 +1,6 @@
 use crate::error::Result;
 use adler32::adler32;
-use bytes::{Bytes};
+use bytes::Bytes;
 use std::time::SystemTime;
 use url::Url;
 

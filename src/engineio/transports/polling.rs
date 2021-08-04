@@ -2,12 +2,12 @@ use crate::engineio::transport::Transport;
 use crate::error::{Error, Result};
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
-use url::Url;
 use reqwest::{
     blocking::{Client, ClientBuilder},
     header::HeaderMap,
 };
 use std::sync::{Arc, Mutex, RwLock};
+use url::Url;
 
 #[derive(Debug, Clone)]
 pub struct PollingTransport {

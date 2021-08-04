@@ -1,7 +1,7 @@
-use crate::error::Error;
 use crate::engineio::packet::Packet;
 use crate::engineio::packet::PacketId;
 use crate::engineio::transport::Transport;
+use crate::error::Error;
 use crate::error::Result;
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
@@ -56,12 +56,15 @@ impl WebsocketSecureTransport {
         // send the probe packet, the text `2probe` represents a ping packet with
         // the content `probe`
         client.send_message(&Message::binary(Cow::Borrowed(
-            Packet::new(PacketId::Ping, Bytes::from("probe")).encode_packet().as_ref(),
+            Packet::new(PacketId::Ping, Bytes::from("probe"))
+                .encode_packet()
+                .as_ref(),
         )))?;
 
         // expect to receive a probe packet
         let message = client.recv_message()?;
-        if message.take_payload() != Packet::new(PacketId::Pong, Bytes::from("probe")).encode_packet()
+        if message.take_payload()
+            != Packet::new(PacketId::Pong, Bytes::from("probe")).encode_packet()
         {
             return Err(Error::InvalidPacket());
         }
@@ -69,7 +72,9 @@ impl WebsocketSecureTransport {
         // finally send the upgrade request. the payload `5` stands for an upgrade
         // packet without any payload
         client.send_message(&Message::binary(Cow::Borrowed(
-            Packet::new(PacketId::Upgrade, Bytes::from("")).encode_packet().as_ref(),
+            Packet::new(PacketId::Upgrade, Bytes::from(""))
+                .encode_packet()
+                .as_ref(),
         )))?;
 
         Ok(())

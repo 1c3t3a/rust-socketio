@@ -63,7 +63,7 @@ pub enum Error {
     #[error("Missing URL")]
     MissingUrl(),
     #[error("Server did not allow upgrating to websockets")]
-    IllegalWebsocketUpgrade()
+    IllegalWebsocketUpgrade(),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;

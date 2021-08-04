@@ -14,6 +14,7 @@ use native_tls::TlsConnector;
 use rand::{thread_rng, Rng};
 use reqwest::header::HeaderMap;
 use reqwest::Url;
+use std::thread;
 use std::{
     fmt::Debug,
     sync::{atomic::Ordering, RwLock},
@@ -22,7 +23,6 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant},
 };
-use std::thread;
 
 use super::{event::Event, payload::Payload};
 
@@ -66,7 +66,8 @@ impl TransportClient {
         opening_headers: Option<HeaderMap>,
     ) -> Result<Self> {
         let address: String = address.into();
-        let mut engine_socket_builder = EngineIoSocketBuilder::new(Url::parse(&address.clone()).unwrap());
+        let mut engine_socket_builder =
+            EngineIoSocketBuilder::new(Url::parse(&address.clone()).unwrap());
         if let Some(tls_config) = tls_config {
             // SAFETY: Checked is_some
             engine_socket_builder = engine_socket_builder.set_tls_config(tls_config);
@@ -74,7 +75,8 @@ impl TransportClient {
         if let Some(opening_headers) = opening_headers {
             // SAFETY: Checked is_some
             engine_socket_builder = engine_socket_builder.set_headers(opening_headers);
-        }        Ok(TransportClient {
+        }
+        Ok(TransportClient {
             engine_socket: Arc::new(RwLock::new(engine_socket_builder.build()?)),
             host: Arc::new(address),
             connected: Arc::new(AtomicBool::default()),
@@ -111,7 +113,8 @@ impl TransportClient {
             loop {
                 match engineio_socket.read().unwrap().poll_cycle() {
                     Ok(_) => break,
-                    e @ Err(Error::IncompleteHttp(_)) | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
+                    e @ Err(Error::IncompleteHttp(_))
+                    | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
                         panic!("{}", e.unwrap_err())
                     }
                     _ => (),
@@ -616,7 +619,7 @@ mod test {
                 ack_callback
             )
             .is_ok());
-            Ok(())
+        Ok(())
     }
 
     #[test]
@@ -635,6 +638,6 @@ mod test {
         assert!(sut
             .send_binary_attachment(Bytes::from_static(b"Hallo"))
             .is_err());
-            Ok(())
+        Ok(())
     }
 }

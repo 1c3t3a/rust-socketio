@@ -26,7 +26,7 @@ impl WebsocketTransport {
             .append_pair("transport", "websocket")
             .finish()
             .clone();
-            url.set_scheme("ws").unwrap();
+        url.set_scheme("ws").unwrap();
         let mut client_bulider = WsClientBuilder::new(url[..].as_ref()).unwrap();
         if let Some(headers) = headers {
             client_bulider = client_bulider.custom_headers(&headers);
@@ -54,12 +54,15 @@ impl WebsocketTransport {
         // send the probe packet, the text `2probe` represents a ping packet with
         // the content `probe`
         sender.send_message(&Message::binary(Cow::Borrowed(
-            Packet::new(PacketId::Ping, Bytes::from("probe")).encode_packet().as_ref(),
+            Packet::new(PacketId::Ping, Bytes::from("probe"))
+                .encode_packet()
+                .as_ref(),
         )))?;
 
         // expect to receive a probe packet
         let message = receiver.recv_message()?;
-        if message.take_payload() != Packet::new(PacketId::Pong, Bytes::from("probe")).encode_packet()
+        if message.take_payload()
+            != Packet::new(PacketId::Pong, Bytes::from("probe")).encode_packet()
         {
             return Err(Error::InvalidPacket());
         }
@@ -67,7 +70,9 @@ impl WebsocketTransport {
         // finally send the upgrade request. the payload `5` stands for an upgrade
         // packet without any payload
         sender.send_message(&Message::binary(Cow::Borrowed(
-            Packet::new(PacketId::Upgrade, Bytes::from("")).encode_packet().as_ref(),
+            Packet::new(PacketId::Upgrade, Bytes::from(""))
+                .encode_packet()
+                .as_ref(),
         )))?;
 
         Ok(())
