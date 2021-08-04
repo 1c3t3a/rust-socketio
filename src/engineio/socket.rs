@@ -542,8 +542,15 @@ mod test {
 
         let mut sut = socket.clone();
         thread::spawn(move || {
-            thread::sleep(Duration::from_secs(5));
-            sut.close().unwrap();
+            loop {
+                thread::sleep(Duration::from_secs(3));
+                let result = sut.close();
+                if let Ok(result) = result {
+                    break;
+                } else if let Err(error) = result {
+                    println!("Closing thread errored! Trying again... {}", error);
+                }
+            }
         });
 
         assert!(socket.poll_cycle().is_ok());
@@ -566,7 +573,7 @@ mod test {
             .is_err());
 
         sut.connect()?;
-
+        
         assert!(sut.on_open(|_| {}).is_err());
         assert!(sut.on_close(|_| {}).is_err());
         assert!(sut.on_packet(|_| {}).is_err());
@@ -575,8 +582,15 @@ mod test {
 
         let mut socket = sut.clone();
         thread::spawn(move || {
-            thread::sleep(Duration::from_secs(5));
-            socket.close().unwrap();
+            loop {
+                thread::sleep(Duration::from_secs(3));
+                let result = socket.close();
+                if let Ok(result) = result {
+                    break;
+                } else if let Err(error) = result {
+                    println!("Closing thread errored! Trying again... {}", error);
+                }
+            }
         });
 
         assert!(sut.poll_cycle().is_ok());
@@ -620,8 +634,15 @@ mod test {
 
         let mut sut = socket.clone();
         thread::spawn(move || {
-            thread::sleep(Duration::from_secs(5));
-            sut.close().unwrap();
+            loop {
+                thread::sleep(Duration::from_secs(3));
+                let result = sut.close();
+                if let Ok(result) = result {
+                    break;
+                } else if let Err(error) = result {
+                    println!("Closing thread errored! Trying again... {}", error);
+                }
+            }
         });
 
         assert!(socket.poll_cycle().is_ok());
@@ -680,8 +701,15 @@ mod test {
 
         let mut sut = socket.clone();
         thread::spawn(move || {
-            thread::sleep(Duration::from_secs(5));
-            sut.close().unwrap();
+            loop {
+                thread::sleep(Duration::from_secs(3));
+                let result = sut.close();
+                if let Ok(result) = result {
+                    break;
+                } else if let Err(error) = result {
+                    println!("Closing thread errored! Trying again... {}", error);
+                }
+            }
         });
 
         assert!(socket.poll_cycle().is_ok());
@@ -728,8 +756,15 @@ mod test {
 
         let mut sut = socket.clone();
         thread::spawn(move || {
-            thread::sleep(Duration::from_secs(5));
-            sut.close().unwrap();
+            loop {
+                thread::sleep(Duration::from_secs(3));
+                let result = sut.close();
+                if let Ok(result) = result {
+                    break;
+                } else if let Err(error) = result {
+                    println!("Closing thread errored! Trying again... {}", error);
+                }
+            }
         });
 
         assert!(socket.poll_cycle().is_ok());
