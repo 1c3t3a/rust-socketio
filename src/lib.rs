@@ -92,7 +92,7 @@ macro_rules! spawn_scoped {
 }
 
 /// Contains the types and the code concerning the `engine.io` protocol.
-pub mod engineio;
+mod engineio;
 /// Contains the types and the code concerning the `socket.io` protocol.
 pub mod socketio;
 
