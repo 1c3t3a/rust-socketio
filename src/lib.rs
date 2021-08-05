@@ -122,6 +122,8 @@ pub(crate) mod test {
         cert_file.read_to_end(&mut buf)?;
         let cert: Certificate = Certificate::from_pem(&buf[..]).unwrap();
         Ok(TlsConnector::builder()
+            // ONLY USE FOR TESTING!
+            .danger_accept_invalid_hostnames(true)
             .add_root_certificate(cert)
             .build()
             .unwrap())

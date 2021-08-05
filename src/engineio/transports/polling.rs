@@ -79,7 +79,7 @@ impl Transport for PollingTransport {
     }
 
     fn poll(&self) -> Result<Bytes> {
-        Ok(Client::new().get(self.address()?).send()?.bytes()?)
+        Ok(self.client.lock()?.get(self.address()?).send()?.bytes()?)
     }
 
     fn base_url(&self) -> Result<Url> {
