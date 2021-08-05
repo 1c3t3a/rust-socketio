@@ -40,7 +40,7 @@ fn criterion_engine_io_socket_build(c: &mut Criterion) {
 }
 
 fn criterion_engine_io_packet(c: &mut Criterion) {
-    c.bench_function("engine io emit", |b| b.iter(|| engine_io_packet()));
+    c.bench_function("packet", |b| b.iter(|| engine_io_packet()));
 }
 
 fn criterion_engine_io_emit(c: &mut Criterion) {
