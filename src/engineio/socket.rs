@@ -120,9 +120,7 @@ impl SocketBuilder {
                 "http" => {
                     let transport = WebsocketTransport::new(url, self.get_ws_headers()?);
                     transport.upgrade()?;
-                    Ok(Socket::<WebsocketTransport>::new(
-                        transport, handshake,
-                    ))
+                    Ok(Socket::<WebsocketTransport>::new(transport, handshake))
                 }
                 _ => Err(Error::InvalidUrlScheme(url.scheme().to_string())),
             }
@@ -541,15 +539,13 @@ mod test {
             .is_ok());
 
         let mut sut = socket.clone();
-        thread::spawn(move || {
-            loop {
-                thread::sleep(Duration::from_secs(3));
-                let result = sut.close();
-                if result.is_ok() {
-                    break;
-                } else if let Err(error) = result {
-                    println!("Closing thread errored! Trying again... {}", error);
-                }
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(3));
+            let result = sut.close();
+            if result.is_ok() {
+                break;
+            } else if let Err(error) = result {
+                println!("Closing thread errored! Trying again... {}", error);
             }
         });
 
@@ -573,7 +569,7 @@ mod test {
             .is_err());
 
         sut.connect()?;
-        
+
         assert!(sut.on_open(|_| {}).is_err());
         assert!(sut.on_close(|_| {}).is_err());
         assert!(sut.on_packet(|_| {}).is_err());
@@ -581,15 +577,13 @@ mod test {
         assert!(sut.on_error(|_| {}).is_err());
 
         let mut socket = sut.clone();
-        thread::spawn(move || {
-            loop {
-                thread::sleep(Duration::from_secs(3));
-                let result = socket.close();
-                if result.is_ok() {
-                    break;
-                } else if let Err(error) = result {
-                    println!("Closing thread errored! Trying again... {}", error);
-                }
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(3));
+            let result = socket.close();
+            if result.is_ok() {
+                break;
+            } else if let Err(error) = result {
+                println!("Closing thread errored! Trying again... {}", error);
             }
         });
 
@@ -633,15 +627,13 @@ mod test {
             .is_ok());
 
         let mut sut = socket.clone();
-        thread::spawn(move || {
-            loop {
-                thread::sleep(Duration::from_secs(3));
-                let result = sut.close();
-                if result.is_ok() {
-                    break;
-                } else if let Err(error) = result {
-                    println!("Closing thread errored! Trying again... {}", error);
-                }
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(3));
+            let result = sut.close();
+            if result.is_ok() {
+                break;
+            } else if let Err(error) = result {
+                println!("Closing thread errored! Trying again... {}", error);
             }
         });
 
@@ -700,15 +692,13 @@ mod test {
             .is_ok());
 
         let mut sut = socket.clone();
-        thread::spawn(move || {
-            loop {
-                thread::sleep(Duration::from_secs(3));
-                let result = sut.close();
-                if result.is_ok() {
-                    break;
-                } else if let Err(error) = result {
-                    println!("Closing thread errored! Trying again... {}", error);
-                }
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(3));
+            let result = sut.close();
+            if result.is_ok() {
+                break;
+            } else if let Err(error) = result {
+                println!("Closing thread errored! Trying again... {}", error);
             }
         });
 
@@ -755,15 +745,13 @@ mod test {
             .is_ok());
 
         let mut sut = socket.clone();
-        thread::spawn(move || {
-            loop {
-                thread::sleep(Duration::from_secs(3));
-                let result = sut.close();
-                if result.is_ok() {
-                    break;
-                } else if let Err(error) = result {
-                    println!("Closing thread errored! Trying again... {}", error);
-                }
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(3));
+            let result = sut.close();
+            if result.is_ok() {
+                break;
+            } else if let Err(error) = result {
+                println!("Closing thread errored! Trying again... {}", error);
             }
         });
 
@@ -779,11 +767,9 @@ mod test {
         assert!(Url::parse(&illegal_url).is_err());
 
         let invalid_protocol = "file:///tmp/foo";
-        assert!(
-            SocketBuilder::new(Url::parse(&invalid_protocol).unwrap())
-                .build()
-                .is_err()
-        );
+        assert!(SocketBuilder::new(Url::parse(&invalid_protocol).unwrap())
+            .build()
+            .is_err());
 
         let sut = SocketBuilder::new(url.clone()).build()?;
         let _error = sut
@@ -805,9 +791,7 @@ mod test {
                     .unwrap(),
             )
             .build()?;
-        let _ = SocketBuilder::new(url)
-            .set_headers(headers)
-            .build()?;
+        let _ = SocketBuilder::new(url).set_headers(headers).build()?;
         Ok(())
     }
 }
