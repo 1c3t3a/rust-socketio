@@ -478,7 +478,7 @@ impl<T: Transport> Debug for Socket<T> {
 #[cfg(test)]
 mod test {
 
-    use std::{time::Duration};
+    use std::time::Duration;
 
     use crate::engineio::packet::PacketId;
 
