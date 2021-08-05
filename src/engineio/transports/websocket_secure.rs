@@ -6,6 +6,7 @@ use crate::error::Result;
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
 use std::borrow::Cow;
+use std::convert::TryFrom;
 use std::str::from_utf8;
 use std::sync::{Arc, Mutex, RwLock};
 use websocket::{
@@ -17,7 +18,6 @@ use websocket::{
     ws::dataframe::DataFrame,
     ClientBuilder as WsClientBuilder, Message,
 };
-use std::convert::TryFrom;
 
 #[derive(Clone)]
 pub struct WebsocketSecureTransport {
@@ -53,9 +53,9 @@ impl WebsocketSecureTransport {
 
         // send the probe packet, the text `2probe` represents a ping packet with
         // the content `probe`
-        client.send_message(&Message::text(Cow::Borrowed(from_utf8(
-            &Bytes::from(Packet::new(PacketId::Ping, Bytes::from("probe"))),
-        )?)))?;
+        client.send_message(&Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
+            Packet::new(PacketId::Ping, Bytes::from("probe")),
+        ))?)))?;
 
         // expect to receive a probe packet
         let message = client.recv_message()?;
@@ -68,9 +68,9 @@ impl WebsocketSecureTransport {
 
         // finally send the upgrade request. the payload `5` stands for an upgrade
         // packet without any payload
-        client.send_message(&Message::text(Cow::Borrowed(from_utf8(
-            &Bytes::from(Packet::new(PacketId::Upgrade, Bytes::from(""))),
-        )?)))?;
+        client.send_message(&Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
+            Packet::new(PacketId::Upgrade, Bytes::from("")),
+        ))?)))?;
 
         Ok(())
     }

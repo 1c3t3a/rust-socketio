@@ -50,25 +50,24 @@ impl WebsocketTransport {
 
         // send the probe packet, the text `2probe` represents a ping packet with
         // the content `probe`
-        sender.send_message(&Message::text(Cow::Borrowed(from_utf8(
-            &Bytes::from(Packet::new(PacketId::Ping, Bytes::from("probe"))),
-        )?)))?;
+        sender.send_message(&Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
+            Packet::new(PacketId::Ping, Bytes::from("probe")),
+        ))?)))?;
 
         std::thread::sleep(std::time::Duration::from_secs(10));
 
         // expect to receive a probe packet
         let message = receiver.recv_message()?;
-        if message.take_payload()
-            != Bytes::from(Packet::new(PacketId::Pong, Bytes::from("probe")))
+        if message.take_payload() != Bytes::from(Packet::new(PacketId::Pong, Bytes::from("probe")))
         {
             return Err(Error::InvalidPacket());
         }
 
         // finally send the upgrade request. the payload `5` stands for an upgrade
         // packet without any payload
-        sender.send_message(&Message::text(Cow::Borrowed(from_utf8(
-            &Bytes::from(Packet::new(PacketId::Upgrade, Bytes::from(""))),
-        )?)))?;
+        sender.send_message(&Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
+            Packet::new(PacketId::Upgrade, Bytes::from("")),
+        ))?)))?;
 
         Ok(())
     }
