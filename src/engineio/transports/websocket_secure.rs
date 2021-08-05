@@ -27,12 +27,9 @@ pub struct WebsocketSecureTransport {
 impl WebsocketSecureTransport {
     /// Creates an instance of `TransportClient`.
     pub fn new(base_url: Url, tls_config: Option<TlsConnector>, headers: Option<Headers>) -> Self {
-        let mut url = base_url
-            .clone()
-            .query_pairs_mut()
-            .append_pair("transport", "websocket")
-            .finish()
-            .clone();
+        let mut url = base_url;
+        url.query_pairs_mut()
+            .append_pair("transport", "websocket");
         url.set_scheme("wss").unwrap();
         let mut client_builder = WsClientBuilder::new(url[..].as_ref()).unwrap();
         if let Some(headers) = headers {
@@ -63,7 +60,7 @@ impl WebsocketSecureTransport {
         // expect to receive a probe packet
         let message = client.recv_message()?;
         let payload = message.take_payload();
-        if Packet::decode_packet(Bytes::from(payload.clone()))?
+        if Packet::decode_packet(Bytes::from(payload))?
             != Packet::new(PacketId::Pong, Bytes::from("probe"))
         {
             return Err(Error::InvalidPacket());

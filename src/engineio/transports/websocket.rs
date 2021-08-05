@@ -21,12 +21,9 @@ pub struct WebsocketTransport {
 impl WebsocketTransport {
     /// Creates an instance of `TransportClient`.
     pub fn new(base_url: Url, headers: Option<Headers>) -> Self {
-        let mut url = base_url
-            .clone()
-            .query_pairs_mut()
-            .append_pair("transport", "websocket")
-            .finish()
-            .clone();
+        let mut url = base_url;
+        url.query_pairs_mut()
+            .append_pair("transport", "websocket");
         url.set_scheme("ws").unwrap();
         let mut client_builder = WsClientBuilder::new(url[..].as_ref()).unwrap();
         if let Some(headers) = headers {

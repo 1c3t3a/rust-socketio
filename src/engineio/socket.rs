@@ -96,7 +96,7 @@ impl SocketBuilder {
 
         // Make a polling transport with new sid
         let transport =
-            PollingTransport::new(url.clone(), self.tls_config.clone(), self.headers.clone());
+            PollingTransport::new(url, self.tls_config.clone(), self.headers.clone());
 
         // If we can't upgrade or upgrade fails use polling
         Ok(Socket::new(transport, handshake))

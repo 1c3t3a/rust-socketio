@@ -22,7 +22,7 @@ impl PollingTransport {
         tls_config: Option<TlsConnector>,
         opening_headers: Option<HeaderMap>,
     ) -> Self {
-        let client = match (tls_config.clone(), opening_headers.clone()) {
+        let client = match (tls_config, opening_headers) {
             (Some(config), Some(map)) => ClientBuilder::new()
                 .use_preconfigured_tls(config)
                 .default_headers(map)
@@ -36,12 +36,9 @@ impl PollingTransport {
             (None, None) => Client::new(),
         };
 
-        let url = base_url
-            .clone()
-            .query_pairs_mut()
-            .append_pair("transport", "polling")
-            .finish()
-            .clone();
+        let mut url = base_url;
+        url.query_pairs_mut()
+            .append_pair("transport", "polling");
 
         PollingTransport {
             client: Arc::new(Mutex::new(client)),
