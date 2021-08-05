@@ -1,15 +1,15 @@
+use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rust_socketio::engineio::{
     packet::{Packet, PacketId},
-    transport::TransportClient
+    transport::TransportClient,
 };
-use bytes::Bytes;
 use rust_socketio::error::Error;
 
 fn engine_io_emit(socket: &TransportClient, packet: Packet) -> Result<(), Error> {
     let mut i = 0;
     while i < 100 {
-        i+=1;
+        i += 1;
         socket.emit(packet.clone(), false)?;
     }
     Ok(())
@@ -31,13 +31,12 @@ fn engine_io_packet() -> Packet {
     Packet::new(PacketId::Message, Bytes::from("hello world"))
 }
 
-
-
-
 fn criterion_engine_io_socket_build(c: &mut Criterion) {
     let url = engine_io_url().unwrap();
 
-    c.bench_function("engine io build", |b| b.iter(|| engine_io_socket_build(black_box(url.clone()))));
+    c.bench_function("engine io build", |b| {
+        b.iter(|| engine_io_socket_build(black_box(url.clone())))
+    });
 }
 
 fn criterion_engine_io_packet(c: &mut Criterion) {
@@ -49,8 +48,15 @@ fn criterion_engine_io_emit(c: &mut Criterion) {
     let socket = engine_io_socket_build(url);
     let packet = engine_io_packet();
 
-    c.bench_function("engine io emit", |b| b.iter(|| engine_io_emit(black_box(&socket), black_box(packet.clone())).unwrap()));
+    c.bench_function("engine io emit", |b| {
+        b.iter(|| engine_io_emit(black_box(&socket), black_box(packet.clone())).unwrap())
+    });
 }
 
-criterion_group!(benches, criterion_engine_io_socket_build, criterion_engine_io_packet, criterion_engine_io_emit);
+criterion_group!(
+    benches,
+    criterion_engine_io_socket_build,
+    criterion_engine_io_packet,
+    criterion_engine_io_emit
+);
 criterion_main!(benches);
