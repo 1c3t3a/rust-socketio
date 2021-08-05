@@ -1,13 +1,16 @@
 use crate::engineio::transport::Transport;
 
-use crate::engineio::packet::{Packet, PacketId, Payload, HandshakePacket};
-use super::transports::{polling::PollingTransport, websocket::WebsocketTransport, websocket_secure::WebsocketSecureTransport};
+use super::transports::{
+    polling::PollingTransport, websocket::WebsocketTransport,
+    websocket_secure::WebsocketSecureTransport,
+};
+use crate::engineio::packet::{HandshakePacket, Packet, PacketId, Payload};
 use crate::error::{Error, Result};
 use bytes::Bytes;
+use native_tls::{Certificate, TlsConnector};
+use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
-use native_tls::{TlsConnector, Certificate};
-use reqwest::header::HeaderMap;
 use std::convert::TryInto;
 use std::thread::sleep;
 use std::{borrow::Cow, time::SystemTime};
@@ -17,9 +20,7 @@ use std::{
     time::{Duration, Instant},
 };
 use url::Url;
-use websocket::{
-    header::Headers,
-};
+use websocket::header::Headers;
 
 /// Type of a `Callback` function. (Normal closures can be passed in here).
 type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;

@@ -88,7 +88,6 @@ impl TryFrom<Packet> for HandshakePacket {
     }
 }
 
-
 impl Packet {
     /// Creates a new `Packet`.
     pub fn new(packet_id: PacketId, data: Bytes) -> Self {
