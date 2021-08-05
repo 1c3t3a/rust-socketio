@@ -4,14 +4,14 @@ use crate::engineio::packet::{Packet, PacketId, Payload, HandshakePacket};
 use super::transports::{polling::PollingTransport, websocket::WebsocketTransport, websocket_secure::WebsocketSecureTransport};
 use crate::error::{Error, Result};
 use bytes::Bytes;
-use native_tls::TlsConnector;
 use reqwest::{
     header::HeaderMap,
 };
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
-use std::thread::sleep;
+use native_tls::{TlsConnector, Certificate};
 use std::convert::TryInto;
+use std::thread::sleep;
 use std::{borrow::Cow, time::SystemTime};
 use std::{fmt::Debug, sync::atomic::Ordering};
 use std::{
@@ -651,11 +651,9 @@ mod test {
         let mut headers = HeaderMap::new();
         headers.insert(HOST, host.parse().unwrap());
         let mut builder = SocketBuilder::new(url);
+
         builder = builder.set_tls_config(
-            TlsConnector::builder()
-                .danger_accept_invalid_certs(true)
-                .build()
-                .unwrap(),
+            crate::test::tls_connector()?
         );
         builder = builder.set_headers(headers);
         let mut socket = builder.build_websocket_secure()?;
