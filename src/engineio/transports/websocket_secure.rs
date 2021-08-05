@@ -17,6 +17,7 @@ use websocket::{
     ws::dataframe::DataFrame,
     ClientBuilder as WsClientBuilder, Message,
 };
+use std::convert::TryFrom;
 
 #[derive(Clone)]
 pub struct WebsocketSecureTransport {
@@ -53,13 +54,13 @@ impl WebsocketSecureTransport {
         // send the probe packet, the text `2probe` represents a ping packet with
         // the content `probe`
         client.send_message(&Message::text(Cow::Borrowed(from_utf8(
-            &Packet::new(PacketId::Ping, Bytes::from("probe")).encode_packet(),
+            &Bytes::from(Packet::new(PacketId::Ping, Bytes::from("probe"))),
         )?)))?;
 
         // expect to receive a probe packet
         let message = client.recv_message()?;
         let payload = message.take_payload();
-        if Packet::decode_packet(Bytes::from(payload))?
+        if Packet::try_from(Bytes::from(payload))?
             != Packet::new(PacketId::Pong, Bytes::from("probe"))
         {
             return Err(Error::InvalidPacket());
@@ -68,7 +69,7 @@ impl WebsocketSecureTransport {
         // finally send the upgrade request. the payload `5` stands for an upgrade
         // packet without any payload
         client.send_message(&Message::text(Cow::Borrowed(from_utf8(
-            &Packet::new(PacketId::Upgrade, Bytes::from("")).encode_packet(),
+            &Bytes::from(Packet::new(PacketId::Upgrade, Bytes::from(""))),
         )?)))?;
 
         Ok(())
