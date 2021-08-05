@@ -345,12 +345,15 @@ impl<T: Transport> Socket<T> {
         );
 
         while self.connected.load(Ordering::Acquire) {
-            let packets = self.poll()?;
+            let packets = self.poll();
 
             // Double check that we have not disconnected since last loop.
             if !self.connected.load(Ordering::Acquire) {
                 break;
             }
+
+            // Only care about errors if the connection is still open.
+            let packets = packets?;
 
             if packets.is_none() {
                 break;
@@ -390,7 +393,11 @@ impl<T: Transport> Socket<T> {
                     }
                     PacketId::Ping => {
                         last_ping = Instant::now();
-                        self.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
+                        let result = self.emit(Packet::new(PacketId::Pong, Bytes::new()), false);
+                        // Only care about errors if the socket is still connected
+                        if self.connected.load(Ordering::Acquire) {
+                            result?;
+                        }
                     }
                     PacketId::Pong => {
                         // this will never happen as the pong packet is
@@ -428,14 +435,6 @@ impl<T: Transport> Socket<T> {
     // Check if the underlying transport client is connected.
     pub(crate) fn is_connected(&self) -> Result<bool> {
         Ok(self.connected.load(Ordering::Acquire))
-    }
-
-    /// Disconnects this client from the server by sending a `engine.io` closing
-    /// packet.
-    pub fn disconnect(&mut self) -> Result<()> {
-        let packet = Packet::new(PacketId::Close, Bytes::from_static(&[]));
-        self.connected.store(false, Ordering::Release);
-        self.emit(packet, false)
     }
 }
 
@@ -479,7 +478,7 @@ impl<T: Transport> Debug for Socket<T> {
 #[cfg(test)]
 mod test {
 
-    use std::{thread::sleep, time::Duration};
+    use std::{time::Duration};
 
     use crate::engineio::packet::PacketId;
 
@@ -491,50 +490,36 @@ mod test {
         let url = crate::engineio::test::engine_io_server()?;
         let mut socket = SocketBuilder::new(url).build()?;
 
-        assert!(socket
-            .on_open(|_| {
-                println!("Open event!");
-            })
-            .is_ok());
+        socket.on_open(|_| {
+            println!("Open event!");
+        })?;
 
-        assert!(socket
-            .on_packet(|packet| {
-                println!("Received packet: {:?}", packet);
-            })
-            .is_ok());
+        socket.on_packet(|packet| {
+            println!("Received packet: {:?}", packet);
+        })?;
 
-        assert!(socket
-            .on_data(|data| {
-                println!("Received packet: {:?}", std::str::from_utf8(&data));
-            })
-            .is_ok());
+        socket.on_data(|data| {
+            println!("Received packet: {:?}", std::str::from_utf8(&data));
+        })?;
 
         socket.connect()?;
 
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"Hello World"),),
-                false
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"Hello World")),
+            false,
+        )?;
 
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"Hello World2"),),
-                false
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"Hello World2")),
+            false,
+        )?;
 
-        assert!(socket
-            .emit(Packet::new(PacketId::Pong, Bytes::new()), false)
-            .is_ok());
+        socket.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
 
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"Hello World3"),),
-                false
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"Hello World3")),
+            false,
+        )?;
 
         let mut sut = socket.clone();
         thread::spawn(move || loop {
@@ -547,7 +532,7 @@ mod test {
             }
         });
 
-        assert!(socket.poll_cycle().is_ok());
+        socket.poll_cycle()?;
         Ok(())
     }
 
@@ -585,7 +570,7 @@ mod test {
             }
         });
 
-        assert!(sut.poll_cycle().is_ok());
+        sut.poll_cycle()?;
 
         let sut = SocketBuilder::new(url).build()?;
         assert!(sut.poll_cycle().is_err());
@@ -603,12 +588,10 @@ mod test {
 
         socket.connect().unwrap();
 
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
-                false,
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
+            false,
+        )?;
 
         socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
             println!(
@@ -617,12 +600,10 @@ mod test {
             );
         }))));
 
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
-                true
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
+            true,
+        )?;
 
         let mut sut = socket.clone();
         thread::spawn(move || loop {
@@ -635,7 +616,7 @@ mod test {
             }
         });
 
-        assert!(socket.poll_cycle().is_ok());
+        socket.poll_cycle()?;
 
         Ok(())
     }
@@ -656,12 +637,10 @@ mod test {
 
         socket.connect().unwrap();
 
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
-                false,
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
+            false,
+        )?;
 
         socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
             println!(
@@ -670,20 +649,10 @@ mod test {
             );
         }))));
 
-        // closes the connection
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"CLOSE")),
-                false,
-            )
-            .is_ok());
-
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
-                true
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
+            true,
+        )?;
 
         let mut sut = socket.clone();
         thread::spawn(move || loop {
@@ -696,7 +665,7 @@ mod test {
             }
         });
 
-        assert!(socket.poll_cycle().is_ok());
+        socket.poll_cycle()?;
         Ok(())
     }
 
@@ -709,12 +678,10 @@ mod test {
 
         socket.connect().unwrap();
 
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
-                false,
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
+            false,
+        )?;
 
         socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
             println!(
@@ -723,20 +690,10 @@ mod test {
             );
         }))));
 
-        // closes the connection
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"CLOSE")),
-                false,
-            )
-            .is_ok());
-
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
-                true
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
+            true,
+        )?;
 
         let mut sut = socket.clone();
         thread::spawn(move || loop {
@@ -749,7 +706,7 @@ mod test {
             }
         });
 
-        assert!(socket.poll_cycle().is_ok());
+        socket.poll_cycle()?;
         Ok(())
     }
 
