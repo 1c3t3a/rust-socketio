@@ -5,8 +5,6 @@ build:
 
 keys:
 	@./ci/keygen.sh node-engine-io-secure 127.0.0.1
-	@cp ./ci/cert/ca.crt /usr/local/share/ca-certificates/rust_socketio.crt
-	@update-ca-certificates
 
 test-fast: keys
 	@cargo test --verbose --package rust_socketio --lib -- engineio::packet && cargo test --verbose --package rust_socketio --lib -- socketio::packet
