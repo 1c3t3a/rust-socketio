@@ -1,7 +1,7 @@
 #![allow(unused)]
 use std::{ops::Deref, thread};
 
-use crate::engineio::packet::{decode_payload, encode_payload, Packet, PacketId};
+use crate::engineio::packet::{Packet, PacketId, Payload};
 use crate::error::{Error, Result};
 use adler32::adler32;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -28,6 +28,8 @@ use websocket::{
     ws::dataframe::DataFrame,
     ClientBuilder as WsClientBuilder, Message,
 };
+use std::convert::TryInto;
+use std::convert::TryFrom;
 
 /// Type of a `Callback` function. (Normal closures can be passed in here).
 type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
@@ -250,7 +252,7 @@ impl EngineSocket {
                         "ws" => full_address.set_scheme("http").unwrap(),
                         "wss" => full_address.set_scheme("https").unwrap(),
                         "http" | "https" => (),
-                        _ => return Err(Error::InvalidUrl(full_address.to_string())),
+                        _ => return Err(Error::InvalidUrlScheme(full_address.to_string())),
                     }
 
                     let response = client.lock()?.get(full_address).send()?.text()?;
@@ -297,7 +299,7 @@ impl EngineSocket {
                     return Err(error);
                 }
 
-                let error = Error::InvalidUrl(address.into());
+                let error = Error::InvalidUrlScheme(address.into());
                 self.call_error_callback(format!("{}", error))?;
                 Err(error)
             }
@@ -347,7 +349,7 @@ impl EngineSocket {
                 "http" => {
                     self.perform_upgrade_insecure(&full_address, &custom_headers)?;
                 }
-                _ => return Err(Error::InvalidUrl(full_address.to_string())),
+                _ => return Err(Error::InvalidUrlScheme(full_address.to_string())),
             }
 
             return Ok(());
@@ -456,10 +458,10 @@ impl EngineSocket {
 
         // send a post request with the encoded payload as body
         // if this is a binary attachment, then send the raw bytes
-        let data = if is_binary_att {
+        let data: Bytes = if is_binary_att {
             packet.data
         } else {
-            encode_payload(vec![packet])
+            packet.into()
         };
 
         match &self.transport.as_ref() {
@@ -605,7 +607,7 @@ impl EngineSocket {
                 return Ok(());
             }
 
-            let packets = decode_payload(data)?;
+            let packets = Payload::try_from(data)?;
 
             for packet in packets {
                 {
@@ -618,6 +620,13 @@ impl EngineSocket {
 
                 // check for the appropriate action or callback
                 match packet.packet_id {
+                    PacketId::MessageBase64 => {
+                        let on_data = self.on_data.read()?;
+                        if let Some(function) = on_data.as_ref() {
+                            spawn_scoped!(function(packet.data));
+                        }
+                        drop(on_data);
+                    }
                     PacketId::Message => {
                         let on_data = self.on_data.read()?;
                         if let Some(function) = on_data.as_ref() {
@@ -968,7 +977,7 @@ mod test {
 
         let _error = sut.open(illegal_url).expect_err("Error");
         assert!(matches!(
-            Error::InvalidUrl(String::from("this is illegal")),
+            Error::InvalidUrlScheme(String::from("this is illegal")),
             _error
         ));
 
@@ -977,7 +986,7 @@ mod test {
 
         let _error = sut.open(invalid_protocol).expect_err("Error");
         assert!(matches!(
-            Error::InvalidUrl(String::from("file://localhost:4200")),
+            Error::InvalidUrlScheme(String::from("file://localhost:4200")),
             _error
         ));
 
