@@ -29,6 +29,8 @@ services:
             context: .. 
             dockerfile: ./.devcontainer/Dockerfile
         command: /bin/sh -c "while sleep 10000d; do :; done"
+        security_opt:
+            - seccomp:unconfined
         volumes: 
             - "..:/workspace/rust-socketio"
         environment:
