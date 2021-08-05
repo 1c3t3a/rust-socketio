@@ -545,7 +545,7 @@ mod test {
             loop {
                 thread::sleep(Duration::from_secs(3));
                 let result = sut.close();
-                if let Ok(result) = result {
+                if result.is_ok() {
                     break;
                 } else if let Err(error) = result {
                     println!("Closing thread errored! Trying again... {}", error);
@@ -585,7 +585,7 @@ mod test {
             loop {
                 thread::sleep(Duration::from_secs(3));
                 let result = socket.close();
-                if let Ok(result) = result {
+                if result.is_ok() {
                     break;
                 } else if let Err(error) = result {
                     println!("Closing thread errored! Trying again... {}", error);
@@ -637,7 +637,7 @@ mod test {
             loop {
                 thread::sleep(Duration::from_secs(3));
                 let result = sut.close();
-                if let Ok(result) = result {
+                if result.is_ok() {
                     break;
                 } else if let Err(error) = result {
                     println!("Closing thread errored! Trying again... {}", error);
@@ -704,7 +704,7 @@ mod test {
             loop {
                 thread::sleep(Duration::from_secs(3));
                 let result = sut.close();
-                if let Ok(result) = result {
+                if result.is_ok() {
                     break;
                 } else if let Err(error) = result {
                     println!("Closing thread errored! Trying again... {}", error);
@@ -759,7 +759,7 @@ mod test {
             loop {
                 thread::sleep(Duration::from_secs(3));
                 let result = sut.close();
-                if let Ok(result) = result {
+                if result.is_ok() {
                     break;
                 } else if let Err(error) = result {
                     println!("Closing thread errored! Trying again... {}", error);
