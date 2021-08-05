@@ -374,7 +374,7 @@ impl<T: Transport> Socket<T> {
                     }
                     PacketId::Message => {
                         if let Some(on_data) = self.on_data.read()?.as_ref() {
-                            spawn_scoped!(on_data(Bytes::from(packet)));
+                            spawn_scoped!(on_data(packet.data));
                         }
                     }
 
