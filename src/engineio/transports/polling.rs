@@ -37,8 +37,7 @@ impl PollingTransport {
         };
 
         let mut url = base_url;
-        url.query_pairs_mut()
-            .append_pair("transport", "polling");
+        url.query_pairs_mut().append_pair("transport", "polling");
 
         PollingTransport {
             client: Arc::new(Mutex::new(client)),
