@@ -11,6 +11,8 @@ use reqwest::{
     header::HeaderMap,
 };
 use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::{borrow::Cow, time::SystemTime};
 use std::{fmt::Debug, sync::atomic::Ordering};
 use std::{
@@ -28,8 +30,6 @@ use websocket::{
     ws::dataframe::DataFrame,
     ClientBuilder as WsClientBuilder, Message,
 };
-use std::convert::TryInto;
-use std::convert::TryFrom;
 
 /// Type of a `Callback` function. (Normal closures can be passed in here).
 type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;

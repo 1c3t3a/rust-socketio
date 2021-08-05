@@ -1,11 +1,11 @@
 extern crate base64;
-use std::ops::Index;
 use base64::{decode, encode};
 use bytes::{BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use std::char;
-use std::convert::TryInto;
 use std::convert::TryFrom;
+use std::convert::TryInto;
+use std::ops::Index;
 
 use crate::error::{Error, Result};
 /// Enumeration of the `engine.io` `Packet` types.
@@ -41,7 +41,7 @@ impl From<PacketId> for u8 {
             PacketId::Message => 4,
             PacketId::MessageBase64 => 4,
             PacketId::Upgrade => 5,
-            PacketId::Noop => 6
+            PacketId::Noop => 6,
         }
     }
 }
@@ -50,7 +50,6 @@ impl TryFrom<u8> for PacketId {
     type Error = Error;
     /// Converts a byte into the corresponding `PacketId`.
     fn try_from(b: u8) -> Result<PacketId> {
-        
         match b as char {
             '0' => Ok(PacketId::Open),
             '1' => Ok(PacketId::Close),
@@ -64,9 +63,8 @@ impl TryFrom<u8> for PacketId {
     }
 }
 
-
 /// Data which gets exchanged in a handshake as defined by the server.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct HandshakePacket {
     pub sid: String,
     pub upgrades: Vec<String>,
@@ -76,10 +74,10 @@ pub struct HandshakePacket {
     pub ping_timeout: u64,
 }
 
-impl TryInto<HandshakePacket> for Packet {
+impl TryFrom<Packet> for HandshakePacket {
     type Error = Error;
-    fn try_into(self) -> Result<HandshakePacket> {
-        Ok(serde_json::from_slice(self.data[..].as_ref())?)
+    fn try_from(packet: Packet) -> Result<HandshakePacket> {
+        Ok(serde_json::from_slice(packet.data[..].as_ref())?)
     }
 }
 
@@ -93,10 +91,7 @@ pub struct Packet {
 impl Packet {
     /// Creates a new `Packet`.
     pub fn new(packet_id: PacketId, data: Bytes) -> Self {
-        Packet {
-            packet_id,
-            data,
-        }
+        Packet { packet_id, data }
     }
 }
 
@@ -325,5 +320,25 @@ mod tests {
         let sut = PacketId::try_from(42);
         assert!(sut.is_err());
         assert!(matches!(sut.unwrap_err(), Error::InvalidPacketId(42)));
+    }
+
+    #[test]
+    fn test_handshake_packet() {
+        assert!(
+            HandshakePacket::try_from(Packet::new(PacketId::Message, Bytes::from("test"))).is_err()
+        );
+        let packet = HandshakePacket {
+            ping_interval: 10000,
+            ping_timeout: 1000,
+            sid: "Test".to_owned(),
+            upgrades: vec!["websocket".to_owned(), "test".to_owned()],
+        };
+        let encoded: String = serde_json::to_string(&packet).unwrap();
+
+        assert_eq!(
+            packet,
+            HandshakePacket::try_from(Packet::new(PacketId::Message, Bytes::from(encoded)))
+                .unwrap()
+        );
     }
 }
