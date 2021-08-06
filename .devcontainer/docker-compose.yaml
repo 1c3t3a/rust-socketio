@@ -6,18 +6,24 @@ services:
         command: [ "node", "/test/engine-io-secure.js" ]
         ports:
             - "4202:4202"
+        environment:
+            - "DEBUG=*"
     node-engine-io:
         build:
             context: ../ci
         command: [ "node", "/test/engine-io.js" ]
         ports:
             - "4201:4201"
+        environment:
+            - "DEBUG=*"
     node-socket-io:
         build:
             context: ../ci
         command: [ "node", "/test/socket-io.js" ]
         ports:
             - "4200:4200"
+        environment:
+            - "DEBUG=*"
     rust-client:
         build: 
             context: .. 
