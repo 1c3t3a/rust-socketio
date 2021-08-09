@@ -91,17 +91,17 @@ impl SocketBuilder {
         Ok((handshake, url.clone()))
     }
 
-    pub fn build(&self) -> Result<Socket<PollingTransport>> {
+    pub fn build(self) -> Result<Socket<PollingTransport>> {
         let (handshake, url) = self._build()?;
 
         // Make a polling transport with new sid
-        let transport = PollingTransport::new(url, self.tls_config.clone(), self.headers.clone());
+        let transport = PollingTransport::new(url, self.tls_config, self.headers);
 
         // If we can't upgrade or upgrade fails use polling
         Ok(Socket::new(transport, handshake))
     }
 
-    pub fn build_websocket(&self) -> Result<Socket<WebsocketTransport>> {
+    pub fn build_websocket(self) -> Result<Socket<WebsocketTransport>> {
         let (handshake, url) = self._build()?;
 
         // SAFTEY: Already a Url
@@ -127,7 +127,7 @@ impl SocketBuilder {
         }
     }
 
-    pub fn build_websocket_secure(&self) -> Result<Socket<WebsocketSecureTransport>> {
+    pub fn build_websocket_secure(self) -> Result<Socket<WebsocketSecureTransport>> {
         let (handshake, url) = self._build()?;
 
         // SAFTEY: Already a Url
