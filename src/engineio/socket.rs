@@ -7,13 +7,11 @@ use super::transports::{
 use crate::engineio::packet::{HandshakePacket, Packet, PacketId, Payload};
 use crate::error::{Error, Result};
 use bytes::Bytes;
-use native_tls::{Certificate, TlsConnector};
+use native_tls::TlsConnector;
 use reqwest::header::HeaderMap;
-use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::thread::sleep;
-use std::{borrow::Cow, time::SystemTime};
 use std::{fmt::Debug, sync::atomic::Ordering};
 use std::{
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
