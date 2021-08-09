@@ -67,9 +67,9 @@ impl SocketBuilder {
         self
     }
 
-    fn _build(&self) -> Result<(HandshakePacket, Url)> {
+    fn _handshake(&self) -> Result<(HandshakePacket, Url)> {
         let mut url = self.url.clone();
-        let url = url.query_pairs_mut().append_pair("EIO", "4").finish();
+        url.query_pairs_mut().append_pair("EIO", "4");
 
         // No path add engine.io
         if url.path() == "/" {
@@ -83,16 +83,13 @@ impl SocketBuilder {
         let handshake: HandshakePacket = Packet::try_from(transport.poll()?)?.try_into()?;
 
         // update the base_url with the new sid
-        let url = url
-            .query_pairs_mut()
-            .append_pair("sid", &handshake.sid[..])
-            .finish();
+        url.query_pairs_mut().append_pair("sid", &handshake.sid[..]);
 
-        Ok((handshake, url.clone()))
+        Ok((handshake, url))
     }
 
     pub fn build(self) -> Result<Socket<PollingTransport>> {
-        let (handshake, url) = self._build()?;
+        let (handshake, url) = self._handshake()?;
 
         // Make a polling transport with new sid
         let transport = PollingTransport::new(url, self.tls_config, self.headers);
@@ -102,7 +99,7 @@ impl SocketBuilder {
     }
 
     pub fn build_websocket(self) -> Result<Socket<WebsocketTransport>> {
-        let (handshake, url) = self._build()?;
+        let (handshake, url) = self._handshake()?;
 
         // SAFTEY: Already a Url
         let url = websocket::client::Url::parse(&url.to_string())?;
@@ -128,7 +125,7 @@ impl SocketBuilder {
     }
 
     pub fn build_websocket_secure(self) -> Result<Socket<WebsocketSecureTransport>> {
-        let (handshake, url) = self._build()?;
+        let (handshake, url) = self._handshake()?;
 
         // SAFTEY: Already a Url
         let url = websocket::client::Url::parse(&url.to_string())?;
