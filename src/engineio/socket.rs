@@ -300,10 +300,7 @@ impl Socket {
         Ok(())
     }
 
-    /// Opens the connection to a specified server. Includes an opening `GET`
-    /// request to the server, the server passes back the handshake data in the
-    /// response. If the handshake data mentions a websocket upgrade possibility,
-    /// we try to upgrade the connection. Afterwards a first Pong packet is sent
+    /// Opens the connection to a specified server. The first Pong packet is sent
     /// to the server to trigger the Ping-cycle.
     pub fn connect(&mut self) -> Result<()> {
         // SAFETY: Has valid handshake due to type
