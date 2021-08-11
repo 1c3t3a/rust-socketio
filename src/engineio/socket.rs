@@ -392,6 +392,7 @@ impl Socket {
                 break;
             }
 
+            // SAFETY: packets checked to be none before
             for packet in packets.unwrap() {
                 // check for the appropriate action or callback
                 if let Some(on_packet) = self.on_packet.read()?.as_ref() {
@@ -399,11 +400,9 @@ impl Socket {
                 }
                 match packet.packet_id {
                     PacketId::MessageBase64 => {
-                        let on_data = self.on_data.read()?;
-                        if let Some(function) = on_data.as_ref() {
-                            spawn_scoped!(function(packet.data));
+                        if let Some(on_data) = self.on_data.read()?.as_ref() {
+                            spawn_scoped!(on_data(packet.data));
                         }
-                        drop(on_data);
                     }
                     PacketId::Message => {
                         if let Some(on_data) = self.on_data.read()?.as_ref() {
