@@ -440,6 +440,8 @@ impl Socket {
                 }
             }
 
+            // TODO: respect timeout properly.
+            // This check only happens after a valid response from the server
             if server_timeout < last_ping.elapsed() {
                 // the server is unreachable
                 // set current state to not connected and stop polling
