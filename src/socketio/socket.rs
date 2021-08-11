@@ -51,7 +51,7 @@ impl SocketBuilder {
     ///
     //TODO: Remove trailing slash when URL parsing is properly handled.
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .set_namespace("/admin")
+    ///     .namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("test", callback)
     ///     .connect()
@@ -76,7 +76,7 @@ impl SocketBuilder {
 
     /// Sets the target namespace of the client. The namespace should start
     /// with a leading `/`. Valid examples are e.g. `/admin`, `/foo`.
-    pub fn set_namespace<T: Into<String>>(mut self, namespace: T) -> Result<Self> {
+    pub fn namespace<T: Into<String>>(mut self, namespace: T) -> Result<Self> {
         let mut nsp = namespace.into();
         if !nsp.starts_with('/') {
             nsp = "/".to_owned() + &nsp;
@@ -100,7 +100,7 @@ impl SocketBuilder {
     /// };
     ///
     /// let socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .set_namespace("/admin")
+    ///     .namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("test", callback)
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
@@ -131,14 +131,14 @@ impl SocketBuilder {
     ///            .expect("Found illegal configuration");
     ///
     /// let socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .set_namespace("/admin")
+    ///     .namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
-    ///     .set_tls_config(tls_connector)
+    ///     .tls_config(tls_connector)
     ///     .connect();
     ///
     /// ```
-    pub fn set_tls_config(mut self, tls_config: TlsConnector) -> Self {
+    pub fn tls_config(mut self, tls_config: TlsConnector) -> Self {
         self.tls_config = Some(tls_config);
         self
     }
@@ -153,14 +153,14 @@ impl SocketBuilder {
     ///
     ///
     /// let socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .set_namespace("/admin")
+    ///     .namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
-    ///     .set_opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
+    ///     .opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
     ///     .connect();
     ///
     /// ```
-    pub fn set_opening_header<K: IntoHeaderName>(mut self, key: K, val: HeaderValue) -> Self {
+    pub fn opening_header<K: IntoHeaderName>(mut self, key: K, val: HeaderValue) -> Self {
         match self.opening_headers {
             Some(ref mut map) => {
                 map.insert(key, val);
@@ -436,7 +436,7 @@ mod test {
 
         // expect an illegal namespace
         assert!(SocketBuilder::new(url.clone())
-            .set_namespace("illegal")
+            .namespace("illegal")
             .is_err());
 
         // test socket build logic
@@ -448,11 +448,11 @@ mod test {
             .expect("Found illegal configuration");
 
         let socket = socket_builder
-            .set_namespace("/")
+            .namespace("/")
             .expect("Error!")
-            .set_tls_config(tls_connector)
-            .set_opening_header(HOST, "localhost".parse().unwrap())
-            .set_opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
+            .tls_config(tls_connector)
+            .opening_header(HOST, "localhost".parse().unwrap())
+            .opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
             .on("test", |str, _| println!("Received: {:#?}", str))
             .on("message", |payload, _| println!("{:#?}", payload))
             .connect();
