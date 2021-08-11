@@ -62,58 +62,63 @@ impl Packet {
             attachments,
         }
     }
+}
 
+impl From<&Packet> for Bytes {
     /// Method for encoding from a `Packet` to a `u8` byte stream.
     /// The binary payload of a packet is not put at the end of the
     /// stream as it gets handled and send by it's own logic via the socket.
-    pub fn encode(&self) -> Bytes {
+    fn from(packet: &Packet) -> Bytes {
         // first the packet type
-        let mut string = (self.packet_type as u8).to_string();
+        let mut string = (packet.packet_type as u8).to_string();
 
         // eventually a number of attachments, followed by '-'
-        if let PacketId::BinaryAck | PacketId::BinaryEvent = self.packet_type {
-            string.push_str(&self.attachments.as_ref().unwrap().to_string());
+        if let PacketId::BinaryAck | PacketId::BinaryEvent = packet.packet_type {
+            string.push_str(&packet.attachments.as_ref().unwrap().to_string());
             string.push('-');
         }
 
         // if the namespace is different from the default one append it as well,
         // followed by ','
-        if self.nsp != "/" {
-            string.push_str(self.nsp.as_ref());
+        if packet.nsp != "/" {
+            string.push_str(packet.nsp.as_ref());
             string.push(',');
         }
 
         // if an id is present append it...
-        if let Some(id) = self.id.as_ref() {
+        if let Some(id) = packet.id.as_ref() {
             string.push_str(&id.to_string());
         }
 
         let mut buffer = BytesMut::new();
         buffer.put(string.as_ref());
-        if self.binary_data.as_ref().is_some() {
+        if packet.binary_data.as_ref().is_some() {
             // check if an event type is present
-            let placeholder = if let Some(event_type) = self.data.as_ref() {
+            let placeholder = if let Some(event_type) = packet.data.as_ref() {
                 format!(
                     "[{},{{\"_placeholder\":true,\"num\":{}}}]",
                     event_type,
-                    self.attachments.unwrap() - 1,
+                    packet.attachments.unwrap() - 1,
                 )
             } else {
                 format!(
                     "[{{\"_placeholder\":true,\"num\":{}}}]",
-                    self.attachments.unwrap() - 1,
+                    packet.attachments.unwrap() - 1,
                 )
             };
 
             // build the buffers
             buffer.put(placeholder.as_ref());
-        } else if let Some(data) = self.data.as_ref() {
+        } else if let Some(data) = packet.data.as_ref() {
             buffer.put(data.as_ref());
         }
 
         buffer.freeze()
     }
+}
 
+impl TryFrom<&Bytes> for Packet {
+    type Error = Error;
     /// Decodes a packet given a `Bytes` type.
     /// The binary payload of a packet is not put at the end of the
     /// stream as it gets handled and send by it's own logic via the socket.
@@ -121,7 +126,7 @@ impl Packet {
     /// binary data, instead the socket is responsible for handling
     /// this member. This is done because the attachment is usually
     /// send in another packet.
-    pub fn decode_bytes<'a>(payload: &'a Bytes) -> Result<Self> {
+    fn try_from(payload: &Bytes) -> Result<Packet> {
         let mut i = 0;
         let packet_id = PacketId::try_from(*payload.first().ok_or(Error::EmptyPacket())?)?;
 
@@ -144,7 +149,7 @@ impl Packet {
             None
         };
 
-        let nsp: &'a str = if payload.get(i + 1).ok_or(Error::IncompletePacket())? == &b'/' {
+        let nsp: &str = if payload.get(i + 1).ok_or(Error::IncompletePacket())? == &b'/' {
             let mut start = i + 1;
             while payload.get(i).ok_or(Error::IncompletePacket())? != &b',' && i < payload.len() {
                 i += 1;
@@ -257,7 +262,7 @@ mod test {
     /// https://github.com/socketio/socket.io-protocol
     fn test_decode() {
         let payload = Bytes::from_static(b"0{\"token\":\"123\"}");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -273,7 +278,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"0/admin,{\"token\":\"123\"}");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -289,7 +294,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"1/admin,");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -305,7 +310,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"2[\"hello\",1]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -321,7 +326,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"2/admin,456[\"project:delete\",123]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -337,7 +342,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"3/admin,456[]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -353,7 +358,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"4/admin,{\"message\":\"Not authorized\"}");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -369,7 +374,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"51-[\"hello\",{\"_placeholder\":true,\"num\":0}]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -387,7 +392,7 @@ mod test {
         let payload = Bytes::from_static(
             b"51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]",
         );
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -403,7 +408,7 @@ mod test {
         );
 
         let payload = Bytes::from_static(b"61-/admin,456[{\"_placeholder\":true,\"num\":0}]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -433,7 +438,7 @@ mod test {
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "0{\"token\":\"123\"}".to_string().into_bytes()
         );
 
@@ -447,7 +452,7 @@ mod test {
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "0/admin,{\"token\":\"123\"}".to_string().into_bytes()
         );
 
@@ -460,7 +465,7 @@ mod test {
             None,
         );
 
-        assert_eq!(packet.encode(), "1/admin,".to_string().into_bytes());
+        assert_eq!(Bytes::from(&packet), "1/admin,".to_string().into_bytes());
 
         let packet = Packet::new(
             PacketId::Event,
@@ -471,7 +476,10 @@ mod test {
             None,
         );
 
-        assert_eq!(packet.encode(), "2[\"hello\",1]".to_string().into_bytes());
+        assert_eq!(
+            Bytes::from(&packet),
+            "2[\"hello\",1]".to_string().into_bytes()
+        );
 
         let packet = Packet::new(
             PacketId::Event,
@@ -483,7 +491,7 @@ mod test {
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "2/admin,456[\"project:delete\",123]"
                 .to_string()
                 .into_bytes()
@@ -498,7 +506,10 @@ mod test {
             None,
         );
 
-        assert_eq!(packet.encode(), "3/admin,456[]".to_string().into_bytes());
+        assert_eq!(
+            Bytes::from(&packet),
+            "3/admin,456[]".to_string().into_bytes()
+        );
 
         let packet = Packet::new(
             PacketId::ConnectError,
@@ -510,7 +521,7 @@ mod test {
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "4/admin,{\"message\":\"Not authorized\"}"
                 .to_string()
                 .into_bytes()
@@ -526,7 +537,7 @@ mod test {
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "51-[\"hello\",{\"_placeholder\":true,\"num\":0}]"
                 .to_string()
                 .into_bytes()
@@ -542,7 +553,7 @@ mod test {
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]"
                 .to_string()
                 .into_bytes()
@@ -558,7 +569,7 @@ mod test {
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "61-/admin,456[{\"_placeholder\":true,\"num\":0}]"
                 .to_string()
                 .into_bytes()
