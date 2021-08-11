@@ -5,7 +5,6 @@ use crate::{
     engineio::{
         packet::{Packet as EnginePacket, PacketId as EnginePacketId},
         socket::Socket as EngineIoSocket,
-        transports::polling::PollingTransport as EnginePollingTransport,
     },
     Socket,
 };
@@ -45,7 +44,7 @@ pub struct Ack {
 #[derive(Clone)]
 pub struct TransportClient {
     // TODO: Allow for dynamic typing here when refactoring socket.io
-    engine_socket: Arc<RwLock<EngineIoSocket<EnginePollingTransport>>>,
+    engine_socket: Arc<RwLock<EngineIoSocket>>,
     host: Arc<Url>,
     connected: Arc<AtomicBool>,
     on: Arc<Vec<EventCallback>>,
@@ -81,7 +80,7 @@ impl TransportClient {
             engine_socket_builder = engine_socket_builder.set_headers(opening_headers);
         }
         Ok(TransportClient {
-            engine_socket: Arc::new(RwLock::new(engine_socket_builder.build()?)),
+            engine_socket: Arc::new(RwLock::new(engine_socket_builder.build_with_fallback()?)),
             host: Arc::new(url),
             connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),

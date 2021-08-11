@@ -4,7 +4,7 @@ use bytes::Bytes;
 use std::time::SystemTime;
 use url::Url;
 
-pub trait Transport: Clone + Send + Sync {
+pub trait Transport: Send + Sync {
     /// Sends a packet to the server. This optionally handles sending of a
     /// socketio binary attachment via the boolean attribute `is_binary_att`.
     fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()>;
@@ -29,5 +29,11 @@ pub trait Transport: Clone + Send + Sync {
         let mut url = self.base_url()?;
         url.query_pairs_mut().append_pair("t", &hash.to_string());
         Ok(url)
+    }
+}
+
+impl std::fmt::Debug for dyn Transport {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!("Transport(base_url: {:?})", self.base_url(),))
     }
 }

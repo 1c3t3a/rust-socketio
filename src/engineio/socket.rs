@@ -26,8 +26,8 @@ type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
 /// An `engine.io` socket which manages a connection with the server and allows
 /// it to register common callbacks.
 #[derive(Clone)]
-pub struct Socket<T: Transport> {
-    transport: Arc<T>,
+pub struct Socket {
+    transport: Arc<Box<dyn Transport>>,
     //TODO: Store these in a map
     pub on_error: Callback<String>,
     pub on_open: Callback<()>,
@@ -40,10 +40,12 @@ pub struct Socket<T: Transport> {
     connection_data: Arc<HandshakePacket>,
 }
 
+#[derive(Clone, Debug)]
 pub struct SocketBuilder {
     url: Url,
     tls_config: Option<TlsConnector>,
     headers: Option<HeaderMap>,
+    handshake: Option<HandshakePacket>,
 }
 
 impl SocketBuilder {
@@ -52,6 +54,7 @@ impl SocketBuilder {
             url,
             headers: None,
             tls_config: None,
+            handshake: None,
         }
     }
 
@@ -65,7 +68,12 @@ impl SocketBuilder {
         self
     }
 
-    fn handshake(&self) -> Result<(HandshakePacket, Url)> {
+    fn handshake(&mut self) -> Result<()> {
+        // No need to handshake twice
+        if self.handshake.is_some() {
+            return Ok(());
+        }
+
         let mut url = self.url.clone();
         url.query_pairs_mut().append_pair("EIO", "4");
 
@@ -83,73 +91,106 @@ impl SocketBuilder {
         // update the base_url with the new sid
         url.query_pairs_mut().append_pair("sid", &handshake.sid[..]);
 
-        Ok((handshake, url))
+        self.handshake = Some(handshake);
+
+        self.url = url;
+
+        Ok(())
     }
 
-    pub fn build(self) -> Result<Socket<PollingTransport>> {
-        let (handshake, url) = self.handshake()?;
+    /// Build websocket if allowed, if not fall back to polling
+    pub fn build(mut self) -> Result<Socket> {
+        if self.websocket_upgrade()? {
+            match self.url.scheme() {
+                "http" => self.build_websocket(),
+                "https" => self.build_websocket_secure(),
+                _ => self.build_polling(),
+            }
+        } else {
+            self.build_polling()
+        }
+    }
+
+    /// Build socket with polling transport
+    pub fn build_polling(mut self) -> Result<Socket> {
+        self.handshake()?;
 
         // Make a polling transport with new sid
-        let transport = PollingTransport::new(url, self.tls_config, self.headers);
+        let transport = PollingTransport::new(self.url, self.tls_config, self.headers);
 
-        // If we can't upgrade or upgrade fails use polling
-        Ok(Socket::new(transport, handshake))
+        // SAFETY: handshake function called previously.
+        Ok(Socket::new(transport, self.handshake.unwrap()))
     }
 
-    pub fn build_websocket(self) -> Result<Socket<WebsocketTransport>> {
-        let (handshake, url) = self.handshake()?;
+    /// Build socket with insecure websocket transport
+    pub fn build_websocket(mut self) -> Result<Socket> {
+        self.handshake()?;
 
-        // SAFTEY: Already a Url
-        let url = websocket::client::Url::parse(&url.to_string())?;
+        // SAFETY: Already a Url
+        let url = websocket::client::Url::parse(&self.url.to_string())?;
 
-        // check if we could upgrade to websockets
-        let websocket_upgrade = handshake
-            .upgrades
-            .iter()
-            .any(|upgrade| upgrade.to_lowercase() == *"websocket");
-
-        if websocket_upgrade {
-            match url.scheme() {
-                "http" => {
-                    let transport = WebsocketTransport::new(url, self.get_ws_headers()?);
-                    transport.upgrade()?;
-                    Ok(Socket::<WebsocketTransport>::new(transport, handshake))
-                }
-                _ => Err(Error::InvalidUrlScheme(url.scheme().to_string())),
+        if self.websocket_upgrade()? {
+            if url.scheme() == "http" {
+                let transport = WebsocketTransport::new(url, self.get_ws_headers()?);
+                transport.upgrade()?;
+                // SAFETY: handshake function called previously.
+                Ok(Socket::new(transport, self.handshake.unwrap()))
+            } else {
+                Err(Error::InvalidUrlScheme(url.scheme().to_string()))
             }
         } else {
             Err(Error::IllegalWebsocketUpgrade())
         }
     }
 
-    pub fn build_websocket_secure(self) -> Result<Socket<WebsocketSecureTransport>> {
-        let (handshake, url) = self.handshake()?;
+    /// Build socket with secure websocket transport
+    pub fn build_websocket_secure(mut self) -> Result<Socket> {
+        self.handshake()?;
 
-        // SAFTEY: Already a Url
-        let url = websocket::client::Url::parse(&url.to_string())?;
+        // SAFETY: Already a Url
+        let url = websocket::client::Url::parse(&self.url.to_string())?;
 
-        // check if we could upgrade to websockets
-        let websocket_upgrade = handshake
-            .upgrades
-            .iter()
-            .any(|upgrade| upgrade.to_lowercase() == *"websocket");
-
-        if websocket_upgrade {
-            match url.scheme() {
-                "https" => {
-                    let transport = WebsocketSecureTransport::new(
-                        url,
-                        self.tls_config.clone(),
-                        self.get_ws_headers()?,
-                    );
-                    transport.upgrade()?;
-                    Ok(Socket::new(transport, handshake))
-                }
-                _ => Err(Error::InvalidUrlScheme(url.scheme().to_string())),
+        if self.websocket_upgrade()? {
+            if url.scheme() == "https" {
+                let transport = WebsocketSecureTransport::new(
+                    url,
+                    self.tls_config.clone(),
+                    self.get_ws_headers()?,
+                );
+                transport.upgrade()?;
+                // SAFETY: handshake function called previously.
+                Ok(Socket::new(transport, self.handshake.unwrap()))
+            } else {
+                Err(Error::InvalidUrlScheme(url.scheme().to_string()))
             }
         } else {
             Err(Error::IllegalWebsocketUpgrade())
         }
+    }
+
+    /// Build websocket if allowed, if not allowed or errored fall back to polling.
+    /// WARNING: websocket errors suppressed, no indication of websocket success or failure.
+    pub fn build_with_fallback(self) -> Result<Socket> {
+        let result = self.clone().build();
+        if result.is_err() {
+            self.build_polling()
+        } else {
+            result
+        }
+    }
+
+    /// Checks the handshake to see if websocket upgrades are allowed
+    fn websocket_upgrade(&mut self) -> Result<bool> {
+        // check if we could upgrade to websockets
+        self.handshake()?;
+        // SAFETY: handshake set by above function.
+        Ok(self
+            .handshake
+            .as_ref()
+            .unwrap()
+            .upgrades
+            .iter()
+            .any(|upgrade| upgrade.to_lowercase() == *"websocket"))
     }
 
     /// Converts Reqwest headers to Websocket headers
@@ -167,15 +208,15 @@ impl SocketBuilder {
     }
 }
 
-impl<T: Transport> Socket<T> {
-    pub fn new(transport: T, handshake: HandshakePacket) -> Self {
+impl Socket {
+    pub fn new<T: Transport + 'static>(transport: T, handshake: HandshakePacket) -> Self {
         Socket {
             on_error: Arc::new(RwLock::new(None)),
             on_open: Arc::new(RwLock::new(None)),
             on_close: Arc::new(RwLock::new(None)),
             on_data: Arc::new(RwLock::new(None)),
             on_packet: Arc::new(RwLock::new(None)),
-            transport: Arc::new(transport),
+            transport: Arc::new(Box::new(transport)),
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
@@ -433,10 +474,11 @@ impl<T: Transport> Socket<T> {
     }
 }
 
-impl<T: Transport> Debug for Socket<T> {
+impl Debug for Socket {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "EngineSocket(transport: ?, on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, connection_data: {:?})",
+            "EngineSocket(transport: {:?}, on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, connection_data: {:?})",
+            self.transport,
             if self.on_error.read().unwrap().is_some() {
                 "Fn(String)"
             } else {
@@ -579,7 +621,7 @@ mod test {
     #[test]
     fn test_connection_polling() -> Result<()> {
         let url = crate::engineio::test::engine_io_server()?;
-        let mut socket = SocketBuilder::new(url).build()?;
+        let mut socket = SocketBuilder::new(url).build_polling()?;
 
         socket.connect().unwrap();
 
