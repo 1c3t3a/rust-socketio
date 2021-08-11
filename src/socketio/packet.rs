@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 use byte::{ctx::Str, BytesExt};
 use bytes::{BufMut, Bytes, BytesMut};
 use regex::Regex;
+use std::convert::TryFrom;
 
 /// An enumeration of the different `Packet` types in the `socket.io` protocol.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -26,18 +27,19 @@ pub struct Packet {
     pub attachments: Option<u8>,
 }
 
-/// Converts a `u8` into a `PacketId`.
-#[inline]
-pub const fn u8_to_packet_id(b: u8) -> Result<PacketId> {
-    match b as char {
-        '0' => Ok(PacketId::Connect),
-        '1' => Ok(PacketId::Disconnect),
-        '2' => Ok(PacketId::Event),
-        '3' => Ok(PacketId::Ack),
-        '4' => Ok(PacketId::ConnectError),
-        '5' => Ok(PacketId::BinaryEvent),
-        '6' => Ok(PacketId::BinaryAck),
-        _ => Err(Error::InvalidPacketId(b)),
+impl TryFrom<u8> for PacketId {
+    type Error = Error;
+    fn try_from(b: u8) -> Result<Self> {
+        match b as char {
+            '0' => Ok(PacketId::Connect),
+            '1' => Ok(PacketId::Disconnect),
+            '2' => Ok(PacketId::Event),
+            '3' => Ok(PacketId::Ack),
+            '4' => Ok(PacketId::ConnectError),
+            '5' => Ok(PacketId::BinaryEvent),
+            '6' => Ok(PacketId::BinaryAck),
+            _ => Err(Error::InvalidPacketId(b)),
+        }
     }
 }
 
@@ -121,7 +123,7 @@ impl Packet {
     /// send in another packet.
     pub fn decode_bytes<'a>(payload: &'a Bytes) -> Result<Self> {
         let mut i = 0;
-        let packet_id = u8_to_packet_id(*payload.first().ok_or(Error::EmptyPacket())?)?;
+        let packet_id = PacketId::try_from(*payload.first().ok_or(Error::EmptyPacket())?)?;
 
         let attachments = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
             let start = i + 1;
@@ -565,7 +567,7 @@ mod test {
 
     #[test]
     fn test_illegal_packet_id() {
-        let _sut = u8_to_packet_id(42).expect_err("error!");
+        let _sut = PacketId::try_from(42).expect_err("error!");
         assert!(matches!(Error::InvalidPacketId(42), _sut))
     }
 }
