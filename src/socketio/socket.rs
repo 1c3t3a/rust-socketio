@@ -434,11 +434,6 @@ mod test {
     fn socket_io_builder_integration() -> Result<()> {
         let url = crate::socketio::test::socket_io_server()?;
 
-        // expect an illegal namespace
-        assert!(SocketBuilder::new(url.clone())
-            .namespace("illegal")
-            .is_err());
-
         // test socket build logic
         let socket_builder = SocketBuilder::new(url);
 
