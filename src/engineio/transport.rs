@@ -1,10 +1,11 @@
+use super::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
 use crate::error::Result;
 use adler32::adler32;
 use bytes::Bytes;
 use std::time::SystemTime;
 use url::Url;
 
-pub trait Transport: Send + Sync {
+pub trait Transport {
     /// Sends a packet to the server. This optionally handles sending of a
     /// socketio binary attachment via the boolean attribute `is_binary_att`.
     fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()>;
@@ -28,6 +29,41 @@ pub trait Transport: Send + Sync {
         let mut url = self.base_url()?;
         url.query_pairs_mut().append_pair("t", &hash.to_string());
         Ok(url)
+    }
+}
+
+#[derive(Debug)]
+pub enum TransportType {
+    Polling(PollingTransport),
+    WebsocketSecure(WebsocketSecureTransport),
+    Websocket(WebsocketTransport),
+}
+
+impl From<PollingTransport> for TransportType {
+    fn from(transport: PollingTransport) -> Self {
+        TransportType::Polling(transport)
+    }
+}
+
+impl From<WebsocketSecureTransport> for TransportType {
+    fn from(transport: WebsocketSecureTransport) -> Self {
+        TransportType::WebsocketSecure(transport)
+    }
+}
+
+impl From<WebsocketTransport> for TransportType {
+    fn from(transport: WebsocketTransport) -> Self {
+        TransportType::Websocket(transport)
+    }
+}
+
+impl TransportType {
+    pub fn as_transport(&self) -> &dyn Transport {
+        match self {
+            TransportType::Polling(transport) => transport,
+            TransportType::Websocket(transport) => transport,
+            TransportType::WebsocketSecure(transport) => transport,
+        }
     }
 }
 

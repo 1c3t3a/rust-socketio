@@ -1,9 +1,6 @@
-use crate::engineio::transport::Transport;
+use crate::engineio::transport::{Transport, TransportType};
 
-use super::transports::{
-    polling::PollingTransport, websocket::WebsocketTransport,
-    websocket_secure::WebsocketSecureTransport,
-};
+use super::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
 use crate::engineio::packet::{HandshakePacket, Packet, PacketId, Payload};
 use crate::error::{Error, Result};
 use bytes::Bytes;
@@ -27,7 +24,7 @@ type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
 /// it to register common callbacks.
 #[derive(Clone)]
 pub struct Socket {
-    transport: Arc<Box<dyn Transport>>,
+    transport: Arc<TransportType>,
     //TODO: Store these in a map
     pub on_error: Callback<String>,
     pub on_open: Callback<()>,
@@ -119,7 +116,7 @@ impl SocketBuilder {
         let transport = PollingTransport::new(self.url, self.tls_config, self.headers);
 
         // SAFETY: handshake function called previously.
-        Ok(Socket::new(transport, self.handshake.unwrap()))
+        Ok(Socket::new(transport.into(), self.handshake.unwrap()))
     }
 
     /// Build socket with insecure websocket transport
@@ -134,7 +131,7 @@ impl SocketBuilder {
                 let transport = WebsocketTransport::new(url, self.get_ws_headers()?);
                 transport.upgrade()?;
                 // SAFETY: handshake function called previously.
-                Ok(Socket::new(transport, self.handshake.unwrap()))
+                Ok(Socket::new(transport.into(), self.handshake.unwrap()))
             } else {
                 Err(Error::InvalidUrlScheme(url.scheme().to_string()))
             }
@@ -159,7 +156,7 @@ impl SocketBuilder {
                 );
                 transport.upgrade()?;
                 // SAFETY: handshake function called previously.
-                Ok(Socket::new(transport, self.handshake.unwrap()))
+                Ok(Socket::new(transport.into(), self.handshake.unwrap()))
             } else {
                 Err(Error::InvalidUrlScheme(url.scheme().to_string()))
             }
@@ -209,14 +206,14 @@ impl SocketBuilder {
 }
 
 impl Socket {
-    pub fn new<T: Transport + 'static>(transport: T, handshake: HandshakePacket) -> Self {
+    pub fn new(transport: TransportType, handshake: HandshakePacket) -> Self {
         Socket {
             on_error: Arc::new(RwLock::new(None)),
             on_open: Arc::new(RwLock::new(None)),
             on_close: Arc::new(RwLock::new(None)),
             on_data: Arc::new(RwLock::new(None)),
             on_packet: Arc::new(RwLock::new(None)),
-            transport: Arc::new(Box::new(transport)),
+            transport: Arc::new(transport),
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
@@ -337,7 +334,7 @@ impl Socket {
             packet.into()
         };
 
-        if let Err(error) = self.transport.emit(data, is_binary_att) {
+        if let Err(error) = self.transport.as_transport().emit(data, is_binary_att) {
             self.call_error_callback(error.to_string())?;
             return Err(error);
         }
@@ -348,7 +345,7 @@ impl Socket {
     /// Polls for next payload
     pub(crate) fn poll(&self) -> Result<Option<Payload>> {
         if self.connected.load(Ordering::Acquire) {
-            let data = self.transport.poll()?;
+            let data = self.transport.as_transport().poll()?;
 
             if data.is_empty() {
                 return Ok(None);
