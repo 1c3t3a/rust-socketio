@@ -24,7 +24,7 @@ http.listen(4202, () => {
                     socket.send("Roger Roger");
                 }
             } else {
-                console.log("empty message recived")
+                console.log("empty message received")
             }
         });
     
@@ -34,7 +34,7 @@ http.listen(4202, () => {
     
         socket.on('error', message => {
             // Notify the client if there is an error so it's tests will fail
-            socket.send("ERROR: Recived error")
+            socket.send("ERROR: Received error")
             console.log(message.toString());
         });
     
