@@ -17,7 +17,7 @@ pub struct Socket {
     pub(super) transport: TransportClient,
 }
 
-type SocketCallback = dyn FnMut(Payload, Socket) + 'static + Sync + Send;
+type SocketCallback = dyn FnMut(Payload) + 'static + Sync + Send;
 
 /// A builder class for a `socket.io` socket. This handles setting up the client and
 /// configuring the callback, the namespace and metadata of the socket. If no
@@ -109,7 +109,7 @@ impl SocketBuilder {
     /// ```
     pub fn on<F>(mut self, event: &str, callback: F) -> Self
     where
-        F: FnMut(Payload, Socket) + 'static + Sync + Send,
+        F: FnMut(Payload) + 'static + Sync + Send,
     {
         match self.on {
             Some(ref mut vector) => vector.push((event.into(), Box::new(callback))),
@@ -205,6 +205,7 @@ impl SocketBuilder {
             self.tls_config,
             self.opening_headers,
         )?;
+        #[cfg(feature = "callback")]
         if let Some(callbacks) = self.on {
             for (event, callback) in callbacks {
                 socket.on(event, Box::new(callback)).unwrap();
@@ -234,9 +235,10 @@ impl Socket {
     /// Registers a new callback for a certain event. This returns an
     /// `Error::IllegalActionAfterOpen` error if the callback is registered
     /// after a call to the `connect` method.
+    #[cfg(feature = "callback")]
     pub(crate) fn on<F>(&mut self, event: Event, callback: Box<F>) -> Result<()>
     where
-        F: FnMut(Payload, Socket) + 'static + Sync + Send,
+        F: FnMut(Payload) + 'static + Sync + Send,
     {
         self.transport.on(event, callback)
     }
@@ -355,7 +357,7 @@ impl Socket {
         callback: F,
     ) -> Result<()>
     where
-        F: FnMut(Payload, Socket) + 'static + Send + Sync,
+        F: FnMut(Payload) + 'static + Send + Sync,
         E: Into<Event>,
         D: Into<Payload>,
     {
@@ -383,14 +385,17 @@ mod test {
 
         let mut socket = Socket::new(url, None, None, None)?;
 
-        let result = socket.on(
-            "test".into(),
-            Box::new(|msg, _| match msg {
-                Payload::String(str) => println!("Received string: {}", str),
-                Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
-            }),
-        );
-        assert!(result.is_ok());
+        #[cfg(feature = "callback")]
+        {
+            let result = socket.on(
+                "test".into(),
+                Box::new(|msg| match msg {
+                    Payload::String(str) => println!("Received string: {}", str),
+                    Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
+                }),
+            );
+            assert!(result.is_ok());
+        }
 
         let result = socket.connect();
         assert!(result.is_ok());
@@ -400,8 +405,9 @@ mod test {
 
         assert!(result.is_ok());
 
-        let ack_callback = move |message: Payload, mut socket_: Socket| {
-            let result = socket_.emit(
+        let mut socket_clone = socket.clone();
+        let ack_callback = move |message: Payload| {
+            let result = socket_clone.emit(
                 "test",
                 Payload::String(json!({"got ack": true}).to_string()),
             );
@@ -453,8 +459,8 @@ mod test {
             .set_tls_config(tls_connector)
             .set_opening_header(HOST, "localhost".parse().unwrap())
             .set_opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
-            .on("test", |str, _| println!("Received: {:#?}", str))
-            .on("message", |payload, _| println!("{:#?}", payload))
+            .on("test", |str| println!("Received: {:#?}", str))
+            .on("message", |payload| println!("{:#?}", payload))
             .connect();
 
         assert!(socket.is_ok());
@@ -464,7 +470,7 @@ mod test {
 
         assert!(socket.emit("binary", Bytes::from_static(&[46, 88])).is_ok());
 
-        let ack_cb = |payload, _| {
+        let ack_cb = |payload| {
             println!("Yehaa the ack got acked");
             println!("With data: {:#?}", payload);
         };

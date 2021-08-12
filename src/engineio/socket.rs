@@ -14,25 +14,32 @@ use std::convert::TryInto;
 use std::thread::sleep;
 use std::{fmt::Debug, sync::atomic::Ordering};
 use std::{
-    sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
+    sync::{atomic::AtomicBool, Arc, Mutex},
     time::{Duration, Instant},
 };
 use url::Url;
 use websocket::header::Headers;
 
 /// Type of a `Callback` function. (Normal closures can be passed in here).
-type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
+#[cfg(feature = "callback")]
+type Callback<I> = Arc<Option<RawCallback<I>>>;
+#[cfg(feature = "callback")]
+type RawCallback<I> = Box<dyn Fn(I) + 'static + Sync + Send>;
 
 /// An `engine.io` socket which manages a connection with the server and allows
 /// it to register common callbacks.
 #[derive(Clone)]
 pub struct Socket {
     transport: Arc<Box<dyn Transport>>,
-    //TODO: Store these in a map
+    #[cfg(feature = "callback")]
     pub on_error: Callback<String>,
+    #[cfg(feature = "callback")]
     pub on_open: Callback<()>,
+    #[cfg(feature = "callback")]
     pub on_close: Callback<()>,
+    #[cfg(feature = "callback")]
     pub on_data: Callback<Bytes>,
+    #[cfg(feature = "callback")]
     pub on_packet: Callback<Packet>,
     pub connected: Arc<AtomicBool>,
     last_ping: Arc<Mutex<Instant>>,
@@ -40,12 +47,22 @@ pub struct Socket {
     connection_data: Arc<HandshakePacket>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SocketBuilder {
     url: Url,
     tls_config: Option<TlsConnector>,
     headers: Option<HeaderMap>,
     handshake: Option<HandshakePacket>,
+    #[cfg(feature = "callback")]
+    on_close: Arc<Option<RawCallback<()>>>,
+    #[cfg(feature = "callback")]
+    on_data: Arc<Option<RawCallback<Bytes>>>,
+    #[cfg(feature = "callback")]
+    on_error: Arc<Option<RawCallback<String>>>,
+    #[cfg(feature = "callback")]
+    on_open: Arc<Option<RawCallback<()>>>,
+    #[cfg(feature = "callback")]
+    on_packet: Arc<Option<RawCallback<Packet>>>,
 }
 
 impl SocketBuilder {
@@ -55,6 +72,16 @@ impl SocketBuilder {
             headers: None,
             tls_config: None,
             handshake: None,
+            #[cfg(feature = "callback")]
+            on_close: Arc::new(None),
+            #[cfg(feature = "callback")]
+            on_data: Arc::new(None),
+            #[cfg(feature = "callback")]
+            on_error: Arc::new(None),
+            #[cfg(feature = "callback")]
+            on_open: Arc::new(None),
+            #[cfg(feature = "callback")]
+            on_packet: Arc::new(None),
         }
     }
 
@@ -98,6 +125,73 @@ impl SocketBuilder {
         Ok(())
     }
 
+    /// Registers the `on_open` callback.
+    #[cfg(feature = "callback")]
+    pub fn on_open<F>(&mut self, function: F)
+    where
+        F: Fn(()) + 'static + Sync + Send,
+    {
+        *self.on_open = Some(Box::new(function));
+    }
+
+    /// Registers the `on_error` callback.
+    #[cfg(feature = "callback")]
+    pub fn on_error<F>(&mut self, function: F)
+    where
+        F: Fn(String) + 'static + Sync + Send,
+    {
+        *self.on_error = Some(Box::new(function));
+    }
+
+    /// Registers the `on_packet` callback.
+    #[cfg(feature = "callback")]
+    pub fn on_packet<F>(&mut self, function: F)
+    where
+        F: Fn(Packet) + 'static + Sync + Send,
+    {
+        *self.on_packet = Some(Box::new(function));
+    }
+
+    /// Registers the `on_data` callback.
+    #[cfg(feature = "callback")]
+    pub fn on_data<F>(&mut self, function: F)
+    where
+        F: Fn(Bytes) + 'static + Sync + Send,
+    {
+        *self.on_data = Some(Box::new(function));
+    }
+
+    /// Registers the `on_close` callback.
+    #[cfg(feature = "callback")]
+    pub fn on_close<F>(&mut self, function: F)
+    where
+        F: Fn(()) + 'static + Sync + Send,
+    {
+        *self.on_close = Some(Box::new(function));
+    }
+
+    fn build_with_transport<T: Transport + Sized + 'static>(mut self, transport: T) -> Result<Socket> {
+        self.handshake()?;
+        // SAFETY: handshake function called previously.
+        Ok(Socket {
+            #[cfg(feature = "callback")]
+            on_close: Arc::new(self.on_close),
+            #[cfg(feature = "callback")]
+            on_data: Arc::new(self.on_data),
+            #[cfg(feature = "callback")]
+            on_error: Arc::new(self.on_error),
+            #[cfg(feature = "callback")]
+            on_open: Arc::new(self.on_open),
+            #[cfg(feature = "callback")]
+            on_packet: Arc::new(self.on_packet),
+            transport: Arc::new(Box::new(transport)),
+            connected: Arc::new(AtomicBool::default()),
+            last_ping: Arc::new(Mutex::new(Instant::now())),
+            last_pong: Arc::new(Mutex::new(Instant::now())),
+            connection_data: Arc::new(self.handshake.unwrap()),
+        })
+    }
+
     /// Build websocket if allowed, if not fall back to polling
     pub fn build(mut self) -> Result<Socket> {
         if self.websocket_upgrade()? {
@@ -116,10 +210,9 @@ impl SocketBuilder {
         self.handshake()?;
 
         // Make a polling transport with new sid
-        let transport = PollingTransport::new(self.url, self.tls_config, self.headers);
+        let transport = PollingTransport::new(self.url.clone(), self.tls_config.clone(), self.headers.clone());
 
-        // SAFETY: handshake function called previously.
-        Ok(Socket::new(transport, self.handshake.unwrap()))
+        self.build_with_transport(transport)
     }
 
     /// Build socket with insecure websocket transport
@@ -133,8 +226,7 @@ impl SocketBuilder {
             if url.scheme() == "http" {
                 let transport = WebsocketTransport::new(url, self.get_ws_headers()?);
                 transport.upgrade()?;
-                // SAFETY: handshake function called previously.
-                Ok(Socket::new(transport, self.handshake.unwrap()))
+                self.build_with_transport(transport)
             } else {
                 Err(Error::InvalidUrlScheme(url.scheme().to_string()))
             }
@@ -158,8 +250,7 @@ impl SocketBuilder {
                     self.get_ws_headers()?,
                 );
                 transport.upgrade()?;
-                // SAFETY: handshake function called previously.
-                Ok(Socket::new(transport, self.handshake.unwrap()))
+                self.build_with_transport(transport)
             } else {
                 Err(Error::InvalidUrlScheme(url.scheme().to_string()))
             }
@@ -209,91 +300,7 @@ impl SocketBuilder {
 }
 
 impl Socket {
-    pub fn new<T: Transport + 'static>(transport: T, handshake: HandshakePacket) -> Self {
-        Socket {
-            on_error: Arc::new(RwLock::new(None)),
-            on_open: Arc::new(RwLock::new(None)),
-            on_close: Arc::new(RwLock::new(None)),
-            on_data: Arc::new(RwLock::new(None)),
-            on_packet: Arc::new(RwLock::new(None)),
-            transport: Arc::new(Box::new(transport)),
-            connected: Arc::new(AtomicBool::default()),
-            last_ping: Arc::new(Mutex::new(Instant::now())),
-            last_pong: Arc::new(Mutex::new(Instant::now())),
-            connection_data: Arc::new(handshake),
-        }
-    }
-
-    /// Registers the `on_open` callback.
-    pub fn on_open<F>(&mut self, function: F) -> Result<()>
-    where
-        F: Fn(()) + 'static + Sync + Send,
-    {
-        if self.is_connected()? {
-            return Err(Error::IllegalActionAfterOpen());
-        }
-        let mut on_open = self.on_open.write()?;
-        *on_open = Some(Box::new(function));
-        drop(on_open);
-        Ok(())
-    }
-
-    /// Registers the `on_error` callback.
-    pub fn on_error<F>(&mut self, function: F) -> Result<()>
-    where
-        F: Fn(String) + 'static + Sync + Send,
-    {
-        if self.is_connected()? {
-            return Err(Error::IllegalActionAfterOpen());
-        }
-        let mut on_error = self.on_error.write()?;
-        *on_error = Some(Box::new(function));
-        drop(on_error);
-        Ok(())
-    }
-
-    /// Registers the `on_packet` callback.
-    pub fn on_packet<F>(&mut self, function: F) -> Result<()>
-    where
-        F: Fn(Packet) + 'static + Sync + Send,
-    {
-        if self.is_connected()? {
-            return Err(Error::IllegalActionAfterOpen());
-        }
-        let mut on_packet = self.on_packet.write()?;
-        *on_packet = Some(Box::new(function));
-        drop(on_packet);
-        Ok(())
-    }
-
-    /// Registers the `on_data` callback.
-    pub fn on_data<F>(&mut self, function: F) -> Result<()>
-    where
-        F: Fn(Bytes) + 'static + Sync + Send,
-    {
-        if self.is_connected()? {
-            return Err(Error::IllegalActionAfterOpen());
-        }
-        let mut on_data = self.on_data.write()?;
-        *on_data = Some(Box::new(function));
-        drop(on_data);
-        Ok(())
-    }
-
-    /// Registers the `on_close` callback.
-    pub fn on_close<F>(&mut self, function: F) -> Result<()>
-    where
-        F: Fn(()) + 'static + Sync + Send,
-    {
-        if self.is_connected()? {
-            return Err(Error::IllegalActionAfterOpen());
-        }
-        let mut on_close = self.on_close.write()?;
-        *on_close = Some(Box::new(function));
-        drop(on_close);
-        Ok(())
-    }
-
+    #[allow(unused)]
     pub fn close(&mut self) -> Result<()> {
         self.emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)?;
         self.connected.store(false, Ordering::Release);
@@ -302,11 +309,12 @@ impl Socket {
 
     /// Opens the connection to a specified server. The first Pong packet is sent
     /// to the server to trigger the Ping-cycle.
-    pub fn connect(&mut self) -> Result<()> {
+    pub fn connect(&self) -> Result<()> {
         // SAFETY: Has valid handshake due to type
         self.connected.store(true, Ordering::Release);
 
-        if let Some(on_open) = self.on_open.read()?.as_ref() {
+        #[cfg(feature = "callback")]
+        if let Some(on_open) = self.on_open.as_ref() {
             spawn_scoped!(on_open(()));
         }
 
@@ -325,6 +333,7 @@ impl Socket {
     pub fn emit(&self, packet: Packet, is_binary_att: bool) -> Result<()> {
         if !self.connected.load(Ordering::Acquire) {
             let error = Error::IllegalActionBeforeOpen();
+            #[cfg(feature = "callback")]
             self.call_error_callback(format!("{}", error))?;
             return Err(error);
         }
@@ -338,6 +347,7 @@ impl Socket {
         };
 
         if let Err(error) = self.transport.emit(data, is_binary_att) {
+            #[cfg(feature = "callback")]
             self.call_error_callback(error.to_string())?;
             return Err(error);
         }
@@ -366,6 +376,7 @@ impl Socket {
     pub(crate) fn poll_cycle(&self) -> Result<()> {
         if !self.connected.load(Ordering::Acquire) {
             let error = Error::IllegalActionBeforeOpen();
+            #[cfg(feature = "callback")]
             self.call_error_callback(format!("{}", error))?;
             return Err(error);
         }
@@ -395,23 +406,29 @@ impl Socket {
             // SAFETY: packets checked to be none before
             for packet in packets.unwrap() {
                 // check for the appropriate action or callback
-                if let Some(on_packet) = self.on_packet.read()?.as_ref() {
+                #[cfg(feature = "callback")]
+                if let Some(on_packet) = self.on_packet.as_ref() {
                     spawn_scoped!(on_packet(packet.clone()));
                 }
                 match packet.packet_id {
-                    PacketId::MessageBase64 => {
-                        if let Some(on_data) = self.on_data.read()?.as_ref() {
+                    PacketId::MessageBase64 =>
+                    {
+                        #[cfg(feature = "callback")]
+                        if let Some(on_data) = self.on_data.as_ref() {
                             spawn_scoped!(on_data(packet.data));
                         }
                     }
-                    PacketId::Message => {
-                        if let Some(on_data) = self.on_data.read()?.as_ref() {
+                    PacketId::Message =>
+                    {
+                        #[cfg(feature = "callback")]
+                        if let Some(on_data) = self.on_data.as_ref() {
                             spawn_scoped!(on_data(packet.data));
                         }
                     }
 
                     PacketId::Close => {
-                        if let Some(on_close) = self.on_close.read()?.as_ref() {
+                        #[cfg(feature = "callback")]
+                        if let Some(on_close) = self.on_close.as_ref() {
                             spawn_scoped!(on_close(()));
                         }
                         // set current state to not connected and stop polling
@@ -456,13 +473,11 @@ impl Socket {
 
     /// Calls the error callback with a given message.
     #[inline]
+    #[cfg(feature = "callback")]
     fn call_error_callback(&self, text: String) -> Result<()> {
-        let function = self.on_error.read()?;
-        if let Some(function) = function.as_ref() {
+        if let Some(function) = self.on_error.as_ref() {
             spawn_scoped!(function(text));
         }
-        drop(function);
-
         Ok(())
     }
 
@@ -475,38 +490,43 @@ impl Socket {
 impl Debug for Socket {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "EngineSocket(transport: {:?}, on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, connection_data: {:?})",
+            "EngineSocket(transport: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, connection_data: {:?}",
             self.transport,
-            if self.on_error.read().unwrap().is_some() {
-                "Fn(String)"
-            } else {
-                "None"
-            },
-            if self.on_open.read().unwrap().is_some() {
-                "Fn(())"
-            } else {
-                "None"
-            },
-            if self.on_close.read().unwrap().is_some() {
-                "Fn(())"
-            } else {
-                "None"
-            },
-            if self.on_packet.read().unwrap().is_some() {
-                "Fn(Packet)"
-            } else {
-                "None"
-            },
-            if self.on_data.read().unwrap().is_some() {
-                "Fn(Bytes)"
-            } else {
-                "None"
-            },
             self.connected,
             self.last_ping,
             self.last_pong,
             self.connection_data,
-        ))
+        ))?;
+        #[cfg(feature = "callback")]
+        f.write_fmt(format_args!(
+            ", on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}",
+            if self.on_error.is_some() {
+                "Fn(String)"
+            } else {
+                "None"
+            },
+            if self.on_open.is_some() {
+                "Fn(())"
+            } else {
+                "None"
+            },
+            if self.on_close.is_some() {
+                "Fn(())"
+            } else {
+                "None"
+            },
+            if self.on_packet.is_some() {
+                "Fn(Packet)"
+            } else {
+                "None"
+            },
+            if self.on_data.is_some() {
+                "Fn(Bytes)"
+            } else {
+                "None"
+            },
+        ))?;
+        f.write_fmt(format_args!(")",))
     }
 }
 
@@ -523,21 +543,25 @@ mod test {
     #[test]
     fn test_basic_connection() -> Result<()> {
         let url = crate::engineio::test::engine_io_server()?;
-        let mut socket = SocketBuilder::new(url).build()?;
+        // Needed as mut in the callbacks feature
+        #[allow(unused_mut)]
+        let mut socket_builder = SocketBuilder::new(url);
 
-        socket.on_open(|_| {
-            println!("Open event!");
-        })?;
+        #[cfg(feature = "callback")]
+        {
+            socket_builder.on_open(|_| {
+                println!("Open event!");
+            });
 
-        socket.on_packet(|packet| {
-            println!("Received packet: {:?}", packet);
-        })?;
+            socket_builder.on_packet(|packet| {
+                println!("Received packet: {:?}", packet);
+            });
 
-        socket.on_data(|data| {
-            println!("Received packet: {:?}", std::str::from_utf8(&data));
-        })?;
-
-        socket.connect()?;
+            socket_builder.on_data(|data| {
+                println!("Received packet: {:?}", std::str::from_utf8(&data));
+            });
+        }
+        let socket = socket_builder.build()?;
 
         socket.emit(
             Packet::new(PacketId::Message, Bytes::from_static(b"Hello World")),
@@ -574,7 +598,7 @@ mod test {
     #[test]
     fn test_illegal_actions() -> Result<()> {
         let url = crate::engineio::test::engine_io_server()?;
-        let mut sut = SocketBuilder::new(url.clone()).build()?;
+        let sut = SocketBuilder::new(url.clone()).build()?;
 
         assert!(sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
@@ -585,14 +609,7 @@ mod test {
                 true
             )
             .is_err());
-
         sut.connect()?;
-
-        assert!(sut.on_open(|_| {}).is_err());
-        assert!(sut.on_close(|_| {}).is_err());
-        assert!(sut.on_packet(|_| {}).is_err());
-        assert!(sut.on_data(|_| {}).is_err());
-        assert!(sut.on_error(|_| {}).is_err());
 
         let mut socket = sut.clone();
         thread::spawn(move || loop {
@@ -619,21 +636,26 @@ mod test {
     #[test]
     fn test_connection_polling() -> Result<()> {
         let url = crate::engineio::test::engine_io_server()?;
-        let mut socket = SocketBuilder::new(url).build_polling()?;
+        // Needed as mut in the callbacks feature
+        #[allow(unused_mut)]
+        let mut socket_builder = SocketBuilder::new(url);
 
-        socket.connect().unwrap();
+        #[cfg(feature = "callback")]
+        socket_builder.on_data(|data| {
+            println!(
+                "Received: {:?}",
+                std::str::from_utf8(&data).expect("Error while decoding utf-8")
+            );
+        });
+
+        let socket = socket_builder.build_polling()?;
+
+        socket.connect()?;
 
         socket.emit(
             Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
             false,
         )?;
-
-        socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
-            println!(
-                "Received: {:?}",
-                std::str::from_utf8(&data).expect("Error while decoding utf-8")
-            );
-        }))));
 
         socket.emit(
             Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
@@ -668,21 +690,23 @@ mod test {
 
         builder = builder.set_tls_config(crate::test::tls_connector()?);
         builder = builder.set_headers(headers);
-        let mut socket = builder.build_websocket_secure()?;
 
-        socket.connect().unwrap();
+        #[cfg(feature = "callback")]
+        builder.on_data(|data| {
+            println!(
+                "Received: {:?}",
+                std::str::from_utf8(&data).expect("Error while decoding utf-8")
+            );
+        });
+
+        let socket = builder.build_websocket_secure()?;
+
+        socket.connect()?;
 
         socket.emit(
             Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
             false,
         )?;
-
-        socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
-            println!(
-                "Received: {:?}",
-                std::str::from_utf8(&data).expect("Error while decoding utf-8")
-            );
-        }))));
 
         socket.emit(
             Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
@@ -709,21 +733,23 @@ mod test {
         let url = crate::engineio::test::engine_io_server()?;
 
         let builder = SocketBuilder::new(url);
-        let mut socket = builder.build_websocket()?;
 
-        socket.connect().unwrap();
+        #[cfg(feature = "callback")]
+        builder.on_data(|data| {
+            println!(
+                "Received: {:?}",
+                std::str::from_utf8(&data).expect("Error while decoding utf-8")
+            );
+        });
+
+        let socket = builder.build_websocket()?;
+
+        socket.connect()?;
 
         socket.emit(
             Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
             false,
         )?;
-
-        socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
-            println!(
-                "Received: {:?}",
-                std::str::from_utf8(&data).expect("Error while decoding utf-8")
-            );
-        }))));
 
         socket.emit(
             Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),

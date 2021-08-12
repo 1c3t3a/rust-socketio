@@ -28,3 +28,7 @@ url = "2.2.2"
 
 [dev-dependencies]
 cargo-tarpaulin = "0.18.0-alpha3"
+
+[features]
+default = [ "callback" ]
+callback = []

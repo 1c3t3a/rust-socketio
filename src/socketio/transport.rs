@@ -26,8 +26,10 @@ use url::Url;
 use super::{event::Event, payload::Payload};
 
 /// The type of a callback function.
-pub(crate) type Callback<I> = RwLock<Box<dyn FnMut(I, Socket) + 'static + Sync + Send>>;
+#[cfg(feature = "callback")]
+pub(crate) type Callback<I> = RwLock<Box<dyn FnMut(I) + 'static + Sync + Send>>;
 
+#[cfg(feature = "callback")]
 pub(crate) type EventCallback = (Event, Callback<Payload>);
 /// Represents an `Ack` as given back to the caller. Holds the internal `id` as
 /// well as the current ack'ed state. Holds data which will be accessible as
@@ -37,6 +39,7 @@ pub struct Ack {
     pub id: i32,
     timeout: Duration,
     time_started: Instant,
+    #[cfg(feature = "callback")]
     callback: Callback<Payload>,
 }
 
@@ -47,6 +50,7 @@ pub struct TransportClient {
     engine_socket: Arc<RwLock<EngineIoSocket>>,
     host: Arc<Url>,
     connected: Arc<AtomicBool>,
+    #[cfg(feature = "callback")]
     on: Arc<Vec<EventCallback>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
     // used to detect unfinished binary events as, as the attachments
@@ -83,6 +87,7 @@ impl TransportClient {
             engine_socket: Arc::new(RwLock::new(engine_socket_builder.build_with_fallback()?)),
             host: Arc::new(url),
             connected: Arc::new(AtomicBool::default()),
+            #[cfg(feature = "callback")]
             on: Arc::new(Vec::new()),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
             unfinished_packet: Arc::new(RwLock::new(None)),
@@ -91,9 +96,10 @@ impl TransportClient {
     }
 
     /// Registers a new event with some callback function `F`.
+    #[cfg(feature = "callback")]
     pub fn on<F>(&mut self, event: Event, callback: Box<F>) -> Result<()>
     where
-        F: FnMut(Payload, Socket) + 'static + Sync + Send,
+        F: FnMut(Payload) + 'static + Sync + Send,
     {
         Arc::get_mut(&mut self.on)
             .unwrap()
@@ -104,6 +110,7 @@ impl TransportClient {
     /// Connects to the server. This includes a connection of the underlying
     /// engine.io client and afterwards an opening socket.io request.
     pub fn connect(&mut self) -> Result<()> {
+        #[cfg(feature = "callback")]
         self.setup_callbacks()?;
 
         self.engine_socket.write()?.connect()?;
@@ -270,7 +277,7 @@ impl TransportClient {
         callback: F,
     ) -> Result<()>
     where
-        F: FnMut(Payload, Socket) + 'static + Send + Sync,
+        F: FnMut(Payload) + 'static + Send + Sync,
     {
         let id = thread_rng().gen_range(0..999);
         let default = String::from("/");
@@ -281,6 +288,7 @@ impl TransportClient {
             id,
             time_started: Instant::now(),
             timeout,
+            #[cfg(feature = "callback")]
             callback: RwLock::new(Box::new(callback)),
         };
 
@@ -324,12 +332,10 @@ impl TransportClient {
                 }
                 SocketPacketId::ConnectError => {
                     clone_self.connected.store(false, Ordering::Release);
+                    #[cfg(feature = "callback")]
                     if let Some(function) = clone_self.get_event_callback(&Event::Error) {
                         spawn_scoped!({
                             let mut lock = function.1.write().unwrap();
-                            let socket = Socket {
-                                transport: clone_self.clone(),
-                            };
                             lock(
                                 Payload::String(
                                     String::from("Received an ConnectError frame")
@@ -337,7 +343,6 @@ impl TransportClient {
                                             String::from("\"No error message provided\"")
                                         }),
                                 ),
-                                socket,
                             );
                             drop(lock);
                         });
@@ -347,6 +352,7 @@ impl TransportClient {
                     clone_self.connected.store(false, Ordering::Release);
                 }
                 SocketPacketId::Event => {
+                    #[cfg(feature = "callback")]
                     TransportClient::handle_event(socket_packet, clone_self);
                 }
                 SocketPacketId::Ack => {
@@ -356,6 +362,7 @@ impl TransportClient {
                     // in case of a binary event, check if this is the attachement or not and
                     // then either handle the event or set the open packet
                     if is_finalized_packet {
+                        #[cfg(feature = "callback")]
                         Self::handle_binary_event(socket_packet, clone_self);
                     } else {
                         *clone_self.unfinished_packet.write().unwrap() = Some(socket_packet);
@@ -388,6 +395,7 @@ impl TransportClient {
                 if ack.id == id {
                     to_be_removed.push(index);
 
+                    #[cfg(feature = "callback")]
                     if ack.time_started.elapsed() < ack.timeout {
                         if let Some(ref payload) = socket_packet.data {
                             spawn_scoped!({
@@ -395,7 +403,7 @@ impl TransportClient {
                                 let socket = Socket {
                                     transport: clone_self.clone(),
                                 };
-                                function(Payload::String(payload.to_owned()), socket);
+                                function(Payload::String(payload.to_owned()));
                                 drop(function);
                             });
                         }
@@ -405,7 +413,7 @@ impl TransportClient {
                                 let socket = Socket {
                                     transport: clone_self.clone(),
                                 };
-                                function(Payload::Binary(payload.to_owned()), socket);
+                                function(Payload::Binary(payload.to_owned()));
                                 drop(function);
                             });
                         }
@@ -420,63 +428,41 @@ impl TransportClient {
 
     /// Sets up the callback routes on the engine.io socket, called before
     /// opening the connection.
-    fn setup_callbacks(&mut self) -> Result<()> {
-        let clone_self: TransportClient = self.clone();
+    #[cfg(feature = "callback")]
+    fn setup_callbacks(&self) -> Result<()> {
         let error_callback = move |msg| {
-            if let Some(function) = clone_self.get_event_callback(&Event::Error) {
+            if let Some(function) = self.get_event_callback(&Event::Error) {
                 let mut lock = function.1.write().unwrap();
-                let socket = Socket {
-                    transport: clone_self.clone(),
-                };
-                lock(Payload::String(msg), socket);
+                lock(Payload::String(msg));
                 drop(lock)
             }
         };
 
-        let clone_self = self.clone();
         let open_callback = move |_| {
-            if let Some(function) = clone_self.get_event_callback(&Event::Connect) {
+            if let Some(function) = self.get_event_callback(&Event::Connect) {
                 let mut lock = function.1.write().unwrap();
-                let socket = Socket {
-                    transport: clone_self.clone(),
-                };
                 lock(
                     Payload::String(String::from("Connection is opened")),
-                    socket,
                 );
                 drop(lock)
             }
         };
 
-        let clone_self = self.clone();
         let close_callback = move |_| {
-            if let Some(function) = clone_self.get_event_callback(&Event::Close) {
+            if let Some(function) = self.get_event_callback(&Event::Close) {
                 let mut lock = function.1.write().unwrap();
-                let socket = Socket {
-                    transport: clone_self.clone(),
-                };
                 lock(
                     Payload::String(String::from("Connection is closed")),
-                    socket,
                 );
                 drop(lock)
             }
         };
-
-        self.engine_socket.write()?.on_open(open_callback)?;
-
-        self.engine_socket.write()?.on_error(error_callback)?;
-
-        self.engine_socket.write()?.on_close(close_callback)?;
-
-        let clone_self = self.clone();
-        self.engine_socket
-            .write()?
-            .on_data(move |data| Self::handle_new_message(data, &clone_self))
+        let data_callback = move |data| Self::handle_new_message(data, &self);
     }
 
     /// Handles a binary event.
     #[inline]
+    #[cfg(feature = "callback")]
     fn handle_binary_event(socket_packet: SocketPacket, clone_self: &TransportClient) {
         let event = if let Some(string_data) = socket_packet.data {
             string_data.replace("\"", "").into()
@@ -488,10 +474,7 @@ impl TransportClient {
             if let Some(function) = clone_self.get_event_callback(&event) {
                 spawn_scoped!({
                     let mut lock = function.1.write().unwrap();
-                    let socket = Socket {
-                        transport: clone_self.clone(),
-                    };
-                    lock(Payload::Binary(binary_payload), socket);
+                    lock(Payload::Binary(binary_payload));
                     drop(lock);
                 });
             }
@@ -500,6 +483,7 @@ impl TransportClient {
 
     /// A method for handling the Event Socket Packets.
     // this could only be called with an event
+    #[cfg(feature = "callback")]
     fn handle_event(socket_packet: SocketPacket, clone_self: &TransportClient) {
         // unwrap the potential data
         if let Some(data) = socket_packet.data {
@@ -524,9 +508,6 @@ impl TransportClient {
                 if let Some(function) = clone_self.get_event_callback(&event) {
                     spawn_scoped!({
                         let mut lock = function.1.write().unwrap();
-                        let socket = Socket {
-                            transport: clone_self.clone(),
-                        };
                         // if the data doesn't contain an event type at position `1`, the event must be
                         // of the type `Message`, in that case the data must be on position one and
                         // unwrapping is safe
@@ -537,7 +518,6 @@ impl TransportClient {
                                     .unwrap_or_else(|| contents.get(0).unwrap())
                                     .to_string(),
                             ),
-                            socket,
                         );
                         drop(lock);
                     });
@@ -547,6 +527,7 @@ impl TransportClient {
     }
 
     /// A convenient method for finding a callback for a certain event.
+    #[cfg(feature = "callback")]
     #[inline]
     fn get_event_callback(&self, event: &Event) -> Option<&(Event, Callback<Payload>)> {
         self.on.iter().find(|item| item.0 == *event)
@@ -589,26 +570,29 @@ mod test {
 
         let mut socket = TransportClient::new(url, None, None, None)?;
 
-        assert!(socket
-            .on(
-                "test".into(),
-                Box::new(|message, _| {
-                    if let Payload::String(st) = message {
-                        println!("{}", st)
-                    }
-                })
-            )
-            .is_ok());
+        #[cfg(feature = "callback")]
+        {
+            assert!(socket
+                .on(
+                    "test".into(),
+                    Box::new(|message| {
+                        if let Payload::String(st) = message {
+                            println!("{}", st)
+                        }
+                    })
+                )
+                .is_ok());
 
-        assert!(socket.on("Error".into(), Box::new(|_, _| {})).is_ok());
+            assert!(socket.on("Error".into(), Box::new(|_| {})).is_ok());
 
-        assert!(socket.on("Connect".into(), Box::new(|_, _| {})).is_ok());
+            assert!(socket.on("Connect".into(), Box::new(|_| {})).is_ok());
 
-        assert!(socket.on("Close".into(), Box::new(|_, _| {})).is_ok());
+            assert!(socket.on("Close".into(), Box::new(|_| {})).is_ok());
+        }
 
         socket.connect().unwrap();
 
-        let ack_callback = |message: Payload, _| {
+        let ack_callback = |message: Payload| {
             println!("Yehaa! My ack got acked?");
             if let Payload::String(str) = message {
                 println!("Received string ack");
