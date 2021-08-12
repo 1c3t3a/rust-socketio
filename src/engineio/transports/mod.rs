@@ -1,3 +1,7 @@
-pub mod polling;
-pub mod websocket;
-pub mod websocket_secure;
+mod polling;
+mod websocket;
+mod websocket_secure;
+
+pub use self::polling::PollingTransport;
+pub use self::websocket::WebsocketTransport;
+pub use self::websocket_secure::WebsocketSecureTransport;

@@ -127,6 +127,17 @@ impl Transport for WebsocketSecureTransport {
     }
 }
 
+impl std::fmt::Debug for WebsocketSecureTransport {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!(
+            "WebsocketSecureTransport(base_url: {:?})",
+            self.base_url(),
+        ))
+    }
+}
+
+/*
+//TODO: implement unit tests for base_url and integration via engineio
 #[cfg(test)]
 mod test {
     use super::*;
@@ -165,3 +176,4 @@ mod test {
         Ok(())
     }
 }
+*/
