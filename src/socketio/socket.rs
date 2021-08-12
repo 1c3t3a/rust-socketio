@@ -184,7 +184,7 @@ impl SocketBuilder {
     ///
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .set_namespace("/admin")
+    ///     .namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("error", |err, _| eprintln!("Socket error!: {:#?}", err))
     ///     .connect()
