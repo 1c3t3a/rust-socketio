@@ -1,6 +1,8 @@
+use crate::engineio::packet::Payload;
 use crate::error::Result;
 use adler32::adler32;
-use bytes::Bytes;
+use bytes::{Bytes};
+use std::convert::TryFrom;
 use std::time::SystemTime;
 use url::Url;
 
@@ -35,5 +37,12 @@ pub trait Transport: Send + Sync {
 impl std::fmt::Debug for dyn Transport {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!("Transport(base_url: {:?})", self.base_url(),))
+    }
+}
+
+impl Iterator for dyn Transport {
+    type Item = Payload;
+    fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
+        Some(Payload::try_from(self.poll().unwrap()).unwrap())
     }
 }
