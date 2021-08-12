@@ -1,76 +1,34 @@
-#![allow(unused)]
-use std::{ops::Deref, thread};
+use crate::engineio::transport::Transport;
 
-use crate::engineio::packet::{Packet, PacketId, Payload};
-use crate::error::{Error, Result};
-use adler32::adler32;
-use bytes::{BufMut, Bytes, BytesMut};
-use native_tls::TlsConnector;
-use reqwest::{
-    blocking::{Client, ClientBuilder},
-    header::HeaderMap,
+use super::transports::{
+    polling::PollingTransport, websocket::WebsocketTransport,
+    websocket_secure::WebsocketSecureTransport,
 };
-use serde::{Deserialize, Serialize};
+use crate::engineio::packet::{HandshakePacket, Packet, PacketId, Payload};
+use crate::error::{Error, Result};
+use bytes::Bytes;
+use native_tls::TlsConnector;
+use reqwest::header::HeaderMap;
 use std::convert::TryFrom;
 use std::convert::TryInto;
-use std::{borrow::Cow, time::SystemTime};
+use std::thread::sleep;
 use std::{fmt::Debug, sync::atomic::Ordering};
 use std::{
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
 use url::Url;
-use websocket::{
-    client::sync::Client as WsClient,
-    dataframe::Opcode,
-    header::Headers,
-    receiver::Reader,
-    sync::stream::{TcpStream, TlsStream},
-    sync::Writer,
-    ws::dataframe::DataFrame,
-    ClientBuilder as WsClientBuilder, Message,
-};
+use websocket::header::Headers;
 
 /// Type of a `Callback` function. (Normal closures can be passed in here).
 type Callback<I> = Arc<RwLock<Option<Box<dyn Fn(I) + 'static + Sync + Send>>>>;
 
-/// The different types of transport used for transmitting a payload.
-#[derive(Clone)]
-enum TransportType {
-    Polling(Arc<Mutex<Client>>),
-    Websocket(Arc<Mutex<Reader<TcpStream>>>, Arc<Mutex<Writer<TcpStream>>>),
-    SecureWebsocket(Arc<Mutex<WsClient<TlsStream<TcpStream>>>>),
-}
-
-impl Debug for TransportType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!(
-            "TransportType({})",
-            match self {
-                Self::Polling(_) => "Polling",
-                Self::Websocket(_, _) | Self::SecureWebsocket(_) => "Websocket",
-            }
-        ))
-    }
-}
-
-//TODO: Move this to packet
-/// Data which gets exchanged in a handshake as defined by the server.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct HandshakeData {
-    sid: String,
-    upgrades: Vec<String>,
-    #[serde(rename = "pingInterval")]
-    ping_interval: u64,
-    #[serde(rename = "pingTimeout")]
-    ping_timeout: u64,
-}
-
 /// An `engine.io` socket which manages a connection with the server and allows
 /// it to register common callbacks.
 #[derive(Clone)]
-pub struct EngineSocket {
-    transport: Arc<TransportType>,
+pub struct Socket {
+    transport: Arc<Box<dyn Transport>>,
+    //TODO: Store these in a map
     pub on_error: Callback<String>,
     pub on_open: Callback<()>,
     pub on_close: Callback<()>,
@@ -79,80 +37,191 @@ pub struct EngineSocket {
     pub connected: Arc<AtomicBool>,
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
-    host_address: Arc<Mutex<Option<String>>>,
-    tls_config: Arc<Option<TlsConnector>>,
-    custom_headers: Arc<Option<HeaderMap>>,
-    connection_data: Arc<RwLock<Option<HandshakeData>>>,
-    engine_io_mode: Arc<AtomicBool>,
+    connection_data: Arc<HandshakePacket>,
 }
 
-impl EngineSocket {
-    /// Creates an instance of `EngineSocket`.
-    pub fn new(
-        engine_io_mode: bool,
-        tls_config: Option<TlsConnector>,
-        opening_headers: Option<HeaderMap>,
-    ) -> Self {
-        let client = match (tls_config.clone(), opening_headers.clone()) {
-            (Some(config), Some(map)) => ClientBuilder::new()
-                .use_preconfigured_tls(config)
-                .default_headers(map)
-                .build()
-                .unwrap(),
-            (Some(config), None) => ClientBuilder::new()
-                .use_preconfigured_tls(config)
-                .build()
-                .unwrap(),
-            (None, Some(map)) => ClientBuilder::new().default_headers(map).build().unwrap(),
-            (None, None) => Client::new(),
-        };
+#[derive(Clone, Debug)]
+pub struct SocketBuilder {
+    url: Url,
+    tls_config: Option<TlsConnector>,
+    headers: Option<HeaderMap>,
+    handshake: Option<HandshakePacket>,
+}
 
-        EngineSocket {
-            transport: Arc::new(TransportType::Polling(Arc::new(Mutex::new(client)))),
+impl SocketBuilder {
+    pub fn new(url: Url) -> Self {
+        SocketBuilder {
+            url,
+            headers: None,
+            tls_config: None,
+            handshake: None,
+        }
+    }
+
+    pub fn set_tls_config(mut self, tls_config: TlsConnector) -> Self {
+        self.tls_config = Some(tls_config);
+        self
+    }
+
+    pub fn set_headers(mut self, headers: HeaderMap) -> Self {
+        self.headers = Some(headers);
+        self
+    }
+
+    fn handshake(&mut self) -> Result<()> {
+        // No need to handshake twice
+        if self.handshake.is_some() {
+            return Ok(());
+        }
+
+        let mut url = self.url.clone();
+        url.query_pairs_mut().append_pair("EIO", "4");
+
+        // No path add engine.io
+        if url.path() == "/" {
+            url.set_path("/engine.io/");
+        }
+
+        // Start with polling transport
+        let transport =
+            PollingTransport::new(url.clone(), self.tls_config.clone(), self.headers.clone());
+
+        let handshake: HandshakePacket = Packet::try_from(transport.poll()?)?.try_into()?;
+
+        // update the base_url with the new sid
+        url.query_pairs_mut().append_pair("sid", &handshake.sid[..]);
+
+        self.handshake = Some(handshake);
+
+        self.url = url;
+
+        Ok(())
+    }
+
+    /// Build websocket if allowed, if not fall back to polling
+    pub fn build(mut self) -> Result<Socket> {
+        if self.websocket_upgrade()? {
+            match self.url.scheme() {
+                "http" => self.build_websocket(),
+                "https" => self.build_websocket_secure(),
+                _ => self.build_polling(),
+            }
+        } else {
+            self.build_polling()
+        }
+    }
+
+    /// Build socket with polling transport
+    pub fn build_polling(mut self) -> Result<Socket> {
+        self.handshake()?;
+
+        // Make a polling transport with new sid
+        let transport = PollingTransport::new(self.url, self.tls_config, self.headers);
+
+        // SAFETY: handshake function called previously.
+        Ok(Socket::new(transport, self.handshake.unwrap()))
+    }
+
+    /// Build socket with insecure websocket transport
+    pub fn build_websocket(mut self) -> Result<Socket> {
+        self.handshake()?;
+
+        // SAFETY: Already a Url
+        let url = websocket::client::Url::parse(&self.url.to_string())?;
+
+        if self.websocket_upgrade()? {
+            if url.scheme() == "http" {
+                let transport = WebsocketTransport::new(url, self.get_ws_headers()?);
+                transport.upgrade()?;
+                // SAFETY: handshake function called previously.
+                Ok(Socket::new(transport, self.handshake.unwrap()))
+            } else {
+                Err(Error::InvalidUrlScheme(url.scheme().to_string()))
+            }
+        } else {
+            Err(Error::IllegalWebsocketUpgrade())
+        }
+    }
+
+    /// Build socket with secure websocket transport
+    pub fn build_websocket_secure(mut self) -> Result<Socket> {
+        self.handshake()?;
+
+        // SAFETY: Already a Url
+        let url = websocket::client::Url::parse(&self.url.to_string())?;
+
+        if self.websocket_upgrade()? {
+            if url.scheme() == "https" {
+                let transport = WebsocketSecureTransport::new(
+                    url,
+                    self.tls_config.clone(),
+                    self.get_ws_headers()?,
+                );
+                transport.upgrade()?;
+                // SAFETY: handshake function called previously.
+                Ok(Socket::new(transport, self.handshake.unwrap()))
+            } else {
+                Err(Error::InvalidUrlScheme(url.scheme().to_string()))
+            }
+        } else {
+            Err(Error::IllegalWebsocketUpgrade())
+        }
+    }
+
+    /// Build websocket if allowed, if not allowed or errored fall back to polling.
+    /// WARNING: websocket errors suppressed, no indication of websocket success or failure.
+    pub fn build_with_fallback(self) -> Result<Socket> {
+        let result = self.clone().build();
+        if result.is_err() {
+            self.build_polling()
+        } else {
+            result
+        }
+    }
+
+    /// Checks the handshake to see if websocket upgrades are allowed
+    fn websocket_upgrade(&mut self) -> Result<bool> {
+        // check if we could upgrade to websockets
+        self.handshake()?;
+        // SAFETY: handshake set by above function.
+        Ok(self
+            .handshake
+            .as_ref()
+            .unwrap()
+            .upgrades
+            .iter()
+            .any(|upgrade| upgrade.to_lowercase() == *"websocket"))
+    }
+
+    /// Converts Reqwest headers to Websocket headers
+    fn get_ws_headers(&self) -> Result<Option<Headers>> {
+        let mut headers = Headers::new();
+        if self.headers.is_some() {
+            let opening_headers = self.headers.clone();
+            for (key, val) in opening_headers.unwrap() {
+                headers.append_raw(key.unwrap().to_string(), val.as_bytes().to_owned());
+            }
+            Ok(Some(headers))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl Socket {
+    pub fn new<T: Transport + 'static>(transport: T, handshake: HandshakePacket) -> Self {
+        Socket {
             on_error: Arc::new(RwLock::new(None)),
             on_open: Arc::new(RwLock::new(None)),
             on_close: Arc::new(RwLock::new(None)),
             on_data: Arc::new(RwLock::new(None)),
             on_packet: Arc::new(RwLock::new(None)),
+            transport: Arc::new(Box::new(transport)),
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
-            host_address: Arc::new(Mutex::new(None)),
-            tls_config: Arc::new(tls_config),
-            custom_headers: Arc::new(opening_headers),
-            connection_data: Arc::new(RwLock::new(None)),
-            engine_io_mode: Arc::new(AtomicBool::from(engine_io_mode)),
+            connection_data: Arc::new(handshake),
         }
-    }
-
-    /// Binds the socket to a certain `address`. Attention! This doesn't allow
-    /// to configure callbacks afterwards.
-    pub fn bind<T: Into<String>>(&mut self, address: T) -> Result<()> {
-        if self.connected.load(Ordering::Acquire) {
-            return Err(Error::IllegalActionAfterOpen());
-        }
-        self.open(address.into())?;
-
-        // TODO: Refactor this
-        let mut s = self.clone();
-        thread::spawn(move || {
-            // tries to restart a poll cycle whenever a 'normal' error occurs,
-            // it just panics on network errors, in case the poll cycle returned
-            // `Result::Ok`, the server receives a close frame so it's safe to
-            // terminate
-            loop {
-                match s.poll_cycle() {
-                    Ok(_) => break,
-                    e @ Err(Error::IncompleteHttp(_))
-                    | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
-                        panic!("{}", e.unwrap_err())
-                    }
-                    _ => (),
-                }
-            }
-        });
-
-        Ok(())
     }
 
     /// Registers the `on_open` callback.
@@ -169,7 +238,7 @@ impl EngineSocket {
         Ok(())
     }
 
-    /// Registers an `on_error` callback.
+    /// Registers the `on_error` callback.
     pub fn on_error<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(String) + 'static + Sync + Send,
@@ -183,7 +252,7 @@ impl EngineSocket {
         Ok(())
     }
 
-    /// Registers an `on_packet` callback.
+    /// Registers the `on_packet` callback.
     pub fn on_packet<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(Packet) + 'static + Sync + Send,
@@ -197,7 +266,7 @@ impl EngineSocket {
         Ok(())
     }
 
-    /// Registers an `on_data` callback.
+    /// Registers the `on_data` callback.
     pub fn on_data<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(Bytes) + 'static + Sync + Send,
@@ -211,7 +280,7 @@ impl EngineSocket {
         Ok(())
     }
 
-    /// Registers an `on_close` callback.
+    /// Registers the `on_close` callback.
     pub fn on_close<F>(&mut self, function: F) -> Result<()>
     where
         F: Fn(()) + 'static + Sync + Send,
@@ -231,230 +300,34 @@ impl EngineSocket {
         Ok(())
     }
 
-    /// Opens the connection to a specified server. Includes an opening `GET`
-    /// request to the server, the server passes back the handshake data in the
-    /// response. If the handshake data mentions a websocket upgrade possibility,
-    /// we try to upgrade the connection. Afterwards a first Pong packet is sent
+    /// Opens the connection to a specified server. The first Pong packet is sent
     /// to the server to trigger the Ping-cycle.
-    pub fn open<T: Into<String> + Clone>(&mut self, address: T) -> Result<()> {
-        // build the query path, random_t is used to prevent browser caching
-        let query_path = self.get_query_path()?;
+    pub fn connect(&mut self) -> Result<()> {
+        // SAFETY: Has valid handshake due to type
+        self.connected.store(true, Ordering::Release);
 
-        match &mut self.transport.as_ref() {
-            TransportType::Polling(client) => {
-                if let Ok(mut full_address) = Url::parse(&(address.to_owned().into() + &query_path))
-                {
-                    self.host_address = Arc::new(Mutex::new(Some(address.into())));
-
-                    // change the url scheme here if necessary, unwrapping here is
-                    // safe as both http and https are valid schemes for sure
-                    match full_address.scheme() {
-                        "ws" => full_address.set_scheme("http").unwrap(),
-                        "wss" => full_address.set_scheme("https").unwrap(),
-                        "http" | "https" => (),
-                        _ => return Err(Error::InvalidUrlScheme(full_address.to_string())),
-                    }
-
-                    let response = client.lock()?.get(full_address).send()?.text()?;
-
-                    // the response contains the handshake data
-                    if let Ok(conn_data) = serde_json::from_str::<HandshakeData>(&response[1..]) {
-                        self.connected.store(true, Ordering::Release);
-
-                        // check if we could upgrade to websockets
-                        let websocket_upgrade = conn_data
-                            .upgrades
-                            .iter()
-                            .any(|upgrade| upgrade.to_lowercase() == *"websocket");
-
-                        // if we have an upgrade option, send the corresponding request, if this doesn't work
-                        // for some reason, proceed via polling
-                        if websocket_upgrade {
-                            let _ = self.upgrade_connection(&conn_data.sid);
-                        }
-
-                        // set the connection data
-                        let mut connection_data = self.connection_data.write()?;
-                        *connection_data = Some(conn_data);
-                        drop(connection_data);
-
-                        // call the on_open callback
-                        let function = self.on_open.read()?;
-                        if let Some(function) = function.as_ref() {
-                            spawn_scoped!(function(()));
-                        }
-                        drop(function);
-
-                        // set the last ping to now and set the connected state
-                        *self.last_ping.lock()? = Instant::now();
-
-                        // emit a pong packet to keep trigger the ping cycle on the server
-                        self.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
-
-                        return Ok(());
-                    }
-
-                    let error = Error::InvalidHandshake(response);
-                    self.call_error_callback(format!("{}", error))?;
-                    return Err(error);
-                }
-
-                let error = Error::InvalidUrlScheme(address.into());
-                self.call_error_callback(format!("{}", error))?;
-                Err(error)
-            }
-            _ => unreachable!("Can't happen as we initialize with polling and upgrade later"),
-        }
-    }
-
-    /// This handles the upgrade from polling to websocket transport. Looking at the protocol
-    /// specs, this needs the following preconditions:
-    /// - the handshake must have already happened
-    /// - the handshake `upgrade` field needs to contain the value `websocket`.
-    /// If those preconditions are valid, it is save to call the method. The protocol then
-    /// requires the following procedure:
-    /// - the client starts to connect to the server via websocket, mentioning the related `sid` received
-    ///   in the handshake.
-    /// - to test out the connection, the client sends a `ping` packet with the payload `probe`.
-    /// - if the server receives this correctly, it responses by sending a `pong` packet with the payload `probe`.
-    /// - if the client receives that both sides can be sure that the upgrade is save and the client requests
-    ///   the final upgrade by sending another `update` packet over `websocket`.
-    /// If this procedure is alright, the new transport is established.
-    fn upgrade_connection(&mut self, new_sid: &str) -> Result<()> {
-        let host_address = self.host_address.lock()?;
-        if let Some(address) = &*host_address {
-            // unwrapping here is in fact save as we only set this url if it gets orderly parsed
-            let mut address = Url::parse(&address).unwrap();
-            drop(host_address);
-
-            if self.engine_io_mode.load(Ordering::Relaxed) {
-                address.set_path(&(address.path().to_owned() + "engine.io/"));
-            } else {
-                address.set_path(&(address.path().to_owned() + "socket.io/"));
-            }
-
-            let full_address = address
-                .query_pairs_mut()
-                .clear()
-                .append_pair("EIO", "4")
-                .append_pair("transport", "websocket")
-                .append_pair("sid", new_sid)
-                .finish();
-
-            let custom_headers = self.get_headers_from_header_map();
-            match full_address.scheme() {
-                "https" => {
-                    self.perform_upgrade_secure(&full_address, &custom_headers)?;
-                }
-                "http" => {
-                    self.perform_upgrade_insecure(&full_address, &custom_headers)?;
-                }
-                _ => return Err(Error::InvalidUrlScheme(full_address.to_string())),
-            }
-
-            return Ok(());
-        }
-        Err(Error::InvalidHandshake("Error - invalid url".to_owned()))
-    }
-
-    /// Converts between `reqwest::HeaderMap` and `websocket::Headers`, if they're currently set, if not
-    /// An empty (allocation free) header map is returned.
-    fn get_headers_from_header_map(&mut self) -> Headers {
-        let mut headers = Headers::new();
-        // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection procedure
-        if let Some(map) = Arc::get_mut(&mut self.custom_headers).unwrap().take() {
-            for (key, val) in map {
-                if let Some(h_key) = key {
-                    headers.append_raw(h_key.to_string(), val.as_bytes().to_owned());
-                }
-            }
-        }
-        headers
-    }
-
-    /// Performs the socketio upgrade handshake via `wss://`. A Description of the
-    /// upgrade request can be found above.
-    fn perform_upgrade_secure(&mut self, address: &Url, headers: &Headers) -> Result<()> {
-        // connect to the server via websockets
-        // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection procedure
-        let tls_config = Arc::get_mut(&mut self.tls_config).unwrap().take();
-        let mut client = WsClientBuilder::new(address.as_ref())?
-            .custom_headers(headers)
-            .connect_secure(tls_config)?;
-
-        client.set_nonblocking(false)?;
-
-        // send the probe packet, the text `2probe` represents a ping packet with
-        // the content `probe`
-        client.send_message(&Message::text(Cow::Borrowed("2probe")))?;
-
-        // expect to receive a probe packet
-        let message = client.recv_message()?;
-        if message.take_payload() != b"3probe" {
-            return Err(Error::InvalidHandshake("Error".to_owned()));
+        if let Some(on_open) = self.on_open.read()?.as_ref() {
+            spawn_scoped!(on_open(()));
         }
 
-        // finally send the upgrade request. the payload `5` stands for an upgrade
-        // packet without any payload
-        client.send_message(&Message::text(Cow::Borrowed("5")))?;
+        // set the last ping to now and set the connected state
+        *self.last_ping.lock()? = Instant::now();
 
-        // upgrade the transport layer
-        // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection
-        // procedure
-        *Arc::get_mut(&mut self.transport).unwrap() =
-            TransportType::SecureWebsocket(Arc::new(Mutex::new(client)));
-
-        Ok(())
-    }
-
-    /// Performs the socketio upgrade handshake in an via `ws://`. A Description of the
-    /// upgrade request can be found above.
-    fn perform_upgrade_insecure(&mut self, addres: &Url, headers: &Headers) -> Result<()> {
-        // connect to the server via websockets
-        let client = WsClientBuilder::new(addres.as_ref())?
-            .custom_headers(headers)
-            .connect_insecure()?;
-        client.set_nonblocking(false)?;
-
-        let (mut receiver, mut sender) = client.split()?;
-
-        // send the probe packet, the text `2probe` represents a ping packet with
-        // the content `probe`
-        sender.send_message(&Message::text(Cow::Borrowed("2probe")))?;
-
-        // expect to receive a probe packet
-        let message = receiver.recv_message()?;
-        if message.take_payload() != b"3probe" {
-            return Err(Error::InvalidHandshake("Error".to_owned()));
-        }
-
-        // finally send the upgrade request. the payload `5` stands for an upgrade
-        // packet without any payload
-        sender.send_message(&Message::text(Cow::Borrowed("5")))?;
-
-        // upgrade the transport layer
-        // SAFETY: unwrapping is safe as we only hand out `Weak` copies after the connection
-        // procedure
-        *Arc::get_mut(&mut self.transport).unwrap() =
-            TransportType::Websocket(Arc::new(Mutex::new(receiver)), Arc::new(Mutex::new(sender)));
+        // emit a pong packet to keep trigger the ping cycle on the server
+        self.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
 
         Ok(())
     }
 
     /// Sends a packet to the server. This optionally handles sending of a
     /// socketio binary attachment via the boolean attribute `is_binary_att`.
+    //TODO: Add a new PacketId to send raw binary so is_binary_att can be removed.
     pub fn emit(&self, packet: Packet, is_binary_att: bool) -> Result<()> {
         if !self.connected.load(Ordering::Acquire) {
             let error = Error::IllegalActionBeforeOpen();
             self.call_error_callback(format!("{}", error))?;
             return Err(error);
         }
-        // build the target address
-        let query_path = self.get_query_path()?;
-
-        let host = self.host_address.lock()?;
-        let address = Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
-        drop(host);
 
         // send a post request with the encoded payload as body
         // if this is a binary attachment, then send the raw bytes
@@ -464,183 +337,83 @@ impl EngineSocket {
             packet.into()
         };
 
-        match &self.transport.as_ref() {
-            TransportType::Polling(client) => {
-                let data_to_send = if is_binary_att {
-                    // the binary attachment gets `base64` encoded
-                    let mut packet_bytes = BytesMut::with_capacity(data.len() + 1);
-                    packet_bytes.put_u8(b'b');
+        if let Err(error) = self.transport.emit(data, is_binary_att) {
+            self.call_error_callback(error.to_string())?;
+            return Err(error);
+        }
 
-                    let encoded_data = base64::encode(data);
-                    packet_bytes.put(encoded_data.as_bytes());
+        Ok(())
+    }
 
-                    packet_bytes.freeze()
-                } else {
-                    data
-                };
+    /// Polls for next payload
+    pub(crate) fn poll(&self) -> Result<Option<Payload>> {
+        if self.connected.load(Ordering::Acquire) {
+            let data = self.transport.poll()?;
 
-                let client = client.lock()?;
-                let status = client
-                    .post(address)
-                    .body(data_to_send)
-                    .send()?
-                    .status()
-                    .as_u16();
-
-                drop(client);
-
-                if status != 200 {
-                    let error = Error::IncompleteHttp(status);
-                    self.call_error_callback(format!("{}", error))?;
-                    return Err(error);
-                }
-
-                Ok(())
+            if data.is_empty() {
+                return Ok(None);
             }
-            TransportType::Websocket(_, writer) => {
-                let mut writer = writer.lock()?;
 
-                let message = if is_binary_att {
-                    Message::binary(Cow::Borrowed(data.as_ref()))
-                } else {
-                    Message::text(Cow::Borrowed(std::str::from_utf8(data.as_ref())?))
-                };
-                writer.send_message(&message)?;
-
-                Ok(())
-            }
-            TransportType::SecureWebsocket(client) => {
-                let mut client = client.lock()?;
-
-                let message = if is_binary_att {
-                    Message::binary(Cow::Borrowed(data.as_ref()))
-                } else {
-                    Message::text(Cow::Borrowed(std::str::from_utf8(data.as_ref())?))
-                };
-
-                client.send_message(&message)?;
-
-                Ok(())
-            }
+            Ok(Some(Payload::try_from(data)?))
+        } else {
+            Err(Error::IllegalActionAfterClose())
         }
     }
 
     /// Performs the server long polling procedure as long as the client is
     /// connected. This should run separately at all time to ensure proper
     /// response handling from the server.
-    pub fn poll_cycle(&mut self) -> Result<()> {
+    pub(crate) fn poll_cycle(&self) -> Result<()> {
         if !self.connected.load(Ordering::Acquire) {
             let error = Error::IllegalActionBeforeOpen();
             self.call_error_callback(format!("{}", error))?;
             return Err(error);
         }
-        let client = Client::new();
 
         // as we don't have a mut self, the last_ping needs to be safed for later
         let mut last_ping = *self.last_ping.lock()?;
         // the time after we assume the server to be timed out
         let server_timeout = Duration::from_millis(
-            (*self.connection_data)
-                .read()?
-                .as_ref()
-                .map_or_else(|| 0, |data| data.ping_timeout)
-                + (*self.connection_data)
-                    .read()?
-                    .as_ref()
-                    .map_or_else(|| 0, |data| data.ping_interval),
+            self.connection_data.ping_timeout + self.connection_data.ping_interval,
         );
 
         while self.connected.load(Ordering::Acquire) {
-            let data = match &self.transport.as_ref() {
-                // we won't use the shared client as this blocks the resource
-                // in the long polling requests
-                TransportType::Polling(_) => {
-                    let query_path = self.get_query_path()?;
-
-                    let host = self.host_address.lock()?;
-                    let address =
-                        Url::parse(&(host.as_ref().unwrap().to_owned() + &query_path)[..]).unwrap();
-                    drop(host);
-
-                    client.get(address).send()?.bytes()?
-                }
-                TransportType::Websocket(receiver, _) => {
-                    let mut receiver = receiver.lock()?;
-
-                    // if this is a binary payload, we mark it as a message
-                    let received_df = receiver.recv_dataframe()?;
-                    match received_df.opcode {
-                        Opcode::Binary => {
-                            let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
-                            message.put_u8(b'4');
-                            message.put(received_df.take_payload().as_ref());
-
-                            message.freeze()
-                        }
-                        _ => Bytes::from(received_df.take_payload()),
-                    }
-                }
-                TransportType::SecureWebsocket(client) => {
-                    let mut client = client.lock()?;
-
-                    // if this is a binary payload, we mark it as a message
-                    let received_df = client.recv_dataframe()?;
-                    match received_df.opcode {
-                        Opcode::Binary => {
-                            let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
-                            message.put_u8(b'4');
-                            message.put(received_df.take_payload().as_ref());
-
-                            message.freeze()
-                        }
-                        _ => Bytes::from(received_df.take_payload()),
-                    }
-                }
-            };
+            let packets = self.poll();
 
             // Double check that we have not disconnected since last loop.
             if !self.connected.load(Ordering::Acquire) {
                 break;
             }
 
-            if data.is_empty() {
-                return Ok(());
+            // Only care about errors if the connection is still open.
+            let packets = packets?;
+
+            if packets.is_none() {
+                break;
             }
 
-            let packets = Payload::try_from(data)?;
-
-            for packet in packets {
-                {
-                    let on_packet = self.on_packet.read()?;
-                    // call the packet callback
-                    if let Some(function) = on_packet.as_ref() {
-                        spawn_scoped!(function(packet.clone()));
-                    }
-                }
-
+            // SAFETY: packets checked to be none before
+            for packet in packets.unwrap() {
                 // check for the appropriate action or callback
+                if let Some(on_packet) = self.on_packet.read()?.as_ref() {
+                    spawn_scoped!(on_packet(packet.clone()));
+                }
                 match packet.packet_id {
                     PacketId::MessageBase64 => {
-                        let on_data = self.on_data.read()?;
-                        if let Some(function) = on_data.as_ref() {
-                            spawn_scoped!(function(packet.data));
+                        if let Some(on_data) = self.on_data.read()?.as_ref() {
+                            spawn_scoped!(on_data(packet.data));
                         }
-                        drop(on_data);
                     }
                     PacketId::Message => {
-                        let on_data = self.on_data.read()?;
-                        if let Some(function) = on_data.as_ref() {
-                            spawn_scoped!(function(packet.data));
+                        if let Some(on_data) = self.on_data.read()?.as_ref() {
+                            spawn_scoped!(on_data(packet.data));
                         }
-                        drop(on_data);
                     }
 
                     PacketId::Close => {
-                        let on_close = self.on_close.read()?;
-                        if let Some(function) = on_close.as_ref() {
-                            spawn_scoped!(function(()));
+                        if let Some(on_close) = self.on_close.read()?.as_ref() {
+                            spawn_scoped!(on_close(()));
                         }
-                        drop(on_close);
                         // set current state to not connected and stop polling
                         self.connected.store(false, Ordering::Release);
                     }
@@ -652,7 +425,11 @@ impl EngineSocket {
                     }
                     PacketId::Ping => {
                         last_ping = Instant::now();
-                        self.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
+                        let result = self.emit(Packet::new(PacketId::Pong, Bytes::new()), false);
+                        // Only care about errors if the socket is still connected
+                        if self.connected.load(Ordering::Acquire) {
+                            result?;
+                        }
                     }
                     PacketId::Pong => {
                         // this will never happen as the pong packet is
@@ -663,21 +440,18 @@ impl EngineSocket {
                 }
             }
 
+            // TODO: respect timeout properly.
+            // This check only happens after a valid response from the server
             if server_timeout < last_ping.elapsed() {
                 // the server is unreachable
                 // set current state to not connected and stop polling
                 self.connected.store(false, Ordering::Release);
             }
+
+            // Sleep for a little while in between loops so any emits can send.
+            sleep(Duration::from_secs(1));
         }
         Ok(())
-    }
-
-    /// Produces a random String that is used to prevent browser caching.
-    #[inline]
-    fn get_random_t() -> String {
-        let reader = format!("{:#?}", SystemTime::now());
-        let hash = adler32(reader.as_bytes()).unwrap();
-        hash.to_string()
     }
 
     /// Calls the error callback with a given message.
@@ -692,47 +466,16 @@ impl EngineSocket {
         Ok(())
     }
 
-    // Constructs the path for a request, depending on the different situations.
-    #[inline]
-    fn get_query_path(&self) -> Result<String> {
-        // build the base path
-        let mut path = format!(
-            "{}/?EIO=4&transport={}&t={}",
-            if self.engine_io_mode.load(Ordering::Relaxed) {
-                "engine.io"
-            } else {
-                "socket.io"
-            },
-            match self.transport.as_ref() {
-                TransportType::Polling(_) => "polling",
-                TransportType::Websocket(_, _) | TransportType::SecureWebsocket(_) => "websocket",
-            },
-            EngineSocket::get_random_t(),
-        );
-
-        // append a session id if the socket is connected
-        // unwrapping is safe as a connected socket always
-        // holds its connection data
-        if self.connected.load(Ordering::Acquire) {
-            path.push_str(&format!(
-                "&sid={}",
-                (*self.connection_data).read()?.as_ref().unwrap().sid
-            ));
-        }
-
-        Ok(path)
-    }
-
     // Check if the underlying transport client is connected.
     pub(crate) fn is_connected(&self) -> Result<bool> {
         Ok(self.connected.load(Ordering::Acquire))
     }
 }
 
-impl Debug for EngineSocket {
+impl Debug for Socket {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "EngineSocket(transport: {:?}, on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, host_address: {:?}, tls_config: {:?}, connection_data: {:?}, engine_io_mode: {:?})",
+            "EngineSocket(transport: {:?}, on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, connection_data: {:?})",
             self.transport,
             if self.on_error.read().unwrap().is_some() {
                 "Fn(String)"
@@ -762,10 +505,7 @@ impl Debug for EngineSocket {
             self.connected,
             self.last_ping,
             self.last_pong,
-            self.host_address,
-            self.tls_config,
             self.connection_data,
-            self.engine_io_mode,
         ))
     }
 }
@@ -773,70 +513,68 @@ impl Debug for EngineSocket {
 #[cfg(test)]
 mod test {
 
-    use std::{thread::sleep, time::Duration};
+    use std::time::Duration;
 
     use crate::engineio::packet::PacketId;
 
     use super::*;
+    use std::thread;
 
     #[test]
     fn test_basic_connection() -> Result<()> {
-        let mut socket = EngineSocket::new(true, None, None);
-
-        assert!(socket
-            .on_open(|_| {
-                println!("Open event!");
-            })
-            .is_ok());
-
-        assert!(socket
-            .on_packet(|packet| {
-                println!("Received packet: {:?}", packet);
-            })
-            .is_ok());
-
-        assert!(socket
-            .on_data(|data| {
-                println!("Received packet: {:?}", std::str::from_utf8(&data));
-            })
-            .is_ok());
-
         let url = crate::engineio::test::engine_io_server()?;
+        let mut socket = SocketBuilder::new(url).build()?;
 
-        assert!(socket.bind(url).is_ok());
+        socket.on_open(|_| {
+            println!("Open event!");
+        })?;
 
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"Hello World"),),
-                false
-            )
-            .is_ok());
+        socket.on_packet(|packet| {
+            println!("Received packet: {:?}", packet);
+        })?;
 
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"Hello World2"),),
-                false
-            )
-            .is_ok());
+        socket.on_data(|data| {
+            println!("Received packet: {:?}", std::str::from_utf8(&data));
+        })?;
 
-        assert!(socket
-            .emit(Packet::new(PacketId::Pong, Bytes::new()), false)
-            .is_ok());
+        socket.connect()?;
 
-        sleep(Duration::from_secs(26));
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"Hello World")),
+            false,
+        )?;
 
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"Hello World3"),),
-                false
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"Hello World2")),
+            false,
+        )?;
+
+        socket.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
+
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"Hello World3")),
+            false,
+        )?;
+
+        let mut sut = socket.clone();
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(3));
+            let result = sut.close();
+            if result.is_ok() {
+                break;
+            } else if let Err(error) = result {
+                println!("Closing thread errored! Trying again... {}", error);
+            }
+        });
+
+        socket.poll_cycle()?;
         Ok(())
     }
 
     #[test]
     fn test_illegal_actions() -> Result<()> {
-        let mut sut = EngineSocket::new(true, None, None);
+        let url = crate::engineio::test::engine_io_server()?;
+        let mut sut = SocketBuilder::new(url.clone()).build()?;
 
         assert!(sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
@@ -848,9 +586,7 @@ mod test {
             )
             .is_err());
 
-        let url = crate::engineio::test::engine_io_server()?;
-
-        assert!(sut.bind(url).is_ok());
+        sut.connect()?;
 
         assert!(sut.on_open(|_| {}).is_err());
         assert!(sut.on_close(|_| {}).is_err());
@@ -858,30 +594,39 @@ mod test {
         assert!(sut.on_data(|_| {}).is_err());
         assert!(sut.on_error(|_| {}).is_err());
 
-        let mut sut = EngineSocket::new(true, None, None);
+        let mut socket = sut.clone();
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(3));
+            let result = socket.close();
+            if result.is_ok() {
+                break;
+            } else if let Err(error) = result {
+                println!("Closing thread errored! Trying again... {}", error);
+            }
+        });
 
+        sut.poll_cycle()?;
+
+        let sut = SocketBuilder::new(url).build()?;
         assert!(sut.poll_cycle().is_err());
+
         Ok(())
     }
     use reqwest::header::HOST;
 
     use crate::engineio::packet::Packet;
 
-    use super::*;
     #[test]
     fn test_connection_polling() -> Result<()> {
-        let mut socket = EngineSocket::new(true, None, None);
-
         let url = crate::engineio::test::engine_io_server()?;
+        let mut socket = SocketBuilder::new(url).build_polling()?;
 
-        socket.open(url).unwrap();
+        socket.connect().unwrap();
 
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
-                false,
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
+            false,
+        )?;
 
         socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
             println!(
@@ -890,20 +635,23 @@ mod test {
             );
         }))));
 
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
-                true
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
+            true,
+        )?;
 
         let mut sut = socket.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_secs(5));
-            sut.close();
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(3));
+            let result = sut.close();
+            if result.is_ok() {
+                break;
+            } else if let Err(error) = result {
+                println!("Closing thread errored! Trying again... {}", error);
+            }
         });
 
-        assert!(socket.poll_cycle().is_ok());
+        socket.poll_cycle()?;
 
         Ok(())
     }
@@ -912,30 +660,22 @@ mod test {
     fn test_connection_secure_ws_http() -> Result<()> {
         let host =
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
+        let url = crate::engineio::test::engine_io_server_secure()?;
 
         let mut headers = HeaderMap::new();
         headers.insert(HOST, host.parse().unwrap());
-        let mut socket = EngineSocket::new(
-            true,
-            Some(
-                TlsConnector::builder()
-                    .danger_accept_invalid_certs(true)
-                    .build()
-                    .unwrap(),
-            ),
-            Some(headers),
-        );
+        let mut builder = SocketBuilder::new(url);
 
-        let url = crate::engineio::test::engine_io_server_secure()?;
+        builder = builder.set_tls_config(crate::test::tls_connector()?);
+        builder = builder.set_headers(headers);
+        let mut socket = builder.build_websocket_secure()?;
 
-        socket.open(url).unwrap();
+        socket.connect().unwrap();
 
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
-                false,
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
+            false,
+        )?;
 
         socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
             println!(
@@ -944,53 +684,80 @@ mod test {
             );
         }))));
 
-        // closes the connection
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"CLOSE")),
-                false,
-            )
-            .is_ok());
-
-        assert!(socket
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
-                true
-            )
-            .is_ok());
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
+            true,
+        )?;
 
         let mut sut = socket.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_secs(5));
-            sut.close();
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(3));
+            let result = sut.close();
+            if result.is_ok() {
+                break;
+            } else if let Err(error) = result {
+                println!("Closing thread errored! Trying again... {}", error);
+            }
         });
 
-        assert!(socket.poll_cycle().is_ok());
-
+        socket.poll_cycle()?;
         Ok(())
     }
 
     #[test]
-    fn test_open_invariants() {
-        let mut sut = EngineSocket::new(false, None, None);
+    fn test_connection_ws_http() -> Result<()> {
+        let url = crate::engineio::test::engine_io_server()?;
+
+        let builder = SocketBuilder::new(url);
+        let mut socket = builder.build_websocket()?;
+
+        socket.connect().unwrap();
+
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
+            false,
+        )?;
+
+        socket.on_data = Arc::new(RwLock::new(Some(Box::new(|data| {
+            println!(
+                "Received: {:?}",
+                std::str::from_utf8(&data).expect("Error while decoding utf-8")
+            );
+        }))));
+
+        socket.emit(
+            Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
+            true,
+        )?;
+
+        let mut sut = socket.clone();
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(3));
+            let result = sut.close();
+            if result.is_ok() {
+                break;
+            } else if let Err(error) = result {
+                println!("Closing thread errored! Trying again... {}", error);
+            }
+        });
+
+        socket.poll_cycle()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_open_invariants() -> Result<()> {
+        let url = crate::engineio::test::engine_io_server()?;
         let illegal_url = "this is illegal";
 
-        let _error = sut.open(illegal_url).expect_err("Error");
-        assert!(matches!(
-            Error::InvalidUrlScheme(String::from("this is illegal")),
-            _error
-        ));
+        assert!(Url::parse(&illegal_url).is_err());
 
-        let mut sut = EngineSocket::new(false, None, None);
         let invalid_protocol = "file:///tmp/foo";
+        assert!(SocketBuilder::new(Url::parse(&invalid_protocol).unwrap())
+            .build()
+            .is_err());
 
-        let _error = sut.open(invalid_protocol).expect_err("Error");
-        assert!(matches!(
-            Error::InvalidUrlScheme(String::from("file://localhost:4200")),
-            _error
-        ));
-
-        let sut = EngineSocket::new(false, None, None);
+        let sut = SocketBuilder::new(url.clone()).build()?;
         let _error = sut
             .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
             .expect_err("error");
@@ -1002,17 +769,15 @@ mod test {
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
         headers.insert(HOST, host.parse().unwrap());
 
-        let _ = EngineSocket::new(
-            true,
-            Some(
+        let _ = SocketBuilder::new(url.clone())
+            .set_tls_config(
                 TlsConnector::builder()
                     .danger_accept_invalid_certs(true)
                     .build()
                     .unwrap(),
-            ),
-            None,
-        );
-
-        let _ = EngineSocket::new(true, None, Some(headers));
+            )
+            .build()?;
+        let _ = SocketBuilder::new(url).set_headers(headers).build()?;
+        Ok(())
     }
 }

@@ -2,16 +2,17 @@ use crate::engineio::transport::Transport;
 use crate::error::{Error, Result};
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
-use reqwest::Url;
 use reqwest::{
     blocking::{Client, ClientBuilder},
     header::HeaderMap,
 };
 use std::sync::{Arc, Mutex, RwLock};
+use url::Url;
 
-pub(crate) struct PollingTransport {
+#[derive(Debug, Clone)]
+pub struct PollingTransport {
     client: Arc<Mutex<Client>>,
-    base_url: Arc<RwLock<String>>,
+    base_url: Arc<RwLock<Url>>,
 }
 
 impl PollingTransport {
@@ -21,7 +22,7 @@ impl PollingTransport {
         tls_config: Option<TlsConnector>,
         opening_headers: Option<HeaderMap>,
     ) -> Self {
-        let client = match (tls_config.clone(), opening_headers.clone()) {
+        let client = match (tls_config, opening_headers) {
             (Some(config), Some(map)) => ClientBuilder::new()
                 .use_preconfigured_tls(config)
                 .default_headers(map)
@@ -35,16 +36,12 @@ impl PollingTransport {
             (None, None) => Client::new(),
         };
 
-        let url = base_url
-            .clone()
-            .query_pairs_mut()
-            .append_pair("transport", "polling")
-            .finish()
-            .clone();
+        let mut url = base_url;
+        url.query_pairs_mut().append_pair("transport", "polling");
 
         PollingTransport {
             client: Arc::new(Mutex::new(client)),
-            base_url: Arc::new(RwLock::new(url.to_string())),
+            base_url: Arc::new(RwLock::new(url)),
         }
     }
 }
@@ -82,14 +79,14 @@ impl Transport for PollingTransport {
     }
 
     fn poll(&self) -> Result<Bytes> {
-        Ok(Client::new().get(self.address()?).send()?.bytes()?)
+        Ok(self.client.lock()?.get(self.address()?).send()?.bytes()?)
     }
 
-    fn base_url(&self) -> Result<String> {
+    fn base_url(&self) -> Result<Url> {
         Ok(self.base_url.read()?.clone())
     }
 
-    fn set_base_url(&self, base_url: String) -> Result<()> {
+    fn set_base_url(&self, base_url: Url) -> Result<()> {
         *self.base_url.write()? = base_url;
         Ok(())
     }
