@@ -63,6 +63,13 @@ impl TryFrom<u8> for PacketId {
     }
 }
 
+/// A `Packet` sent via the `engine.io` protocol.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Packet {
+    pub packet_id: PacketId,
+    pub data: Bytes,
+}
+
 /// Data which gets exchanged in a handshake as defined by the server.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct HandshakePacket {
@@ -79,13 +86,6 @@ impl TryFrom<Packet> for HandshakePacket {
     fn try_from(packet: Packet) -> Result<HandshakePacket> {
         Ok(serde_json::from_slice(packet.data[..].as_ref())?)
     }
-}
-
-/// A `Packet` sent via the `engine.io` protocol.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Packet {
-    pub packet_id: PacketId,
-    pub data: Bytes,
 }
 
 impl Packet {

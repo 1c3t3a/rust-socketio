@@ -1,11 +1,10 @@
 use crate::error::Result;
 use adler32::adler32;
-use bytes::{Buf, Bytes};
-use std::io::Read;
-use std::io::Write;
+use bytes::Bytes;
 use std::time::SystemTime;
+use url::Url;
 
-pub trait Transport {
+pub trait Transport: Send + Sync {
     /// Sends a packet to the server. This optionally handles sending of a
     /// socketio binary attachment via the boolean attribute `is_binary_att`.
     fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()>;
@@ -18,36 +17,23 @@ pub trait Transport {
     /// Returns start of the url. ex. http://localhost:2998/engine.io/?EIO=4&transport=polling
     /// Must have EIO and transport already set.
     // TODO: Add a URL type
-    fn base_url(&self) -> Result<String>;
+    fn base_url(&self) -> Result<Url>;
 
     /// Used to update the base path, like when adding the sid.
-    fn set_base_url(&self, base_url: String) -> Result<()>;
+    fn set_base_url(&self, base_url: Url) -> Result<()>;
 
     /// Full query address
-    fn address(&self) -> Result<String> {
+    fn address(&self) -> Result<Url> {
         let reader = format!("{:#?}", SystemTime::now());
         let hash = adler32(reader.as_bytes()).unwrap();
-        Ok(self.base_url()? + "&t=" + &hash.to_string())
+        let mut url = self.base_url()?;
+        url.query_pairs_mut().append_pair("t", &hash.to_string());
+        Ok(url)
     }
 }
 
-impl Read for dyn Transport {
-    fn read(&mut self, buf: &mut [u8]) -> std::result::Result<usize, std::io::Error> {
-        let mut bytes = self.poll()?;
-        bytes.copy_to_slice(buf);
-        Ok(bytes.len())
-    }
-}
-
-impl Write for dyn Transport {
-    fn write(&mut self, buf: &[u8]) -> std::result::Result<usize, std::io::Error> {
-        let bytes = Bytes::copy_from_slice(buf);
-        self.emit(bytes.clone(), true).unwrap();
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::result::Result<(), std::io::Error> {
-        // We are always flushed.
-        Ok(())
+impl std::fmt::Debug for dyn Transport {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!("Transport(base_url: {:?})", self.base_url(),))
     }
 }
