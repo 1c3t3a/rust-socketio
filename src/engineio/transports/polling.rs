@@ -87,34 +87,55 @@ impl Transport for PollingTransport {
     }
 
     fn set_base_url(&self, base_url: Url) -> Result<()> {
-        *self.base_url.write()? = base_url;
+        let mut url = base_url;
+        if url
+            .query_pairs()
+            .filter(|(k, v)| k == "transport" && v == "polling")
+            .count()
+            == 0
+        {
+            url.query_pairs_mut().append_pair("transport", "polling");
+        }
+        *self.base_url.write()? = url;
         Ok(())
     }
 }
-/*
-//TODO: implement unit tests for base_url and integration via engineio
+
 #[cfg(test)]
 mod test {
     use super::*;
     use std::str::FromStr;
-    const SERVER_URL: &str = "http://localhost:4201";
     #[test]
     fn polling_transport_base_url() -> Result<()> {
-        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned())
-            + "/engine.io/?transport=polling";
+        let url = crate::engineio::test::engine_io_server()?.to_string();
         let transport = PollingTransport::new(Url::from_str(&url[..]).unwrap(), None, None);
-        assert_eq!(transport.base_url()?, url.clone());
-        transport.set_base_url("127.0.0.1".to_owned())?;
-        // TODO: Change me to "127.0.0.1/?transport=polling"
-        assert_eq!(transport.base_url()?, "127.0.0.1");
-        assert_ne!(transport.base_url()?, url);
-        /*
-        //TODO: Make sure it doesn't double up
-        transport.set_base_url("127.0.0.1/?transport=polling".to_owned())?;
-        assert_eq!(transport.base_url()?, "127.0.0.1/?transport=polling");
-        assert_ne!(transport.base_url()?, url);
-        */
+        assert_eq!(
+            transport.base_url()?.to_string(),
+            url.clone() + "?transport=polling"
+        );
+        transport.set_base_url(Url::parse("https://127.0.0.1")?)?;
+        assert_eq!(
+            transport.base_url()?.to_string(),
+            "https://127.0.0.1/?transport=polling"
+        );
+        assert_ne!(transport.base_url()?.to_string(), url);
+
+        transport.set_base_url(Url::parse("http://127.0.0.1/?transport=polling")?)?;
+        assert_eq!(
+            transport.base_url()?.to_string(),
+            "http://127.0.0.1/?transport=polling"
+        );
+        assert_ne!(transport.base_url()?.to_string(), url);
+        Ok(())
+    }
+
+    #[test]
+    fn transport_debug() -> Result<()> {
+        let url = crate::engineio::test::engine_io_server()?.to_string();
+        let transport = PollingTransport::new(Url::from_str(&url[..]).unwrap(), None, None);
+        println!("{:?}", transport);
+        let test: Box<dyn Transport> = Box::new(transport);
+        println!("{:?}", test);
         Ok(())
     }
 }
-*/
