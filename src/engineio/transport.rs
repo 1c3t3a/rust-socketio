@@ -1,4 +1,4 @@
-use crate::engineio::packet::Payload;
+use crate::engineio::packet::{Packet, Payload};
 use crate::error::Result;
 use adler32::adler32;
 use bytes::{Bytes};
@@ -74,9 +74,36 @@ impl std::fmt::Debug for dyn Transport {
     }
 }
 
-impl Iterator for dyn Transport {
-    type Item = Payload;
+pub struct TransportIterator {
+    payload: Option<std::vec::IntoIter<Packet>>,
+    transport: Box<dyn Transport>,
+}
+
+impl Iterator for TransportIterator {
+    type Item = Packet;
     fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
-        Some(Payload::try_from(self.poll().unwrap()).unwrap())
+        if self.payload.is_none() {
+            self.payload = Some(
+                Payload::try_from(self.transport.poll().unwrap())
+                    .unwrap()
+                    .into_iter(),
+            );
+        }
+        if let Some(payload_iter) = self.payload.as_mut() {
+            payload_iter.next()
+        } else {
+            None
+        }
+    }
+}
+
+impl IntoIterator for Box<dyn Transport> {
+    type IntoIter = TransportIterator;
+    type Item = Packet;
+    fn into_iter(self) -> <Self as std::iter::IntoIterator>::IntoIter {
+        TransportIterator {
+            payload: None,
+            transport: self,
+        }
     }
 }
