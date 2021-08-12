@@ -1,7 +1,9 @@
 use super::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
+use crate::engineio::packet::Payload;
 use crate::error::Result;
 use adler32::adler32;
-use bytes::Bytes;
+use bytes::{Bytes};
+use std::convert::TryFrom;
 use std::time::SystemTime;
 use url::Url;
 
