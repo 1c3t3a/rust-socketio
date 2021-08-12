@@ -1,9 +1,10 @@
+use crate::engineio::socket::SocketBuilder as EngineIoSocketBuilder;
 use crate::error::{Error, Result};
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
 use crate::{
     engineio::{
         packet::{Packet as EnginePacket, PacketId as EnginePacketId},
-        socket::EngineSocket,
+        socket::Socket as EngineIoSocket,
     },
     Socket,
 };
@@ -11,14 +12,16 @@ use bytes::Bytes;
 use native_tls::TlsConnector;
 use rand::{thread_rng, Rng};
 use reqwest::header::HeaderMap;
+use std::thread;
 use std::{
     fmt::Debug,
     sync::{atomic::Ordering, RwLock},
 };
 use std::{
-    sync::{atomic::AtomicBool, Arc, Mutex},
+    sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant},
 };
+use url::Url;
 
 use super::{event::Event, payload::Payload};
 
@@ -40,8 +43,9 @@ pub struct Ack {
 /// Handles communication in the `socket.io` protocol.
 #[derive(Clone)]
 pub struct TransportClient {
-    engine_socket: Arc<Mutex<EngineSocket>>,
-    host: Arc<String>,
+    // TODO: Allow for dynamic typing here when refactoring socket.io
+    engine_socket: Arc<RwLock<EngineIoSocket>>,
+    host: Arc<Url>,
     connected: Arc<AtomicBool>,
     on: Arc<Vec<EventCallback>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
@@ -59,20 +63,31 @@ impl TransportClient {
         nsp: Option<String>,
         tls_config: Option<TlsConnector>,
         opening_headers: Option<HeaderMap>,
-    ) -> Self {
-        TransportClient {
-            engine_socket: Arc::new(Mutex::new(EngineSocket::new(
-                false,
-                tls_config,
-                opening_headers,
-            ))),
-            host: Arc::new(address.into()),
+    ) -> Result<Self> {
+        let mut url: Url = Url::parse(&address.into())?;
+
+        if url.path() == "/" {
+            url.set_path("/socket.io/");
+        }
+
+        let mut engine_socket_builder = EngineIoSocketBuilder::new(url.clone());
+        if let Some(tls_config) = tls_config {
+            // SAFETY: Checked is_some
+            engine_socket_builder = engine_socket_builder.set_tls_config(tls_config);
+        }
+        if let Some(opening_headers) = opening_headers {
+            // SAFETY: Checked is_some
+            engine_socket_builder = engine_socket_builder.set_headers(opening_headers);
+        }
+        Ok(TransportClient {
+            engine_socket: Arc::new(RwLock::new(engine_socket_builder.build_with_fallback()?)),
+            host: Arc::new(url),
             connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
             unfinished_packet: Arc::new(RwLock::new(None)),
             nsp: Arc::new(nsp),
-        }
+        })
     }
 
     /// Registers a new event with some callback function `F`.
@@ -91,9 +106,26 @@ impl TransportClient {
     pub fn connect(&mut self) -> Result<()> {
         self.setup_callbacks()?;
 
-        self.engine_socket
-            .lock()?
-            .bind(self.host.as_ref().to_string())?;
+        self.engine_socket.write()?.connect()?;
+
+        // TODO: refactor me
+        let engine_socket = self.engine_socket.clone();
+        thread::spawn(move || {
+            // tries to restart a poll cycle whenever a 'normal' error occurs,
+            // it just panics on network errors, in case the poll cycle returned
+            // `Result::Ok`, the server receives a close frame so it's safe to
+            // terminate
+            loop {
+                match engine_socket.read().unwrap().poll_cycle() {
+                    Ok(_) => break,
+                    e @ Err(Error::IncompleteHttp(_))
+                    | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
+                        panic!("{}", e.unwrap_err())
+                    }
+                    _ => (),
+                }
+            }
+        });
 
         // construct the opening packet
         let open_packet = SocketPacket::new(
@@ -143,13 +175,13 @@ impl TransportClient {
     /// Sends a `socket.io` packet to the server using the `engine.io` client.
     pub fn send(&self, packet: &SocketPacket) -> Result<()> {
         if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
-            return Err(Error::IllegalActionAfterOpen());
+            return Err(Error::IllegalActionBeforeOpen());
         }
 
         // the packet, encoded as an engine.io message packet
         let engine_packet = EnginePacket::new(EnginePacketId::Message, packet.encode());
 
-        self.engine_socket.lock()?.emit(engine_packet, false)
+        self.engine_socket.read()?.emit(engine_packet, false)
     }
 
     /// Sends a single binary attachment to the server. This method
@@ -162,7 +194,7 @@ impl TransportClient {
         }
 
         self.engine_socket
-            .lock()?
+            .read()?
             .emit(EnginePacket::new(EnginePacketId::Message, attachment), true)
     }
 
@@ -431,15 +463,15 @@ impl TransportClient {
             }
         };
 
-        self.engine_socket.lock()?.on_open(open_callback)?;
+        self.engine_socket.write()?.on_open(open_callback)?;
 
-        self.engine_socket.lock()?.on_error(error_callback)?;
+        self.engine_socket.write()?.on_error(error_callback)?;
 
-        self.engine_socket.lock()?.on_close(close_callback)?;
+        self.engine_socket.write()?.on_close(close_callback)?;
 
         let clone_self = self.clone();
         self.engine_socket
-            .lock()?
+            .write()?
             .on_data(move |data| Self::handle_new_message(data, &clone_self))
     }
 
@@ -521,7 +553,7 @@ impl TransportClient {
     }
 
     fn is_engineio_connected(&self) -> Result<bool> {
-        self.engine_socket.lock()?.is_connected()
+        self.engine_socket.read()?.is_connected()
     }
 }
 
@@ -555,7 +587,7 @@ mod test {
     fn it_works() -> Result<()> {
         let url = crate::socketio::test::socket_io_server()?;
 
-        let mut socket = TransportClient::new(url, None, None, None);
+        let mut socket = TransportClient::new(url, None, None, None)?;
 
         assert!(socket
             .on(
@@ -596,20 +628,9 @@ mod test {
     }
 
     #[test]
-    fn test_error_cases() {
-        let sut = TransportClient::new("http://localhost:123", None, None, None);
-
-        let packet = SocketPacket::new(
-            SocketPacketId::Connect,
-            "/".to_owned(),
-            None,
-            None,
-            None,
-            None,
-        );
-        assert!(sut.send(&packet).is_err());
-        assert!(sut
-            .send_binary_attachment(Bytes::from_static(b"Hallo"))
-            .is_err());
+    fn test_error_cases() -> Result<()> {
+        let result = TransportClient::new("http://localhost:123", None, None, None);
+        assert!(result.is_err());
+        Ok(())
     }
 }
