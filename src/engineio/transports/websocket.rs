@@ -19,7 +19,7 @@ pub struct WebsocketTransport {
 }
 
 impl WebsocketTransport {
-    /// Creates an instance of `TransportClient`.
+    /// Creates an instance of `WebsocketTransport`.
     pub fn new(base_url: Url, headers: Option<Headers>) -> Self {
         let mut url = base_url;
         url.query_pairs_mut().append_pair("transport", "websocket");
