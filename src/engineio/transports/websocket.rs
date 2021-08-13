@@ -110,11 +110,9 @@ impl Transport for WebsocketTransport {
 
     fn set_base_url(&self, url: url::Url) -> Result<()> {
         let mut url = url;
-        if url
+        if !url
             .query_pairs()
-            .filter(|(k, v)| k == "transport" && v == "websocket")
-            .count()
-            == 0
+            .any(|(k, v)| k == "transport" && v == "websocket")
         {
             url.query_pairs_mut().append_pair("transport", "websocket");
         }
