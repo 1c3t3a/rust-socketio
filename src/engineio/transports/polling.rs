@@ -16,7 +16,7 @@ pub struct PollingTransport {
 }
 
 impl PollingTransport {
-    /// Creates an instance of `TransportClient`.
+    /// Creates an instance of `PollingTransport`.
     pub fn new(
         base_url: Url,
         tls_config: Option<TlsConnector>,
