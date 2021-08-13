@@ -52,7 +52,6 @@ impl SocketBuilder {
     //TODO: Remove trailing slash when URL parsing is properly handled.
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .expect("illegal namespace")
     ///     .on("test", callback)
     ///     .connect()
     ///     .expect("error while connecting");
@@ -76,13 +75,13 @@ impl SocketBuilder {
 
     /// Sets the target namespace of the client. The namespace should start
     /// with a leading `/`. Valid examples are e.g. `/admin`, `/foo`.
-    pub fn namespace<T: Into<String>>(mut self, namespace: T) -> Result<Self> {
+    pub fn namespace<T: Into<String>>(mut self, namespace: T) -> Self {
         let mut nsp = namespace.into();
         if !nsp.starts_with('/') {
             nsp = "/".to_owned() + &nsp;
         }
         self.namespace = Some(nsp);
-        Ok(self)
+        self
     }
 
     /// Registers a new callback for a certain [`socketio::event::Event`]. The event could either be
@@ -101,7 +100,6 @@ impl SocketBuilder {
     ///
     /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .expect("illegal namespace")
     ///     .on("test", callback)
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
     ///     .connect();
@@ -132,7 +130,6 @@ impl SocketBuilder {
     ///
     /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .expect("illegal namespace")
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
     ///     .tls_config(tls_connector)
     ///     .connect();
@@ -154,7 +151,6 @@ impl SocketBuilder {
     ///
     /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .expect("illegal namespace")
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
     ///     .opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
     ///     .connect();
@@ -185,7 +181,6 @@ impl SocketBuilder {
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .expect("illegal namespace")
     ///     .on("error", |err, _| eprintln!("Socket error!: {:#?}", err))
     ///     .connect()
     ///     .expect("connection failed");
@@ -444,7 +439,6 @@ mod test {
 
         let socket = socket_builder
             .namespace("/")
-            .expect("Error!")
             .tls_config(tls_connector)
             .opening_header(HOST, "localhost".parse().unwrap())
             .opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
