@@ -16,7 +16,6 @@ pub trait Transport: Send + Sync {
 
     /// Returns start of the url. ex. http://localhost:2998/engine.io/?EIO=4&transport=polling
     /// Must have EIO and transport already set.
-    // TODO: Add a URL type
     fn base_url(&self) -> Result<Url>;
 
     /// Used to update the base path, like when adding the sid.
