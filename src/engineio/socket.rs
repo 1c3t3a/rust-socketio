@@ -58,12 +58,12 @@ impl SocketBuilder {
         }
     }
 
-    pub fn set_tls_config(mut self, tls_config: TlsConnector) -> Self {
+    pub fn tls_config(mut self, tls_config: TlsConnector) -> Self {
         self.tls_config = Some(tls_config);
         self
     }
 
-    pub fn set_headers(mut self, headers: HeaderMap) -> Self {
+    pub fn headers(mut self, headers: HeaderMap) -> Self {
         self.headers = Some(headers);
         self
     }
@@ -666,8 +666,8 @@ mod test {
         headers.insert(HOST, host.parse().unwrap());
         let mut builder = SocketBuilder::new(url);
 
-        builder = builder.set_tls_config(crate::test::tls_connector()?);
-        builder = builder.set_headers(headers);
+        builder = builder.tls_config(crate::test::tls_connector()?);
+        builder = builder.headers(headers);
         let mut socket = builder.build_websocket_secure()?;
 
         socket.connect().unwrap();
@@ -770,14 +770,14 @@ mod test {
         headers.insert(HOST, host.parse().unwrap());
 
         let _ = SocketBuilder::new(url.clone())
-            .set_tls_config(
+            .tls_config(
                 TlsConnector::builder()
                     .danger_accept_invalid_certs(true)
                     .build()
                     .unwrap(),
             )
             .build()?;
-        let _ = SocketBuilder::new(url).set_headers(headers).build()?;
+        let _ = SocketBuilder::new(url).headers(headers).build()?;
         Ok(())
     }
 }
