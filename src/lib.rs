@@ -20,7 +20,6 @@
 //! // get a socket that is connected to the admin namespace
 //! let mut socket = SocketBuilder::new("http://localhost:4200/")
 //!      .namespace("/admin")
-//!      .expect("illegal namespace")
 //!      .on("test", callback)
 //!      .on("error", |err, _| eprintln!("Error: {:#?}", err))
 //!      .connect()

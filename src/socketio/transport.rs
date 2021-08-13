@@ -12,8 +12,8 @@ use bytes::Bytes;
 use native_tls::TlsConnector;
 use rand::{thread_rng, Rng};
 use reqwest::header::HeaderMap;
-use std::thread;
 use std::convert::TryFrom;
+use std::thread;
 use std::{
     fmt::Debug,
     sync::{atomic::Ordering, RwLock},
