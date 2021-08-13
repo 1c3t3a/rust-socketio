@@ -88,11 +88,9 @@ impl Transport for PollingTransport {
 
     fn set_base_url(&self, base_url: Url) -> Result<()> {
         let mut url = base_url;
-        if url
+        if !url
             .query_pairs()
-            .filter(|(k, v)| k == "transport" && v == "polling")
-            .count()
-            == 0
+            .any(|(k, v)| k == "transport" && v == "polling")
         {
             url.query_pairs_mut().append_pair("transport", "polling");
         }
@@ -131,11 +129,16 @@ mod test {
 
     #[test]
     fn transport_debug() -> Result<()> {
-        let url = crate::engineio::test::engine_io_server()?.to_string();
-        let transport = PollingTransport::new(Url::from_str(&url[..]).unwrap(), None, None);
-        println!("{:?}", transport);
+        let mut url = crate::engineio::test::engine_io_server()?;
+        let transport =
+            PollingTransport::new(Url::from_str(&url.to_string()[..]).unwrap(), None, None);
+        url.query_pairs_mut().append_pair("transport", "polling");
+        assert_eq!(format!("PollingTransport {{ client: {:?}, base_url: RwLock {{ data: {:?}, poisoned: false, .. }} }}", transport.client, url), format!("{:?}", transport));
         let test: Box<dyn Transport> = Box::new(transport);
-        println!("{:?}", test);
+        assert_eq!(
+            format!("Transport(base_url: Ok({:?}))", url),
+            format!("{:?}", test)
+        );
         Ok(())
     }
 }
