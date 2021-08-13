@@ -46,8 +46,6 @@ pub enum Error {
     #[error("An illegal action (such as setting a callback after being connected) was triggered")]
     //TODO: make these impossible by using builders and immutable data.
     IllegalActionAfterOpen(),
-    #[error("Specified namespace {0} is not valid")]
-    IllegalNamespace(String),
     #[error("A lock was poisoned")]
     InvalidPoisonedLock(),
     #[error("Got a websocket error: {0}")]
