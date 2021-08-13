@@ -36,5 +36,17 @@ jobs:
           cd ci && docker build -t test_suite:latest .
           docker run -d -p 4200:4200 -p 4201:4201 -p 4202:4202 test_suite:latest
 
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
+
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
       - name: Run testsuite
         run: cargo test --verbose 
