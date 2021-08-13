@@ -54,8 +54,6 @@ impl WebsocketTransport {
             Packet::new(PacketId::Ping, Bytes::from("probe")),
         ))?)))?;
 
-        std::thread::sleep(std::time::Duration::from_secs(10));
-
         // expect to receive a probe packet
         let message = receiver.recv_message()?;
         if message.take_payload() != Bytes::from(Packet::new(PacketId::Pong, Bytes::from("probe")))
