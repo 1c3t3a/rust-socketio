@@ -1,58 +1,175 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use rust_socketio::engineio::{
-    socket::{Socket, SocketBuilder},
-    transport::Transport,
-    packet::{Packet, PacketId},
-    transports::polling::PollingTransport,
-};
 use bytes::Bytes;
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use native_tls::Certificate;
+use native_tls::TlsConnector;
+use rust_socketio::engineio::{
+    packet::{Packet, PacketId},
+    socket::{Socket, SocketBuilder},
+};
 use rust_socketio::error::Error;
+use std::fs::File;
+use std::io::Read;
 use url::Url;
 
-fn engine_io_emit<T: Transport>(socket: &Socket<T>, packet: Packet) -> Result<(), Error> {
-    let mut i = 0;
-    while i < 100 {
-        i+=1;
-        socket.emit(packet.clone(), false)?;
+pub use criterion_wrappers::*;
+pub use tests::*;
+pub use util::*;
+
+pub mod util {
+    use super::*;
+    pub fn engine_io_url() -> Result<Url, Error> {
+        let url = std::env::var("ENGINE_IO_SERVER")
+            .unwrap_or_else(|_| "http://localhost:4201".to_owned());
+        Ok(Url::parse(&url)?)
     }
-    Ok(())
+
+    pub fn engine_io_url_secure() -> Result<Url, Error> {
+        let url = std::env::var("ENGINE_IO_SECURE_SERVER")
+            .unwrap_or_else(|_| "https://localhost:4202".to_owned());
+        Ok(Url::parse(&url)?)
+    }
+
+    pub fn tls_connector() -> Result<TlsConnector, Error> {
+        let cert_path =
+            std::env::var("CA_CERT_PATH").unwrap_or_else(|_| "ci/cert/ca.crt".to_owned());
+        let mut cert_file = File::open(cert_path)?;
+        let mut buf = vec![];
+        cert_file.read_to_end(&mut buf)?;
+        let cert: Certificate = Certificate::from_pem(&buf[..]).unwrap();
+        Ok(TlsConnector::builder()
+            // ONLY USE FOR TESTING!
+            .danger_accept_invalid_hostnames(true)
+            .add_root_certificate(cert)
+            .build()
+            .unwrap())
+    }
 }
 
-fn engine_io_url() -> Result<Url, Error> {
-    const SERVER_URL: &str = "http://localhost:4201";
-    let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
-    Ok(Url::parse(&url)?)
+pub mod tests {
+    use super::*;
+    pub fn engine_io_socket_build(url: Url) -> Result<Socket, Error> {
+        SocketBuilder::new(url).build()
+    }
+
+    pub fn engine_io_socket_build_polling(url: Url) -> Result<Socket, Error> {
+        SocketBuilder::new(url).build_polling()
+    }
+
+    pub fn engine_io_socket_build_websocket(url: Url) -> Result<Socket, Error> {
+        SocketBuilder::new(url).build_websocket()
+    }
+
+    pub fn engine_io_socket_build_websocket_secure(url: Url) -> Result<Socket, Error> {
+        SocketBuilder::new(url)
+            .set_tls_config(tls_connector()?)
+            .build_websocket_secure()
+    }
+
+    pub fn engine_io_packet() -> Packet {
+        Packet::new(PacketId::Message, Bytes::from("hello world"))
+    }
+
+    pub fn engine_io_emit(socket: &Socket, packet: Packet) -> Result<(), Error> {
+        socket.emit(packet.clone(), false)
+    }
+}
+mod criterion_wrappers {
+    use super::*;
+
+    pub fn criterion_engine_io_socket_build(c: &mut Criterion) {
+        let url = engine_io_url().unwrap();
+        c.bench_function("engine io build", |b| {
+            b.iter(|| {
+                engine_io_socket_build(black_box(url.clone()))
+                    .unwrap()
+                    .close()
+            })
+        });
+    }
+
+    pub fn criterion_engine_io_socket_build_polling(c: &mut Criterion) {
+        let url = engine_io_url().unwrap();
+        c.bench_function("engine io build polling", |b| {
+            b.iter(|| {
+                engine_io_socket_build_polling(black_box(url.clone()))
+                    .unwrap()
+                    .close()
+            })
+        });
+    }
+
+    pub fn criterion_engine_io_socket_build_websocket(c: &mut Criterion) {
+        let url = engine_io_url().unwrap();
+        c.bench_function("engine io build websocket", |b| {
+            b.iter(|| {
+                engine_io_socket_build_websocket(black_box(url.clone()))
+                    .unwrap()
+                    .close()
+            })
+        });
+    }
+
+    pub fn criterion_engine_io_socket_build_websocket_secure(c: &mut Criterion) {
+        let url = engine_io_url_secure().unwrap();
+        c.bench_function("engine io build websocket secure", |b| {
+            b.iter(|| {
+                engine_io_socket_build_websocket_secure(black_box(url.clone()))
+                    .unwrap()
+                    .close()
+            })
+        });
+    }
+
+    pub fn criterion_engine_io_packet(c: &mut Criterion) {
+        c.bench_function("engine io packet", |b| b.iter(|| engine_io_packet()));
+    }
+
+    pub fn criterion_engine_io_emit_polling(c: &mut Criterion) {
+        let url = engine_io_url().unwrap();
+        let mut socket = engine_io_socket_build(url).unwrap();
+        socket.connect().unwrap();
+        let packet = engine_io_packet();
+
+        c.bench_function("engine io polling emit", |b| {
+            b.iter(|| engine_io_emit(black_box(&socket), black_box(packet.clone())).unwrap())
+        });
+        socket.close().unwrap();
+    }
+
+    pub fn criterion_engine_io_emit_websocket(c: &mut Criterion) {
+        let url = engine_io_url().unwrap();
+        let mut socket = engine_io_socket_build(url).unwrap();
+        socket.connect().unwrap();
+        let packet = engine_io_packet();
+
+        c.bench_function("engine io websocket emit", |b| {
+            b.iter(|| engine_io_emit(black_box(&socket), black_box(packet.clone())).unwrap())
+        });
+        socket.close().unwrap();
+    }
+
+    pub fn criterion_engine_io_emit_websocket_secure(c: &mut Criterion) {
+        let url = engine_io_url_secure().unwrap();
+        let mut socket = engine_io_socket_build(url).unwrap();
+        socket.connect().unwrap();
+        let packet = engine_io_packet();
+
+        c.bench_function("engine io websocket secure emit", |b| {
+            b.iter(|| engine_io_emit(black_box(&socket), black_box(packet.clone())).unwrap())
+        });
+        socket.close().unwrap();
+    }
 }
 
-fn engine_io_socket_build(url: Url) -> Result<Socket<PollingTransport>, Error> {
-    SocketBuilder::new(url).build()
-}
-
-fn engine_io_packet() -> Packet {
-    Packet::new(PacketId::Message, Bytes::from("hello world"))
-}
-
-
-
-
-fn criterion_engine_io_socket_build(c: &mut Criterion) {
-    let url = engine_io_url().unwrap();
-
-    c.bench_function("engine io build", |b| b.iter(|| engine_io_socket_build(black_box(url.clone()))));
-}
-
-fn criterion_engine_io_packet(c: &mut Criterion) {
-    c.bench_function("engine io emit", |b| b.iter(|| engine_io_packet()));
-}
-
-fn criterion_engine_io_emit(c: &mut Criterion) {
-    let url = engine_io_url().unwrap();
-    let mut socket = engine_io_socket_build(url).unwrap();
-    socket.connect().unwrap();
-    let packet = engine_io_packet();
-
-    c.bench_function("engine io emit", |b| b.iter(|| engine_io_emit(black_box(&socket), black_box(packet.clone())).unwrap()));
-}
-
-criterion_group!(benches, criterion_engine_io_socket_build, criterion_engine_io_packet, criterion_engine_io_emit);
+criterion_group!(
+    benches,
+    criterion_engine_io_socket_build_polling,
+    criterion_engine_io_socket_build_websocket,
+    criterion_engine_io_socket_build_websocket_secure,
+    criterion_engine_io_socket_build,
+    criterion_engine_io_packet,
+    criterion_engine_io_emit_polling,
+    criterion_engine_io_emit_websocket,
+    criterion_engine_io_emit_websocket_secure
+);
 criterion_main!(benches);
