@@ -13,6 +13,7 @@ use native_tls::TlsConnector;
 use rand::{thread_rng, Rng};
 use reqwest::header::HeaderMap;
 use std::thread;
+use std::convert::TryFrom;
 use std::{
     fmt::Debug,
     sync::{atomic::Ordering, RwLock},
@@ -179,7 +180,7 @@ impl TransportClient {
         }
 
         // the packet, encoded as an engine.io message packet
-        let engine_packet = EnginePacket::new(EnginePacketId::Message, packet.encode());
+        let engine_packet = EnginePacket::new(EnginePacketId::Message, Bytes::from(packet));
 
         self.engine_socket.read()?.emit(engine_packet, false)
     }
@@ -309,7 +310,7 @@ impl TransportClient {
             Ok(finalized_packet)
         } else {
             // this is a normal packet, so decode it
-            SocketPacket::decode_bytes(&socket_bytes)
+            SocketPacket::try_from(&socket_bytes)
         };
 
         if let Ok(socket_packet) = decoded_packet {
