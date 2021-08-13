@@ -74,11 +74,11 @@ impl TransportClient {
         let mut engine_socket_builder = EngineIoSocketBuilder::new(url.clone());
         if let Some(tls_config) = tls_config {
             // SAFETY: Checked is_some
-            engine_socket_builder = engine_socket_builder.set_tls_config(tls_config);
+            engine_socket_builder = engine_socket_builder.tls_config(tls_config);
         }
         if let Some(opening_headers) = opening_headers {
             // SAFETY: Checked is_some
-            engine_socket_builder = engine_socket_builder.set_headers(opening_headers);
+            engine_socket_builder = engine_socket_builder.headers(opening_headers);
         }
         Ok(TransportClient {
             engine_socket: Arc::new(RwLock::new(engine_socket_builder.build_with_fallback()?)),
