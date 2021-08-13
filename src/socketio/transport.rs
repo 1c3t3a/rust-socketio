@@ -44,7 +44,6 @@ pub struct Ack {
 /// Handles communication in the `socket.io` protocol.
 #[derive(Clone)]
 pub struct TransportClient {
-    // TODO: Allow for dynamic typing here when refactoring socket.io
     engine_socket: Arc<RwLock<EngineIoSocket>>,
     host: Arc<Url>,
     connected: Arc<AtomicBool>,
