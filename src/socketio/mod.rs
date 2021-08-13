@@ -5,7 +5,6 @@ mod packet;
 /// could be sent or received.
 pub mod payload;
 pub mod socket;
-pub(crate) mod transport;
 
 #[cfg(test)]
 pub(crate) mod test {
