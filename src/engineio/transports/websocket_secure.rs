@@ -114,27 +114,54 @@ impl Transport for WebsocketSecureTransport {
     }
 
     fn set_base_url(&self, url: url::Url) -> Result<()> {
+        let mut url = url;
+        if !url
+            .query_pairs()
+            .any(|(k, v)| k == "transport" && v == "websocket")
+        {
+            url.query_pairs_mut().append_pair("transport", "websocket");
+        }
+        url.set_scheme("wss").unwrap();
         *self.base_url.write()? = url;
         Ok(())
     }
 }
-/*
-//TODO: implement unit tests for base_url and integration via engineio
+
 #[cfg(test)]
 mod test {
     use super::*;
     use std::str::FromStr;
-    const SERVER_URL: &str = "http://localhost:4201";
     #[test]
-    fn wss_transport_base_url() -> Result<()> {
-        let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
-        let transport = WebsocketSecureTransport::new(Url::from_str(&url[..]).unwrap(), None, None);
-        assert_eq!(transport.base_url()?, url.clone() + "/?transport=websocket");
-        transport.set_base_url("127.0.0.1".to_owned())?;
-        // TODO: Change me to "127.0.0.1/?transport=websocket"
-        assert_eq!(transport.base_url()?, "127.0.0.1");
-        assert_ne!(transport.base_url()?, url);
+    fn websocket_secure_transport_base_url() -> Result<()> {
+        let url =
+            crate::engineio::test::engine_io_server_secure()?.to_string() + "engine.io/?EIO=4";
+        let transport = WebsocketSecureTransport::new(
+            Url::from_str(&url[..]).unwrap(),
+            Some(crate::test::tls_connector()?),
+            None,
+        );
+        let mut url = crate::engineio::test::engine_io_server_secure()?;
+        url.set_path("/engine.io/");
+        url.query_pairs_mut()
+            .append_pair("EIO", "4")
+            .append_pair("transport", "websocket");
+        url.set_scheme("wss").unwrap();
+        assert_eq!(transport.base_url()?.to_string(), url.to_string());
+        transport.set_base_url(reqwest::Url::parse("https://127.0.0.1")?)?;
+        assert_eq!(
+            transport.base_url()?.to_string(),
+            "wss://127.0.0.1/?transport=websocket"
+        );
+        assert_ne!(transport.base_url()?.to_string(), url.to_string());
+
+        transport.set_base_url(reqwest::Url::parse(
+            "http://127.0.0.1/?transport=websocket",
+        )?)?;
+        assert_eq!(
+            transport.base_url()?.to_string(),
+            "wss://127.0.0.1/?transport=websocket"
+        );
+        assert_ne!(transport.base_url()?.to_string(), url.to_string());
         Ok(())
     }
 }
-*/
