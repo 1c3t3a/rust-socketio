@@ -21,7 +21,7 @@
 //! let mut socket = SocketBuilder::new("http://localhost:4200/")
 //!      .namespace("/admin")
 //!      .on("test", callback)
-//!      .on("error", |err, _| eprintln!("Error: {:#?}", err))
+//!      .on("error", |err| eprintln!("Error: {:#?}", err))
 //!      .connect()
 //!      .expect("Connection failed");
 //!
