@@ -55,7 +55,7 @@ pub struct Socket {
 
 impl Socket {
     /// Creates an instance of `Socket`.
-    pub fn new<T: Into<String>>(
+    pub(super) fn new<T: Into<String>>(
         address: T,
         nsp: Option<String>,
         tls_config: Option<TlsConnector>,
