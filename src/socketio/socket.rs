@@ -101,8 +101,6 @@ impl Socket {
     /// Connects to the server. This includes a connection of the underlying
     /// engine.io client and afterwards an opening socket.io request.
     pub fn connect(&mut self) -> Result<()> {
-        self.setup_callbacks()?;
-
         self.engine_socket.connect()?;
 
         // TODO: refactor me
@@ -287,6 +285,39 @@ impl Socket {
         Ok(())
     }
 
+    pub(crate) fn poll(&self) -> Result<Option<SocketPacket>> {
+        let next: Option<Result<EnginePacket>> = self.engine_socket.iter().next();
+
+        if next.is_none() {
+            return Ok(None);
+        }
+
+        let next: EnginePacket = next.unwrap()?;
+
+        match next.packet_id {
+            EnginePacketId::Message => {
+                self.handle_new_message(next.data);
+            }
+            EnginePacketId::Open => {
+                if let Some(function) = self.get_event_callback(&Event::Connect) {
+                    let mut lock = function.1.write().unwrap();
+                    lock(Payload::String(String::from("Connection is opened")));
+                    drop(lock)
+                }
+            }
+            EnginePacketId::Close => {
+                if let Some(function) = self.get_event_callback(&Event::Close) {
+                    let mut lock = function.1.write().unwrap();
+                    lock(Payload::String(String::from("Connection is closed")));
+                    drop(lock)
+                }
+            }
+            _ => (),
+        }
+
+        Ok(None)
+    }
+
     /// Handles the incoming messages and classifies what callbacks to call and how.
     /// This method is later registered as the callback for the `on_data` event of the
     /// engineio client.
@@ -400,52 +431,6 @@ impl Socket {
                 self.outstanding_acks.write().unwrap().remove(index);
             }
         }
-    }
-
-    /// Sets up the callback routes on the engine.io socket, called before
-    /// opening the connection.
-    fn setup_callbacks(&mut self) -> Result<()> {
-        // TODO: re-setup callbacks
-        /*
-        let clone_self: Socket = self.clone();
-        let error_callback = move |msg| {
-            if let Some(function) = clone_self.get_event_callback(&Event::Error) {
-                let mut lock = function.1.write().unwrap();
-                lock(Payload::String(msg));
-                drop(lock)
-            }
-        };
-
-        let clone_self = self.clone();
-        let open_callback = move |_| {
-            if let Some(function) = clone_self.get_event_callback(&Event::Connect) {
-                let mut lock = function.1.write().unwrap();
-                lock(Payload::String(String::from("Connection is opened")));
-                drop(lock)
-            }
-        };
-
-        let clone_self = self.clone();
-        let close_callback = move |_| {
-            if let Some(function) = clone_self.get_event_callback(&Event::Close) {
-                let mut lock = function.1.write().unwrap();
-                lock(Payload::String(String::from("Connection is closed")));
-                drop(lock)
-            }
-        };
-
-        self.engine_socket.on_open(open_callback)?;
-
-        self.engine_socket.on_error(error_callback)?;
-
-        self.engine_socket.on_close(close_callback)?;
-
-        // TODO: refactor me
-        let clone_self = self.clone();
-        self.engine_socket
-            .on_data(move |data| clone_self.handle_new_message(data))
-        */
-        Ok(())
     }
 
     /// Handles a binary event.
