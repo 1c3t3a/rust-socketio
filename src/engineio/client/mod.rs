@@ -1,2 +1,2 @@
 mod socket;
-pub use {socket::Socket, socket::SocketBuilder};
+pub use {socket::Iter as SocketIter, socket::Socket, socket::SocketBuilder};

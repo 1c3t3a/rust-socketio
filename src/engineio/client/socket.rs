@@ -239,7 +239,7 @@ impl Socket {
 
     /// Opens the connection to a specified server. The first Pong packet is sent
     /// to the server to trigger the Ping-cycle.
-    pub fn connect(&mut self) -> Result<()> {
+    pub fn connect(&self) -> Result<()> {
         self.socket.connect()
     }
 

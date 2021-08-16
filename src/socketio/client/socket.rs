@@ -6,6 +6,7 @@ pub use reqwest::header::{HeaderMap, HeaderValue, IntoHeaderName};
 use crate::error::Result;
 use std::{time::Duration, vec};
 
+use super::super::packet::Packet;
 use crate::socketio::socket::Socket as InnerSocket;
 
 /// A socket which handles communication with the server. It's initialized with
@@ -13,9 +14,9 @@ use crate::socketio::socket::Socket as InnerSocket;
 /// is given the server will connect to the default namespace `"/"`.
 #[derive(Debug, Clone)]
 pub struct Socket {
-    /// The inner transport client to delegate the methods to.
+    /// The inner socket client to delegate the methods to.
     // TODO: Make this private
-    pub transport: InnerSocket,
+    pub socket: InnerSocket,
 }
 
 type SocketCallback = dyn FnMut(Payload) + 'static + Sync + Send;
@@ -151,7 +152,7 @@ impl SocketBuilder {
     ///
     /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    ///     .on("error", |err| eprintln!("Error: {:#?}", err))
     ///     .opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
     ///     .connect();
     ///
@@ -222,7 +223,7 @@ impl Socket {
         opening_headers: Option<HeaderMap>,
     ) -> Result<Self> {
         Ok(Socket {
-            transport: InnerSocket::new(address, namespace, tls_config, opening_headers)?,
+            socket: InnerSocket::new(address, namespace, tls_config, opening_headers)?,
         })
     }
 
@@ -233,14 +234,14 @@ impl Socket {
     where
         F: FnMut(Payload) + 'static + Sync + Send,
     {
-        self.transport.on(event, callback)
+        self.socket.on(event, callback)
     }
 
     /// Connects the client to a server. Afterwards the `emit_*` methods can be
     /// called to interact with the server. Attention: it's not allowed to add a
     /// callback after a call to this method.
     pub(crate) fn connect(&mut self) -> Result<()> {
-        self.transport.connect()
+        self.socket.connect()
     }
 
     /// Sends a message to the server using the underlying `engine.io` protocol.
@@ -274,7 +275,7 @@ impl Socket {
         E: Into<Event>,
         D: Into<Payload>,
     {
-        self.transport.emit(event.into(), data.into())
+        self.socket.emit(event.into(), data.into())
     }
 
     /// Disconnects this client from the server by sending a `socket.io` closing
@@ -301,7 +302,7 @@ impl Socket {
     ///
     /// ```
     pub fn disconnect(&mut self) -> Result<()> {
-        self.transport.disconnect()
+        self.socket.disconnect()
     }
 
     /// Sends a message to the server but `alloc`s an `ack` to check whether the
@@ -323,13 +324,13 @@ impl Socket {
     /// use std::thread::sleep;
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
+    ///     .on("foo", |payload: Payload| println!("Received: {:#?}", payload))
     ///     .connect()
     ///     .expect("connection failed");
     ///
     ///
     ///
-    /// let ack_callback = |message: Payload, _| {
+    /// let ack_callback = |message: Payload| {
     ///     match message {
     ///         Payload::String(str) => println!("{}", str),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
@@ -354,9 +355,14 @@ impl Socket {
         E: Into<Event>,
         D: Into<Payload>,
     {
-        self.transport
+        self.socket
             .emit_with_ack(event.into(), data.into(), timeout, callback)
     }
+    // TODO: iter()
+}
+// TODO impl Itereator
+pub struct Iter<'a> {
+    iter: crate::socketio::socket::Iter<'a>,
 }
 
 #[cfg(test)]

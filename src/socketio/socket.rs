@@ -41,7 +41,7 @@ pub struct Ack {
 /// Handles communication in the `socket.io` protocol.
 #[derive(Clone)]
 pub struct Socket {
-    engine_socket: Arc<RwLock<EngineIoSocket>>,
+    engine_socket: Arc<EngineIoSocket>,
     host: Arc<Url>,
     connected: Arc<AtomicBool>,
     on: Arc<Vec<EventCallback>>,
@@ -77,7 +77,7 @@ impl Socket {
             engine_socket_builder = engine_socket_builder.headers(opening_headers);
         }
         Ok(Socket {
-            engine_socket: Arc::new(RwLock::new(engine_socket_builder.build_with_fallback()?)),
+            engine_socket: Arc::new(engine_socket_builder.build_with_fallback()?),
             host: Arc::new(url),
             connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
@@ -103,7 +103,7 @@ impl Socket {
     pub fn connect(&mut self) -> Result<()> {
         self.setup_callbacks()?;
 
-        self.engine_socket.write()?.connect()?;
+        self.engine_socket.connect()?;
 
         // TODO: refactor me
         let engine_socket = self.engine_socket.clone();
@@ -113,7 +113,7 @@ impl Socket {
             // `Result::Ok`, the server receives a close frame so it's safe to
             // terminate
             loop {
-                match engine_socket.read().unwrap().poll() {
+                match engine_socket.poll() {
                     Ok(None) => break,
                     e @ Err(Error::IncompleteHttp(_))
                     | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
@@ -178,7 +178,7 @@ impl Socket {
         // the packet, encoded as an engine.io message packet
         let engine_packet = EnginePacket::new(EnginePacketId::Message, Bytes::from(packet));
 
-        self.engine_socket.read()?.emit(engine_packet, false)
+        self.engine_socket.emit(engine_packet, false)
     }
 
     /// Sends a single binary attachment to the server. This method
@@ -191,7 +191,6 @@ impl Socket {
         }
 
         self.engine_socket
-            .read()?
             .emit(EnginePacket::new(EnginePacketId::Message, attachment), true)
     }
 
@@ -406,6 +405,8 @@ impl Socket {
     /// Sets up the callback routes on the engine.io socket, called before
     /// opening the connection.
     fn setup_callbacks(&mut self) -> Result<()> {
+        // TODO: re-setup callbacks
+        /*
         let clone_self: Socket = self.clone();
         let error_callback = move |msg| {
             if let Some(function) = clone_self.get_event_callback(&Event::Error) {
@@ -433,17 +434,18 @@ impl Socket {
             }
         };
 
-        self.engine_socket.write()?.on_open(open_callback)?;
+        self.engine_socket.on_open(open_callback)?;
 
-        self.engine_socket.write()?.on_error(error_callback)?;
+        self.engine_socket.on_error(error_callback)?;
 
-        self.engine_socket.write()?.on_close(close_callback)?;
+        self.engine_socket.on_close(close_callback)?;
 
         // TODO: refactor me
         let clone_self = self.clone();
         self.engine_socket
-            .write()?
             .on_data(move |data| clone_self.handle_new_message(data))
+        */
+        Ok(())
     }
 
     /// Handles a binary event.
@@ -515,7 +517,13 @@ impl Socket {
     }
 
     fn is_engineio_connected(&self) -> Result<bool> {
-        self.engine_socket.read()?.is_connected()
+        self.engine_socket.is_connected()
+    }
+
+    pub fn iter(&self) -> Iter {
+        Iter {
+            iter: self.engine_socket.iter(),
+        }
     }
 }
 
@@ -537,6 +545,26 @@ impl Debug for Socket {
             self.outstanding_acks,
             self.nsp,
         ))
+    }
+}
+
+pub struct Iter<'a> {
+    iter: crate::engineio::client::SocketIter<'a>,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = Result<SocketPacket>;
+    fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
+        let engine_packet = self.iter.next()?;
+        // One unwrap for option the next for error
+        if let Err(error) = engine_packet {
+            return Some(Err(error));
+        }
+        let engine_packet = engine_packet.unwrap();
+
+        let packet = SocketPacket::try_from(&engine_packet.data);
+
+        Some(packet)
     }
 }
 
