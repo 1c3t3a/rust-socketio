@@ -131,7 +131,7 @@ impl SocketBuilder {
     ///
     /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    ///     .on("error", |err| eprintln!("Error: {:#?}", err))
     ///     .tls_config(tls_connector)
     ///     .connect();
     ///
@@ -182,7 +182,7 @@ impl SocketBuilder {
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .on("error", |err, _| eprintln!("Socket error!: {:#?}", err))
+    ///     .on("error", |err| eprintln!("Socket error!: {:#?}", err))
     ///     .connect()
     ///     .expect("connection failed");
     ///
