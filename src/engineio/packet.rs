@@ -145,6 +145,7 @@ impl From<Packet> for Bytes {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Payload(Vec<Packet>);
 
 impl Payload {

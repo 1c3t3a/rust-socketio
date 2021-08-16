@@ -1,10 +1,10 @@
-use crate::engineio::socket::SocketBuilder as EngineIoSocketBuilder;
 use crate::error::{Error, Result};
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
 use crate::{
     engineio::{
+        client::Socket as EngineIoSocket,
+        client::SocketBuilder as EngineIoSocketBuilder,
         packet::{Packet as EnginePacket, PacketId as EnginePacketId},
-        socket::Socket as EngineIoSocket,
     },
     Socket,
 };
@@ -116,7 +116,7 @@ impl TransportClient {
             // `Result::Ok`, the server receives a close frame so it's safe to
             // terminate
             loop {
-                match engine_socket.read().unwrap().poll_cycle() {
+                match engine_socket.read().unwrap().poll() {
                     Ok(_) => break,
                     e @ Err(Error::IncompleteHttp(_))
                     | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
