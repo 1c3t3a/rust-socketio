@@ -257,43 +257,45 @@ impl Socket {
             return Ok(None);
         }
 
-        if let Some(payload) = payload.clone() {
-            for packet in payload {
-                // check for the appropriate action or callback
-                self.socket.handle_packet(packet.clone())?;
-                match packet.packet_id {
-                    PacketId::MessageBase64 => {
-                        self.socket.handle_data(packet.data)?;
-                    }
-                    PacketId::Message => {
-                        self.socket.handle_data(packet.data)?;
-                    }
+        let payload = payload.unwrap();
 
-                    PacketId::Close => {
-                        self.socket.handle_close()?;
-                        // set current state to not connected and stop polling
-                        self.socket.close()?;
-                    }
-                    PacketId::Open => {
-                        unreachable!("Won't happen as we open the connection beforehand");
-                    }
-                    PacketId::Upgrade => {
-                        // this is already checked during the handshake, so just do nothing here
-                    }
-                    PacketId::Ping => {
-                        self.socket.pinged()?;
-                        self.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
-                    }
-                    PacketId::Pong => {
-                        // this will never happen as the pong packet is
-                        // only sent by the client
-                        unreachable!();
-                    }
-                    PacketId::Noop => (),
+        let mut iter = payload.iter();
+
+        while let Some(packet) = iter.next() {
+            // check for the appropriate action or callback
+            self.socket.handle_packet(packet.clone())?;
+            match packet.packet_id {
+                PacketId::MessageBase64 => {
+                    self.socket.handle_data(packet.data.clone())?;
                 }
+                PacketId::Message => {
+                    self.socket.handle_data(packet.data.clone())?;
+                }
+
+                PacketId::Close => {
+                    self.socket.handle_close()?;
+                    // set current state to not connected and stop polling
+                    self.socket.close()?;
+                }
+                PacketId::Open => {
+                    unreachable!("Won't happen as we open the connection beforehand");
+                }
+                PacketId::Upgrade => {
+                    // this is already checked during the handshake, so just do nothing here
+                }
+                PacketId::Ping => {
+                    self.socket.pinged()?;
+                    self.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
+                }
+                PacketId::Pong => {
+                    // this will never happen as the pong packet is
+                    // only sent by the client
+                    unreachable!();
+                }
+                PacketId::Noop => (),
             }
         }
-        Ok(payload)
+        Ok(Some(payload))
     }
 
     // Check if the underlying transport client is connected.
