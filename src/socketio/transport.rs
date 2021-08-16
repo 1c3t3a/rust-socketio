@@ -12,8 +12,8 @@ use bytes::Bytes;
 use native_tls::TlsConnector;
 use rand::{thread_rng, Rng};
 use reqwest::header::HeaderMap;
-use std::thread;
 use std::convert::TryFrom;
+use std::thread;
 use std::{
     fmt::Debug,
     sync::{atomic::Ordering, RwLock},
@@ -44,7 +44,6 @@ pub struct Ack {
 /// Handles communication in the `socket.io` protocol.
 #[derive(Clone)]
 pub struct TransportClient {
-    // TODO: Allow for dynamic typing here when refactoring socket.io
     engine_socket: Arc<RwLock<EngineIoSocket>>,
     host: Arc<Url>,
     connected: Arc<AtomicBool>,

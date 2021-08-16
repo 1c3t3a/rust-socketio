@@ -26,7 +26,7 @@ pub struct WebsocketSecureTransport {
 }
 
 impl WebsocketSecureTransport {
-    /// Creates an instance of `TransportClient`.
+    /// Creates an instance of `WebsocketSecureTransport`.
     pub fn new(base_url: Url, tls_config: Option<TlsConnector>, headers: Option<Headers>) -> Self {
         let mut url = base_url;
         url.query_pairs_mut().append_pair("transport", "websocket");

@@ -72,12 +72,6 @@ impl<T> From<std::sync::PoisonError<T>> for Error {
     }
 }
 
-impl<T: Into<Error>> From<Option<T>> for Error {
-    fn from(error: Option<T>) -> Self {
-        error.into()
-    }
-}
-
 impl From<Error> for std::io::Error {
     fn from(err: Error) -> std::io::Error {
         std::io::Error::new(std::io::ErrorKind::Other, err)
@@ -93,9 +87,13 @@ mod tests {
     /// This just tests the own implementations and relies on `thiserror` for the others.
     #[test]
     fn test_error_conversion() {
-        //TODO: create the errors and test all type conversions
         let mutex = Mutex::new(0);
-        let _poison_error = Error::from(PoisonError::new(mutex.lock()));
-        assert!(matches!(Error::InvalidPoisonedLock(), _poison_error));
+        let _error = Error::from(PoisonError::new(mutex.lock()));
+        assert!(matches!(Error::InvalidPoisonedLock(), _error));
+
+        let _io_error = std::io::Error::from(Error::IllegalWebsocketUpgrade());
+        let _error =
+            std::io::Error::new(std::io::ErrorKind::Other, Error::IllegalWebsocketUpgrade());
+        assert!(matches!(_io_error, _error));
     }
 }

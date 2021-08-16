@@ -49,8 +49,7 @@ impl SocketBuilder {
     ///            }
     /// };
     ///
-    //TODO: Remove trailing slash when URL parsing is properly handled.
-    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
+    /// let mut socket = SocketBuilder::new("http://localhost:4200")
     ///     .namespace("/admin")
     ///     .expect("illegal namespace")
     ///     .on("test", callback)
