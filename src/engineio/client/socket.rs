@@ -393,7 +393,7 @@ mod test {
         })?;
 
         socket.on_data(|data| {
-            println!("Received packet: {:?}", std::str::from_utf8(&data));
+            println!("Received data: {:?}", std::str::from_utf8(&data));
         })?;
 
         socket.on_close(|_| {
@@ -429,6 +429,13 @@ mod test {
     #[test]
     fn test_connection_dynamic() -> Result<()> {
         let url = crate::engineio::test::engine_io_server()?;
+        let socket = SocketBuilder::new(url).build()?;
+        test_connection(socket)
+    }
+
+    #[test]
+    fn test_connection_dynamic_secure() -> Result<()> {
+        let url = crate::engineio::test::engine_io_server_secure()?;
         let socket = SocketBuilder::new(url).build()?;
         test_connection(socket)
     }
