@@ -6,7 +6,7 @@ use crate::{
         client::SocketBuilder as EngineIoSocketBuilder,
         packet::{Packet as EnginePacket, PacketId as EnginePacketId},
     },
-    Socket,
+    socketio::client::Socket,
 };
 use bytes::Bytes;
 use native_tls::TlsConnector;

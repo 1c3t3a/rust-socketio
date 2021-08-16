@@ -102,8 +102,7 @@ pub mod error;
 pub use reqwest::header::{HeaderMap, HeaderValue, IntoHeaderName};
 pub use socketio::{event::Event, payload::Payload};
 
-pub use socketio::socket::Socket;
-pub use socketio::socket::SocketBuilder;
+pub use socketio::client::{Socket, SocketBuilder};
 
 #[cfg(test)]
 pub(crate) mod test {
