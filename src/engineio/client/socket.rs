@@ -401,7 +401,7 @@ mod test {
         })?;
 
         socket.on_error(|error| {
-            println!(format!("Error {}", error));
+            println!("Error {}", error);
         })?;
 
         socket.connect().unwrap();
