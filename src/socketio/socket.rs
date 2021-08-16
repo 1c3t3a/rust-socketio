@@ -504,12 +504,6 @@ impl Socket {
     fn is_engineio_connected(&self) -> Result<bool> {
         self.engine_socket.is_connected()
     }
-
-    pub fn iter(&self) -> Iter {
-        Iter {
-            iter: self.engine_socket.iter(),
-        }
-    }
 }
 
 impl Debug for Ack {
@@ -530,26 +524,6 @@ impl Debug for Socket {
             self.outstanding_acks,
             self.nsp,
         ))
-    }
-}
-
-pub struct Iter<'a> {
-    iter: crate::engineio::client::SocketIter<'a>,
-}
-
-impl<'a> Iterator for Iter<'a> {
-    type Item = Result<SocketPacket>;
-    fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
-        let engine_packet = self.iter.next()?;
-        // One unwrap for option the next for error
-        if let Err(error) = engine_packet {
-            return Some(Err(error));
-        }
-        let engine_packet = engine_packet.unwrap();
-
-        let packet = SocketPacket::try_from(&engine_packet.data);
-
-        Some(packet)
     }
 }
 

@@ -1,12 +1,11 @@
 pub use super::super::{event::Event, payload::Payload};
-use crate::error::Error;
+use crate::socketio::packet::Packet as SocketPacket;
 use native_tls::TlsConnector;
 pub use reqwest::header::{HeaderMap, HeaderValue, IntoHeaderName};
 
 use crate::error::Result;
 use std::{time::Duration, vec};
 
-use super::super::packet::Packet;
 use crate::socketio::socket::Socket as InnerSocket;
 
 /// A socket which handles communication with the server. It's initialized with
@@ -358,11 +357,32 @@ impl Socket {
         self.socket
             .emit_with_ack(event.into(), data.into(), timeout, callback)
     }
-    // TODO: iter()
+
+    pub(crate) fn poll(&self) -> Result<Option<SocketPacket>> {
+        self.socket.poll()
+    }
+
+    pub fn iter(&self) -> Iter {
+        Iter { socket: self }
+    }
 }
-// TODO impl Itereator
+
 pub struct Iter<'a> {
-    iter: crate::socketio::socket::Iter<'a>,
+    socket: &'a Socket,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = Result<SocketPacket>;
+    fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
+        let packet = self.socket.poll();
+        // One unwrap for option the next for error
+        if let Err(error) = packet {
+            return Some(Err(error));
+        }
+        let packet = packet.unwrap()?;
+
+        Some(Ok(packet))
+    }
 }
 
 #[cfg(test)]
