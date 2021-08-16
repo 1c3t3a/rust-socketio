@@ -292,13 +292,13 @@ impl Socket {
     /// This method is later registered as the callback for the `on_data` event of the
     /// engineio client.
     #[inline]
-    fn handle_new_message(socket_bytes: Bytes, clone_self: &Socket) {
+    fn handle_new_message(&self, socket_bytes: Bytes) {
         let mut is_finalized_packet = false;
         // either this is a complete packet or the rest of a binary packet (as attachments are
         // sent in a separate packet).
-        let decoded_packet = if clone_self.unfinished_packet.read().unwrap().is_some() {
+        let decoded_packet = if self.unfinished_packet.read().unwrap().is_some() {
             // this must be an attachement, so parse it
-            let mut unfinished_packet = clone_self.unfinished_packet.write().unwrap();
+            let mut unfinished_packet = self.unfinished_packet.write().unwrap();
             let mut finalized_packet = unfinished_packet.take().unwrap();
             finalized_packet.binary_data = Some(socket_bytes);
 
@@ -311,17 +311,17 @@ impl Socket {
 
         if let Ok(socket_packet) = decoded_packet {
             let default = String::from("/");
-            if socket_packet.nsp != *clone_self.nsp.as_ref().as_ref().unwrap_or(&default) {
+            if socket_packet.nsp != *self.nsp.as_ref().as_ref().unwrap_or(&default) {
                 return;
             }
 
             match socket_packet.packet_type {
                 SocketPacketId::Connect => {
-                    clone_self.connected.store(true, Ordering::Release);
+                    self.connected.store(true, Ordering::Release);
                 }
                 SocketPacketId::ConnectError => {
-                    clone_self.connected.store(false, Ordering::Release);
-                    if let Some(function) = clone_self.get_event_callback(&Event::Error) {
+                    self.connected.store(false, Ordering::Release);
+                    if let Some(function) = self.get_event_callback(&Event::Error) {
                         spawn_scoped!({
                             let mut lock = function.1.write().unwrap();
                             lock(Payload::String(
@@ -335,28 +335,28 @@ impl Socket {
                     }
                 }
                 SocketPacketId::Disconnect => {
-                    clone_self.connected.store(false, Ordering::Release);
+                    self.connected.store(false, Ordering::Release);
                 }
                 SocketPacketId::Event => {
-                    Socket::handle_event(socket_packet, clone_self);
+                    self.handle_event(socket_packet);
                 }
                 SocketPacketId::Ack => {
-                    Self::handle_ack(socket_packet, clone_self);
+                    self.handle_ack(socket_packet);
                 }
                 SocketPacketId::BinaryEvent => {
                     // in case of a binary event, check if this is the attachement or not and
                     // then either handle the event or set the open packet
                     if is_finalized_packet {
-                        Self::handle_binary_event(socket_packet, clone_self);
+                        self.handle_binary_event(socket_packet);
                     } else {
-                        *clone_self.unfinished_packet.write().unwrap() = Some(socket_packet);
+                        *self.unfinished_packet.write().unwrap() = Some(socket_packet);
                     }
                 }
                 SocketPacketId::BinaryAck => {
                     if is_finalized_packet {
-                        Self::handle_ack(socket_packet, clone_self);
+                        self.handle_ack(socket_packet);
                     } else {
-                        *clone_self.unfinished_packet.write().unwrap() = Some(socket_packet);
+                        *self.unfinished_packet.write().unwrap() = Some(socket_packet);
                     }
                 }
             }
@@ -365,10 +365,10 @@ impl Socket {
 
     /// Handles the incoming acks and classifies what callbacks to call and how.
     #[inline]
-    fn handle_ack(socket_packet: SocketPacket, clone_self: &Socket) {
+    fn handle_ack(&self, socket_packet: SocketPacket) {
         let mut to_be_removed = Vec::new();
         if let Some(id) = socket_packet.id {
-            for (index, ack) in clone_self
+            for (index, ack) in self
                 .clone()
                 .outstanding_acks
                 .read()
@@ -398,7 +398,7 @@ impl Socket {
                 }
             }
             for index in to_be_removed {
-                clone_self.outstanding_acks.write().unwrap().remove(index);
+                self.outstanding_acks.write().unwrap().remove(index);
             }
         }
     }
@@ -439,15 +439,16 @@ impl Socket {
 
         self.engine_socket.write()?.on_close(close_callback)?;
 
+        // TODO: refactor me
         let clone_self = self.clone();
         self.engine_socket
             .write()?
-            .on_data(move |data| Self::handle_new_message(data, &clone_self))
+            .on_data(move |data| clone_self.handle_new_message(data))
     }
 
     /// Handles a binary event.
     #[inline]
-    fn handle_binary_event(socket_packet: SocketPacket, clone_self: &Socket) {
+    fn handle_binary_event(&self, socket_packet: SocketPacket) {
         let event = if let Some(string_data) = socket_packet.data {
             string_data.replace("\"", "").into()
         } else {
@@ -455,7 +456,7 @@ impl Socket {
         };
 
         if let Some(binary_payload) = socket_packet.binary_data {
-            if let Some(function) = clone_self.get_event_callback(&event) {
+            if let Some(function) = self.get_event_callback(&event) {
                 spawn_scoped!({
                     let mut lock = function.1.write().unwrap();
                     lock(Payload::Binary(binary_payload));
@@ -467,7 +468,7 @@ impl Socket {
 
     /// A method for handling the Event Socket Packets.
     // this could only be called with an event
-    fn handle_event(socket_packet: SocketPacket, clone_self: &Socket) {
+    fn handle_event(&self, socket_packet: SocketPacket) {
         // unwrap the potential data
         if let Some(data) = socket_packet.data {
             // the string must be a valid json array with the event at index 0 and the
@@ -488,7 +489,7 @@ impl Socket {
                     Event::Message
                 };
                 // check which callback to use and call it with the data if it's present
-                if let Some(function) = clone_self.get_event_callback(&event) {
+                if let Some(function) = self.get_event_callback(&event) {
                     spawn_scoped!({
                         let mut lock = function.1.write().unwrap();
                         // if the data doesn't contain an event type at position `1`, the event must be
