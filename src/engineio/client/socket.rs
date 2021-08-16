@@ -300,75 +300,52 @@ impl Socket {
     pub(crate) fn is_connected(&self) -> Result<bool> {
         self.socket.is_connected()
     }
+
+    pub fn iter(&self) -> Iter {
+        Iter {
+            socket: &self,
+            iter: None,
+        }
+    }
+}
+
+pub struct Iter<'a> {
+    socket: &'a Socket,
+    iter: Option<crate::engineio::packet::IntoIter>,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = Result<Packet>;
+    fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
+        let mut next = None;
+        if let Some(iter) = self.iter.as_mut() {
+            next = iter.next();
+        }
+        if next.is_none() {
+            let result = self.socket.poll();
+            if let Err(error) = result {
+                return Some(Err(error));
+            } else if let Ok(Some(payload)) = result {
+                self.iter = Some(payload.into_iter());
+            } else {
+                return None;
+            }
+        }
+        if let Some(iter) = self.iter.as_mut() {
+            let result = iter.next();
+            result.map(Ok)
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
 
-    use std::thread::sleep;
-    use std::time::Duration;
-
     use crate::engineio::packet::PacketId;
 
     use super::*;
-    use std::thread;
-
-    #[test]
-    fn test_basic_connection() -> Result<()> {
-        let url = crate::engineio::test::engine_io_server()?;
-        let mut socket = SocketBuilder::new(url).build()?;
-
-        socket.on_open(|_| {
-            println!("Open event!");
-        })?;
-
-        socket.on_packet(|packet| {
-            println!("Received packet: {:?}", packet);
-        })?;
-
-        socket.on_data(|data| {
-            println!("Received packet: {:?}", std::str::from_utf8(&data));
-        })?;
-
-        socket.connect()?;
-
-        socket.emit(
-            Packet::new(PacketId::Message, Bytes::from_static(b"Hello World")),
-            false,
-        )?;
-
-        socket.emit(
-            Packet::new(PacketId::Message, Bytes::from_static(b"Hello World2")),
-            false,
-        )?;
-
-        socket.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
-
-        socket.emit(
-            Packet::new(PacketId::Message, Bytes::from_static(b"Hello World3")),
-            false,
-        )?;
-
-        let mut sut = socket.clone();
-        thread::spawn(move || loop {
-            thread::sleep(Duration::from_secs(3));
-            let result = sut.close();
-            if result.is_ok() {
-                break;
-            } else if let Err(error) = result {
-                println!("Closing thread errored! Trying again... {}", error);
-            }
-        });
-
-        loop {
-            let result = socket.poll()?;
-            if result.is_none() {
-                break;
-            }
-            // Ping/pongs/callbacks are called by poll
-        }
-        Ok(())
-    }
 
     #[test]
     fn test_illegal_actions() -> Result<()> {
@@ -393,24 +370,7 @@ mod test {
         assert!(sut.on_data(|_| {}).is_err());
         assert!(sut.on_error(|_| {}).is_err());
 
-        let mut socket = sut.clone();
-        thread::spawn(move || loop {
-            thread::sleep(Duration::from_secs(3));
-            let result = socket.close();
-            if result.is_ok() {
-                break;
-            } else if let Err(error) = result {
-                println!("Closing thread errored! Trying again... {}", error);
-            }
-        });
-
-        loop {
-            let result = sut.poll()?;
-            if result.is_none() {
-                break;
-            }
-            // Ping/pongs/callbacks are called by poll
-        }
+        assert!(sut.poll().is_ok());
 
         let sut = SocketBuilder::new(url).build()?;
         assert!(sut.poll().is_err());
@@ -421,55 +381,67 @@ mod test {
 
     use crate::engineio::packet::Packet;
 
-    #[test]
-    fn test_connection_polling() -> Result<()> {
-        let url = crate::engineio::test::engine_io_server()?;
-        let mut socket = SocketBuilder::new(url).build_polling()?;
+    fn test_connection(socket: Socket) -> Result<()> {
+        let mut socket = socket;
+        // TODO: confirm callbacks are getting data
+        socket.on_open(|_| {
+            println!("Open event!");
+        })?;
+
+        socket.on_packet(|packet| {
+            println!("Received packet: {:?}", packet);
+        })?;
 
         socket.on_data(|data| {
-            println!(
-                "Received: {:?}",
-                std::str::from_utf8(&data).expect("Error while decoding utf-8")
-            );
+            println!("Received packet: {:?}", std::str::from_utf8(&data));
+        })?;
+
+        socket.on_close(|_| {
+            println!("Close event!");
+        })?;
+
+        socket.on_error(|error| {
+            println!(format!("Error {}", error));
         })?;
 
         socket.connect().unwrap();
 
-        socket.emit(
-            Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
-            false,
-        )?;
+        let mut iter = socket
+            .iter()
+            .map(|packet| packet.unwrap())
+            .filter(|packet| packet.packet_id != PacketId::Ping);
 
-        socket.emit(
-            Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
-            true,
-        )?;
+        assert_eq!(
+            iter.next(),
+            Some(Packet::new(PacketId::Message, "hello client"))
+        );
 
-        let mut sut = socket.clone();
-        thread::spawn(move || loop {
-            thread::sleep(Duration::from_secs(3));
-            let result = sut.close();
-            if result.is_ok() {
-                break;
-            } else if let Err(error) = result {
-                println!("Closing thread errored! Trying again... {}", error);
-            }
-        });
+        socket.emit(Packet::new(PacketId::Message, "respond"), false)?;
 
-        loop {
-            let result = socket.poll()?;
-            if result.is_none() {
-                break;
-            }
-            // Ping/pongs/callbacks are called by poll
-            sleep(Duration::from_millis(100));
-        }
+        assert_eq!(
+            iter.next(),
+            Some(Packet::new(PacketId::Message, "Roger Roger"))
+        );
 
-        Ok(())
+        socket.close()
     }
 
     #[test]
-    fn test_connection_secure_ws_http() -> Result<()> {
+    fn test_connection_dynamic() -> Result<()> {
+        let url = crate::engineio::test::engine_io_server()?;
+        let socket = SocketBuilder::new(url).build()?;
+        test_connection(socket)
+    }
+
+    #[test]
+    fn test_connection_polling() -> Result<()> {
+        let url = crate::engineio::test::engine_io_server()?;
+        let socket = SocketBuilder::new(url).build_polling()?;
+        test_connection(socket)
+    }
+
+    #[test]
+    fn test_connection_wss() -> Result<()> {
         let host =
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
         let url = crate::engineio::test::engine_io_server_secure()?;
@@ -480,94 +452,19 @@ mod test {
 
         builder = builder.tls_config(crate::test::tls_connector()?);
         builder = builder.headers(headers);
-        let mut socket = builder.build_websocket_secure()?;
+        let socket = builder.build_websocket_secure()?;
 
-        socket.on_data(|data| {
-            println!(
-                "Received: {:?}",
-                std::str::from_utf8(&data).expect("Error while decoding utf-8")
-            );
-        })?;
-
-        socket.connect().unwrap();
-
-        socket.emit(
-            Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
-            false,
-        )?;
-
-        socket.emit(
-            Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
-            true,
-        )?;
-
-        let mut sut = socket.clone();
-        thread::spawn(move || loop {
-            thread::sleep(Duration::from_secs(3));
-            let result = sut.close();
-            if result.is_ok() {
-                break;
-            } else if let Err(error) = result {
-                println!("Closing thread errored! Trying again... {}", error);
-            }
-        });
-
-        loop {
-            let result = socket.poll()?;
-            if result.is_none() {
-                break;
-            }
-            // Ping/pongs/callbacks are called by poll
-        }
-        Ok(())
+        test_connection(socket)
     }
 
     #[test]
-    fn test_connection_ws_http() -> Result<()> {
+    fn test_connection_ws() -> Result<()> {
         let url = crate::engineio::test::engine_io_server()?;
 
         let builder = SocketBuilder::new(url);
-        let mut socket = builder.build_websocket()?;
+        let socket = builder.build_websocket()?;
 
-        socket.on_data(|data| {
-            println!(
-                "Received: {:?}",
-                std::str::from_utf8(&data).expect("Error while decoding utf-8")
-            );
-        })?;
-
-        socket.connect().unwrap();
-
-        socket.emit(
-            Packet::new(PacketId::Message, Bytes::from_static(b"HelloWorld")),
-            false,
-        )?;
-
-        socket.emit(
-            Packet::new(PacketId::Message, Bytes::from_static(b"Hi")),
-            true,
-        )?;
-
-        let mut sut = socket.clone();
-        thread::spawn(move || loop {
-            thread::sleep(Duration::from_secs(3));
-            let result = sut.close();
-            if result.is_ok() {
-                break;
-            } else if let Err(error) = result {
-                println!("Closing thread errored! Trying again... {}", error);
-            }
-        });
-
-        loop {
-            let result = socket.poll()?;
-            if result.is_none() {
-                break;
-            }
-
-            // Ping/pongs/callbacks are called by poll
-        }
-        Ok(())
+        test_connection(socket)
     }
 
     #[test]

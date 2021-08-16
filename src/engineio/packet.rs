@@ -90,8 +90,11 @@ impl TryFrom<Packet> for HandshakePacket {
 
 impl Packet {
     /// Creates a new `Packet`.
-    pub fn new(packet_id: PacketId, data: Bytes) -> Self {
-        Packet { packet_id, data }
+    pub fn new<T: Into<Bytes>>(packet_id: PacketId, data: T) -> Self {
+        Packet {
+            packet_id,
+            data: data.into(),
+        }
     }
 }
 
@@ -146,7 +149,7 @@ impl From<Packet> for Bytes {
 }
 
 #[derive(Debug, Clone)]
-pub struct Payload(Vec<Packet>);
+pub(crate) struct Payload(Vec<Packet>);
 
 impl Payload {
     // see https://en.wikipedia.org/wiki/Delimiter#ASCII_delimited_text
