@@ -436,7 +436,9 @@ mod test {
     #[test]
     fn test_connection_dynamic_secure() -> Result<()> {
         let url = crate::engineio::test::engine_io_server_secure()?;
-        let socket = SocketBuilder::new(url).build()?;
+        let mut builder = SocketBuilder::new(url);
+        builder = builder.tls_config(crate::test::tls_connector()?);
+        let socket = builder.build()?;
         test_connection(socket)
     }
 
