@@ -71,5 +71,3 @@ impl std::fmt::Debug for dyn Transport {
         f.write_fmt(format_args!("Transport(base_url: {:?})", self.base_url(),))
     }
 }
-
-//TODO: add iter() implementation
