@@ -259,9 +259,9 @@ impl Socket {
 
         let payload = payload.unwrap();
 
-        let mut iter = payload.iter();
+        let iter = payload.iter();
 
-        while let Some(packet) = iter.next() {
+        for packet in iter {
             // check for the appropriate action or callback
             self.socket.handle_packet(packet.clone())?;
             match packet.packet_id {
