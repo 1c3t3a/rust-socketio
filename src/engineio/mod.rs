@@ -1,5 +1,6 @@
+pub mod client;
 pub mod packet;
-pub mod socket;
+pub(self) mod socket;
 pub mod transport;
 pub mod transports;
 
