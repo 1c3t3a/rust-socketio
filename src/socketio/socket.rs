@@ -104,20 +104,22 @@ impl Socket {
         self.engine_socket.connect()?;
 
         // TODO: refactor me
-        let engine_socket = self.engine_socket.clone();
+        let clone_self = self.clone();
         thread::spawn(move || {
             // tries to restart a poll cycle whenever a 'normal' error occurs,
             // it just panics on network errors, in case the poll cycle returned
             // `Result::Ok`, the server receives a close frame so it's safe to
             // terminate
             loop {
-                match engine_socket.poll() {
-                    Ok(None) => break,
+                match clone_self.poll() {
                     e @ Err(Error::IncompleteHttp(_))
                     | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
                         panic!("{}", e.unwrap_err())
                     }
                     _ => (),
+                }
+                if !clone_self.connected.load(Ordering::Acquire) {
+                    break;
                 }
             }
         });
