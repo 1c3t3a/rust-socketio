@@ -4,6 +4,7 @@ use crate::engineio::{
     packet::{Packet as EnginePacket, PacketId as EnginePacketId},
 };
 use crate::error::{Error, Result};
+use crate::socketio::client::Socket as SocketIoSocket;
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
 use bytes::Bytes;
 use native_tls::TlsConnector;
@@ -24,7 +25,8 @@ use url::Url;
 use super::{event::Event, payload::Payload};
 
 /// The type of a callback function.
-pub(crate) type Callback<I> = RwLock<Box<dyn FnMut(I) + 'static + Sync + Send>>;
+// TODO: refactor SocketIoSocket out
+pub(crate) type Callback<I> = RwLock<Box<dyn FnMut(I, SocketIoSocket) + 'static + Sync + Send>>;
 
 pub(crate) type EventCallback = (Event, Callback<Payload>);
 /// Represents an `Ack` as given back to the caller. Holds the internal `id` as
@@ -90,7 +92,7 @@ impl Socket {
     /// Registers a new event with some callback function `F`.
     pub fn on<F>(&mut self, event: Event, callback: Box<F>) -> Result<()>
     where
-        F: FnMut(Payload) + 'static + Sync + Send,
+        F: FnMut(Payload, SocketIoSocket) + 'static + Sync + Send,
     {
         Arc::get_mut(&mut self.on)
             .unwrap()
@@ -259,14 +261,14 @@ impl Socket {
     /// acquire shared mutability. This `ack` will be changed as soon as the
     /// server answered with an `ack`.
     pub fn emit_with_ack<F>(
-        &mut self,
+        &self,
         event: Event,
         data: Payload,
         timeout: Duration,
         callback: F,
     ) -> Result<()>
     where
-        F: FnMut(Payload) + 'static + Send + Sync,
+        F: FnMut(Payload, SocketIoSocket) + 'static + Send + Sync,
     {
         let id = thread_rng().gen_range(0..999);
         let default = String::from("/");
@@ -303,14 +305,26 @@ impl Socket {
             EnginePacketId::Open => {
                 if let Some(function) = self.get_event_callback(&Event::Connect) {
                     let mut lock = function.1.write().unwrap();
-                    lock(Payload::String(String::from("Connection is opened")));
+                    // TODO: refactor
+                    lock(
+                        Payload::String(String::from("Connection is opened")),
+                        SocketIoSocket {
+                            socket: self.clone(),
+                        },
+                    );
                     drop(lock)
                 }
             }
             EnginePacketId::Close => {
                 if let Some(function) = self.get_event_callback(&Event::Close) {
                     let mut lock = function.1.write().unwrap();
-                    lock(Payload::String(String::from("Connection is closed")));
+                    // TODO: refactor
+                    lock(
+                        Payload::String(String::from("Connection is closed")),
+                        SocketIoSocket {
+                            socket: self.clone(),
+                        },
+                    );
                     drop(lock)
                 }
             }
@@ -356,12 +370,18 @@ impl Socket {
                     if let Some(function) = self.get_event_callback(&Event::Error) {
                         spawn_scoped!({
                             let mut lock = function.1.write().unwrap();
-                            lock(Payload::String(
-                                String::from("Received an ConnectError frame")
-                                    + &socket_packet.data.unwrap_or_else(|| {
-                                        String::from("\"No error message provided\"")
-                                    }),
-                            ));
+                            // TODO: refactor
+                            lock(
+                                Payload::String(
+                                    String::from("Received an ConnectError frame")
+                                        + &socket_packet.data.unwrap_or_else(|| {
+                                            String::from("\"No error message provided\"")
+                                        }),
+                                ),
+                                SocketIoSocket {
+                                    socket: self.clone(),
+                                },
+                            );
                             drop(lock);
                         });
                     }
@@ -415,14 +435,26 @@ impl Socket {
                         if let Some(ref payload) = socket_packet.data {
                             spawn_scoped!({
                                 let mut function = ack.callback.write().unwrap();
-                                function(Payload::String(payload.to_owned()));
+                                // TODO: refactor
+                                function(
+                                    Payload::String(payload.to_owned()),
+                                    SocketIoSocket {
+                                        socket: self.clone(),
+                                    },
+                                );
                                 drop(function);
                             });
                         }
                         if let Some(ref payload) = socket_packet.binary_data {
                             spawn_scoped!({
                                 let mut function = ack.callback.write().unwrap();
-                                function(Payload::Binary(payload.to_owned()));
+                                // TODO: refactor
+                                function(
+                                    Payload::Binary(payload.to_owned()),
+                                    SocketIoSocket {
+                                        socket: self.clone(),
+                                    },
+                                );
                                 drop(function);
                             });
                         }
@@ -448,7 +480,13 @@ impl Socket {
             if let Some(function) = self.get_event_callback(&event) {
                 spawn_scoped!({
                     let mut lock = function.1.write().unwrap();
-                    lock(Payload::Binary(binary_payload));
+                    // TODO: refactor
+                    lock(
+                        Payload::Binary(binary_payload),
+                        SocketIoSocket {
+                            socket: self.clone(),
+                        },
+                    );
                     drop(lock);
                 });
             }
@@ -484,12 +522,19 @@ impl Socket {
                         // if the data doesn't contain an event type at position `1`, the event must be
                         // of the type `Message`, in that case the data must be on position one and
                         // unwrapping is safe
-                        lock(Payload::String(
-                            contents
-                                .get(1)
-                                .unwrap_or_else(|| contents.get(0).unwrap())
-                                .to_string(),
-                        ));
+
+                        // TODO: refactor
+                        lock(
+                            Payload::String(
+                                contents
+                                    .get(1)
+                                    .unwrap_or_else(|| contents.get(0).unwrap())
+                                    .to_string(),
+                            ),
+                            SocketIoSocket {
+                                socket: self.clone(),
+                            },
+                        );
                         drop(lock);
                     });
                 }
@@ -543,7 +588,7 @@ mod test {
         assert!(socket
             .on(
                 "test".into(),
-                Box::new(|message| {
+                Box::new(|message, _| {
                     if let Payload::String(st) = message {
                         println!("{}", st)
                     }
@@ -551,15 +596,15 @@ mod test {
             )
             .is_ok());
 
-        assert!(socket.on("Error".into(), Box::new(|_| {})).is_ok());
+        assert!(socket.on("Error".into(), Box::new(|_, _| {})).is_ok());
 
-        assert!(socket.on("Connect".into(), Box::new(|_| {})).is_ok());
+        assert!(socket.on("Connect".into(), Box::new(|_, _| {})).is_ok());
 
-        assert!(socket.on("Close".into(), Box::new(|_| {})).is_ok());
+        assert!(socket.on("Close".into(), Box::new(|_, _| {})).is_ok());
 
         socket.connect().unwrap();
 
-        let ack_callback = |message: Payload| {
+        let ack_callback = |message: Payload, _| {
             println!("Yehaa! My ack got acked?");
             if let Payload::String(str) = message {
                 println!("Received string ack");

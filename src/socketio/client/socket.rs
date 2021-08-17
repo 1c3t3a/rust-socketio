@@ -18,7 +18,7 @@ pub struct Socket {
     pub socket: InnerSocket,
 }
 
-type SocketCallback = dyn FnMut(Payload) + 'static + Sync + Send;
+type SocketCallback = dyn FnMut(Payload, Socket) + 'static + Sync + Send;
 
 /// A builder class for a `socket.io` socket. This handles setting up the client and
 /// configuring the callback, the namespace and metadata of the socket. If no
@@ -107,7 +107,7 @@ impl SocketBuilder {
     /// ```
     pub fn on<F>(mut self, event: &str, callback: F) -> Self
     where
-        F: FnMut(Payload) + 'static + Sync + Send,
+        F: FnMut(Payload, Socket) + 'static + Sync + Send,
     {
         match self.on {
             Some(ref mut vector) => vector.push((event.into(), Box::new(callback))),
@@ -130,7 +130,7 @@ impl SocketBuilder {
     ///
     /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .on("error", |err| eprintln!("Error: {:#?}", err))
+    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
     ///     .tls_config(tls_connector)
     ///     .connect();
     ///
@@ -151,7 +151,7 @@ impl SocketBuilder {
     ///
     /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .on("error", |err| eprintln!("Error: {:#?}", err))
+    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
     ///     .opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
     ///     .connect();
     ///
@@ -181,7 +181,7 @@ impl SocketBuilder {
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .on("error", |err| eprintln!("Socket error!: {:#?}", err))
+    ///     .on("error", |err, _| eprintln!("Socket error!: {:#?}", err))
     ///     .connect()
     ///     .expect("connection failed");
     ///
@@ -231,7 +231,7 @@ impl Socket {
     /// after a call to the `connect` method.
     pub(crate) fn on<F>(&mut self, event: Event, callback: Box<F>) -> Result<()>
     where
-        F: FnMut(Payload) + 'static + Sync + Send,
+        F: FnMut(Payload, Self) + 'static + Sync + Send,
     {
         self.socket.on(event, callback)
     }
@@ -251,11 +251,11 @@ impl Socket {
     ///
     /// # Example
     /// ```
-    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use rust_socketio::{SocketBuilder, Socket, Payload};
     /// use serde_json::json;
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, mut socket| {
+    ///     .on("test", |payload: Payload, socket: Socket| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     ///      })
@@ -269,7 +269,7 @@ impl Socket {
     /// assert!(result.is_ok());
     /// ```
     #[inline]
-    pub fn emit<E, D>(&mut self, event: E, data: D) -> Result<()>
+    pub fn emit<E, D>(&self, event: E, data: D) -> Result<()>
     where
         E: Into<Event>,
         D: Into<Payload>,
@@ -281,11 +281,11 @@ impl Socket {
     /// packet.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use rust_socketio::{SocketBuilder, Payload, Socket};
     /// use serde_json::json;
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, mut socket| {
+    ///     .on("test", |payload: Payload, socket: Socket| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     ///      })
@@ -323,13 +323,13 @@ impl Socket {
     /// use std::thread::sleep;
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .on("foo", |payload: Payload| println!("Received: {:#?}", payload))
+    ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
     ///     .connect()
     ///     .expect("connection failed");
     ///
     ///
     ///
-    /// let ack_callback = |message: Payload| {
+    /// let ack_callback = |message: Payload, _| {
     ///     match message {
     ///         Payload::String(str) => println!("{}", str),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
@@ -343,14 +343,14 @@ impl Socket {
     /// ```
     #[inline]
     pub fn emit_with_ack<F, E, D>(
-        &mut self,
+        &self,
         event: E,
         data: D,
         timeout: Duration,
         callback: F,
     ) -> Result<()>
     where
-        F: FnMut(Payload) + 'static + Send + Sync,
+        F: FnMut(Payload, Socket) + 'static + Send + Sync,
         E: Into<Event>,
         D: Into<Payload>,
     {
@@ -406,7 +406,7 @@ mod test {
 
         let result = socket.on(
             "test".into(),
-            Box::new(|msg| match msg {
+            Box::new(|msg, _| match msg {
                 Payload::String(str) => println!("Received string: {}", str),
                 Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
             }),
@@ -421,7 +421,7 @@ mod test {
 
         assert!(result.is_ok());
 
-        let ack_callback = move |message: Payload| {
+        let ack_callback = move |message: Payload, _| {
             /*
             // TODO: uncomment
             let result = socket_.emit(
@@ -471,18 +471,18 @@ mod test {
             .tls_config(tls_connector)
             .opening_header(HOST, "localhost".parse().unwrap())
             .opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
-            .on("test", |str| println!("Received: {:#?}", str))
-            .on("message", |payload| println!("{:#?}", payload))
+            .on("test", |str, _| println!("Received: {:#?}", str))
+            .on("message", |payload, _| println!("{:#?}", payload))
             .connect();
 
         assert!(socket.is_ok());
 
-        let mut socket = socket.unwrap();
+        let socket = socket.unwrap();
         assert!(socket.emit("message", json!("Hello World")).is_ok());
 
         assert!(socket.emit("binary", Bytes::from_static(&[46, 88])).is_ok());
 
-        let ack_cb = |payload| {
+        let ack_cb = |payload, _| {
             println!("Yehaa the ack got acked");
             println!("With data: {:#?}", payload);
         };
