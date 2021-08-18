@@ -15,6 +15,12 @@ pub(crate) mod test {
 
     pub(crate) fn socket_io_server() -> crate::error::Result<Url> {
         let url = std::env::var("SOCKET_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
-        Ok(Url::parse(&url)?)
+        let mut url = Url::parse(&url)?;
+
+        if url.path() == "/" {
+            url.set_path("/socket.io/");
+        }
+
+        Ok(url)
     }
 }

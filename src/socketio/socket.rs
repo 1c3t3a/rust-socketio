@@ -78,8 +78,25 @@ impl Socket {
             // SAFETY: Checked is_some
             engine_socket_builder = engine_socket_builder.headers(opening_headers);
         }
+
+        let engine_socket = engine_socket_builder.build_with_fallback()?;
+
+        Self::new_with_socket(url.to_string(), nsp, engine_socket)
+    }
+
+    pub(super) fn new_with_socket<T: Into<String>>(
+        address: T,
+        nsp: Option<String>,
+        engine_socket: EngineIoSocket,
+    ) -> Result<Self> {
+        let mut url: Url = Url::parse(&address.into())?;
+
+        if url.path() == "/" {
+            url.set_path("/socket.io/");
+        }
+
         Ok(Socket {
-            engine_socket: Arc::new(engine_socket_builder.build_with_fallback()?),
+            engine_socket: Arc::new(engine_socket),
             host: Arc::new(url),
             connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
@@ -579,11 +596,9 @@ mod test {
     use std::time::Duration;
 
     use super::*;
-    #[test]
-    fn it_works() -> Result<()> {
-        let url = crate::socketio::test::socket_io_server()?;
 
-        let mut socket = Socket::new(url, None, None, None)?;
+    fn test_socketio_socket(socket: Socket) -> Result<()> {
+        let mut socket = socket;
 
         assert!(socket
             .on(
@@ -622,6 +637,63 @@ mod test {
             .is_ok());
         Ok(())
     }
+
+    #[test]
+    fn test_connection() -> Result<()> {
+        let url = crate::socketio::test::socket_io_server()?;
+
+        let socket = Socket::new(url, None, None, None)?;
+
+        test_socketio_socket(socket)
+    }
+
+    #[test]
+    fn test_connection_failable() -> Result<()> {
+        let url = crate::socketio::test::socket_io_server()?;
+
+        let engine_socket = EngineIoSocketBuilder::new(url.clone()).build()?;
+
+        let socket = Socket::new_with_socket(url, None, engine_socket)?;
+
+        test_socketio_socket(socket)
+    }
+
+    //TODO: make all engineio code-paths reachable from engineio, (is_binary_attr is only used in socketio)
+    #[test]
+    fn test_connection_polling() -> Result<()> {
+        let url = crate::socketio::test::socket_io_server()?;
+
+        let engine_socket = EngineIoSocketBuilder::new(url.clone()).build_polling()?;
+
+        let socket = Socket::new_with_socket(url, None, engine_socket)?;
+
+        test_socketio_socket(socket)
+    }
+
+    #[test]
+    fn test_connection_websocket() -> Result<()> {
+        let url = crate::socketio::test::socket_io_server()?;
+
+        let engine_socket = EngineIoSocketBuilder::new(url.clone()).build_websocket()?;
+
+        let socket = Socket::new_with_socket(url, None, engine_socket)?;
+
+        test_socketio_socket(socket)
+    }
+
+    // TODO: add secure socketio server
+    /*
+    #[test]
+    fn test_connection_websocket_secure() -> Result<()> {
+        let url = crate::socketio::test::socket_io_server()?;
+
+        let engine_socket = EngineIoSocketBuilder::new(url.clone()).build()?;
+
+        let socket = Socket::new_with_socket(url, None, engine_socket)?;
+
+        test_socketio_socket(socket)
+    }
+    */
 
     #[test]
     fn test_error_cases() -> Result<()> {
