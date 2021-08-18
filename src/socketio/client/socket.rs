@@ -211,7 +211,7 @@ impl SocketBuilder {
 }
 
 impl Socket {
-    /// Creates a socket with a certain adress to connect to as well as a
+    /// Creates a socket with a certain address to connect to as well as a
     /// namespace. If `None` is passed in as namespace, the default namespace
     /// `"/"` is taken.
     /// ```
