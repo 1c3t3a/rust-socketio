@@ -120,14 +120,31 @@ impl Transport for WebsocketTransport {
     }
 }
 
+impl std::fmt::Debug for WebsocketTransport {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!(
+            "WebsocketTransport(base_url: {:?})",
+            self.base_url(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use std::str::FromStr;
+
+    fn new() -> Result<WebsocketTransport> {
+        let url = crate::engineio::test::engine_io_server()?.to_string() + "engine.io/?EIO=4";
+        Ok(WebsocketTransport::new(
+            Url::from_str(&url[..]).unwrap(),
+            None,
+        ))
+    }
+
     #[test]
     fn websocket_transport_base_url() -> Result<()> {
-        let url = crate::engineio::test::engine_io_server()?.to_string() + "engine.io/?EIO=4";
-        let transport = WebsocketTransport::new(Url::from_str(&url[..]).unwrap(), None);
+        let transport = new()?;
         let mut url = crate::engineio::test::engine_io_server()?;
         url.set_path("/engine.io/");
         url.query_pairs_mut()
@@ -150,6 +167,16 @@ mod test {
             "ws://127.0.0.1/?transport=websocket"
         );
         assert_ne!(transport.base_url()?.to_string(), url.to_string());
+        Ok(())
+    }
+
+    #[test]
+    fn websocket_secure_debug() -> Result<()> {
+        let transport = new()?;
+        assert_eq!(
+            format!("{:?}", transport),
+            format!("WebsocketTransport(base_url: {:?})", transport.base_url())
+        );
         Ok(())
     }
 }
