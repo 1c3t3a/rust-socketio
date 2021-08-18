@@ -200,12 +200,24 @@ impl TryFrom<Payload> for Bytes {
     }
 }
 
-// This exposes a vec specific type (IntoIter)
+pub struct IntoIter {
+    iter: std::vec::IntoIter<Packet>,
+}
+
+impl Iterator for IntoIter {
+    type Item = Packet;
+    fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
+        self.iter.next()
+    }
+}
+
 impl IntoIterator for Payload {
     type Item = Packet;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
+    type IntoIter = IntoIter;
     fn into_iter(self) -> <Self as std::iter::IntoIterator>::IntoIter {
-        self.0.into_iter()
+        IntoIter {
+            iter: self.0.into_iter(),
+        }
     }
 }
 
