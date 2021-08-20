@@ -50,14 +50,14 @@ impl TryFrom<u8> for PacketId {
     type Error = Error;
     /// Converts a byte into the corresponding `PacketId`.
     fn try_from(b: u8) -> Result<PacketId> {
-        match b as char {
-            '0' => Ok(PacketId::Open),
-            '1' => Ok(PacketId::Close),
-            '2' => Ok(PacketId::Ping),
-            '3' => Ok(PacketId::Pong),
-            '4' => Ok(PacketId::Message),
-            '5' => Ok(PacketId::Upgrade),
-            '6' => Ok(PacketId::Noop),
+        match b {
+            0 | b'0' => Ok(PacketId::Open),
+            1 | b'1' => Ok(PacketId::Close),
+            2 | b'2' => Ok(PacketId::Ping),
+            3 | b'3' => Ok(PacketId::Pong),
+            4 | b'4' => Ok(PacketId::Message),
+            5 | b'5' => Ok(PacketId::Upgrade),
+            6 | b'6' => Ok(PacketId::Noop),
             _ => Err(Error::InvalidPacketId(b)),
         }
     }
@@ -90,8 +90,11 @@ impl TryFrom<Packet> for HandshakePacket {
 
 impl Packet {
     /// Creates a new `Packet`.
-    pub fn new(packet_id: PacketId, data: Bytes) -> Self {
-        Packet { packet_id, data }
+    pub fn new<T: Into<Bytes>>(packet_id: PacketId, data: T) -> Self {
+        Packet {
+            packet_id,
+            data: data.into(),
+        }
     }
 }
 
@@ -145,7 +148,8 @@ impl From<Packet> for Bytes {
     }
 }
 
-pub struct Payload(Vec<Packet>);
+#[derive(Debug, Clone)]
+pub(crate) struct Payload(Vec<Packet>);
 
 impl Payload {
     // see https://en.wikipedia.org/wiki/Delimiter#ASCII_delimited_text
@@ -157,6 +161,12 @@ impl Payload {
 
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn iter(&self) -> Iter {
+        Iter {
+            iter: self.0.iter(),
+        }
     }
 }
 
@@ -200,6 +210,18 @@ impl TryFrom<Payload> for Bytes {
     }
 }
 
+pub struct Iter<'a> {
+    iter: std::slice::Iter<'a, Packet>,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = &'a Packet;
+    fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
+        self.iter.next()
+    }
+}
+
+#[derive(Clone)]
 pub struct IntoIter {
     iter: std::vec::IntoIter<Packet>,
 }
