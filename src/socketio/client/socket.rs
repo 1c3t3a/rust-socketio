@@ -1,4 +1,4 @@
-pub use super::{event::Event, payload::Payload};
+pub use super::super::{event::Event, payload::Payload};
 use crate::error::Error;
 use native_tls::TlsConnector;
 pub use reqwest::header::{HeaderMap, HeaderValue, IntoHeaderName};
@@ -14,7 +14,8 @@ use crate::socketio::transport::TransportClient;
 #[derive(Debug, Clone)]
 pub struct Socket {
     /// The inner transport client to delegate the methods to.
-    pub(super) transport: TransportClient,
+    // TODO: Make this private
+    pub transport: TransportClient,
 }
 
 type SocketCallback = dyn FnMut(Payload, Socket) + 'static + Sync + Send;
