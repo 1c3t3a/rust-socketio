@@ -311,6 +311,7 @@ impl Socket {
     }
 }
 
+#[derive(Clone)]
 pub struct Iter<'a> {
     socket: &'a Socket,
     iter: Option<crate::engineio::packet::IntoIter>,
@@ -328,17 +329,14 @@ impl<'a> Iterator for Iter<'a> {
             if let Err(error) = result {
                 return Some(Err(error));
             } else if let Ok(Some(payload)) = result {
-                self.iter = Some(payload.into_iter());
+                let mut iter = payload.into_iter();
+                next = iter.next();
+                self.iter = Some(iter);
             } else {
                 return None;
             }
         }
-        if let Some(iter) = self.iter.as_mut() {
-            let result = iter.next();
-            result.map(Ok)
-        } else {
-            None
-        }
+        next.map(Ok)
     }
 }
 

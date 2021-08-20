@@ -358,30 +358,21 @@ impl Socket {
             .emit_with_ack(event.into(), data.into(), timeout, callback)
     }
 
-    pub(crate) fn poll(&self) -> Result<Option<SocketPacket>> {
-        self.socket.poll()
-    }
-
     pub fn iter(&self) -> Iter {
-        Iter { socket: self }
+        Iter {
+            socket_iter: self.socket.iter(),
+        }
     }
 }
 
 pub struct Iter<'a> {
-    socket: &'a Socket,
+    socket_iter: crate::socketio::socket::Iter<'a>,
 }
 
 impl<'a> Iterator for Iter<'a> {
     type Item = Result<SocketPacket>;
     fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
-        let packet = self.socket.poll();
-        // One unwrap for option the next for error
-        if let Err(error) = packet {
-            return Some(Err(error));
-        }
-        let packet = packet.unwrap()?;
-
-        Some(Ok(packet))
+        self.socket_iter.next()
     }
 }
 
@@ -400,6 +391,7 @@ mod test {
 
     #[test]
     fn socket_io_integration() -> Result<()> {
+        //TODO: check to make sure we are receiving packets rather than logging.
         let url = crate::socketio::test::socket_io_server()?;
 
         let mut socket = Socket::new(url, None, None, None)?;
@@ -421,14 +413,11 @@ mod test {
 
         assert!(result.is_ok());
 
-        let ack_callback = move |message: Payload, _| {
-            /*
-            // TODO: uncomment
-            let result = socket_.emit(
+        let ack_callback = move |message: Payload, socket: Socket| {
+            let result = socket.emit(
                 "test",
                 Payload::String(json!({"got ack": true}).to_string()),
             );
-            */
             assert!(result.is_ok());
 
             println!("Yehaa! My ack got acked?");

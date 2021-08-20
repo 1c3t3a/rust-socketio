@@ -120,28 +120,34 @@ impl Socket {
     /// Connects to the server. This includes a connection of the underlying
     /// engine.io client and afterwards an opening socket.io request.
     pub fn connect(&mut self) -> Result<()> {
+        self.connect_with_thread(true)
+    }
+
+    /// Connect with optional thread to forward events to callback
+    pub(super) fn connect_with_thread(&mut self, thread: bool) -> Result<()> {
         self.engine_socket.connect()?;
 
         // TODO: refactor me
-        let clone_self = self.clone();
-        thread::spawn(move || {
-            // tries to restart a poll cycle whenever a 'normal' error occurs,
-            // it just panics on network errors, in case the poll cycle returned
-            // `Result::Ok`, the server receives a close frame so it's safe to
-            // terminate
-            loop {
-                match clone_self.poll() {
-                    e @ Err(Error::IncompleteHttp(_))
-                    | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
-                        panic!("{}", e.unwrap_err())
+        // TODO: This is needed (somewhere) to get callbacks to work.
+        if thread {
+            let clone_self = self.clone();
+            thread::spawn(move || {
+                // tries to restart a poll cycle whenever a 'normal' error occurs,
+                // it just panics on network errors, in case the poll cycle returned
+                // `Result::Ok`, the server receives a close frame so it's safe to
+                // terminate
+                let iter = clone_self.iter();
+                for packet in iter {
+                    match packet {
+                        e @ Err(Error::IncompleteHttp(_))
+                        | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
+                            panic!("{}", e.unwrap_err())
+                        }
+                        _ => (),
                     }
-                    _ => (),
                 }
-                if !clone_self.connected.load(Ordering::Acquire) {
-                    break;
-                }
-            }
-        });
+            });
+        }
 
         // construct the opening packet
         let open_packet = SocketPacket::new(
@@ -306,56 +312,18 @@ impl Socket {
         Ok(())
     }
 
-    pub(crate) fn poll(&self) -> Result<Option<SocketPacket>> {
-        let next: Option<Result<EnginePacket>> = self.engine_socket.iter().next();
-
-        if next.is_none() {
-            return Ok(None);
+    pub(crate) fn iter(&self) -> Iter {
+        Iter {
+            socket: self,
+            engine_iter: self.engine_socket.iter(),
         }
-
-        let next: EnginePacket = next.unwrap()?;
-
-        match next.packet_id {
-            EnginePacketId::Message => {
-                self.handle_new_message(next.data);
-            }
-            EnginePacketId::Open => {
-                if let Some(function) = self.get_event_callback(&Event::Connect) {
-                    let mut lock = function.1.write().unwrap();
-                    // TODO: refactor
-                    lock(
-                        Payload::String(String::from("Connection is opened")),
-                        SocketIoSocket {
-                            socket: self.clone(),
-                        },
-                    );
-                    drop(lock)
-                }
-            }
-            EnginePacketId::Close => {
-                if let Some(function) = self.get_event_callback(&Event::Close) {
-                    let mut lock = function.1.write().unwrap();
-                    // TODO: refactor
-                    lock(
-                        Payload::String(String::from("Connection is closed")),
-                        SocketIoSocket {
-                            socket: self.clone(),
-                        },
-                    );
-                    drop(lock)
-                }
-            }
-            _ => (),
-        }
-
-        Ok(None)
     }
 
     /// Handles the incoming messages and classifies what callbacks to call and how.
     /// This method is later registered as the callback for the `on_data` event of the
     /// engineio client.
     #[inline]
-    fn handle_new_message(&self, socket_bytes: Bytes) {
+    fn handle_new_message(&self, socket_bytes: Bytes) -> Option<SocketPacket> {
         let mut is_finalized_packet = false;
         // either this is a complete packet or the rest of a binary packet (as attachments are
         // sent in a separate packet).
@@ -373,9 +341,11 @@ impl Socket {
         };
 
         if let Ok(socket_packet) = decoded_packet {
+            let output = socket_packet.clone();
+
             let default = String::from("/");
             if socket_packet.nsp != *self.nsp.as_ref().as_ref().unwrap_or(&default) {
-                return;
+                return None;
             }
 
             match socket_packet.packet_type {
@@ -419,6 +389,8 @@ impl Socket {
                         self.handle_binary_event(socket_packet);
                     } else {
                         *self.unfinished_packet.write().unwrap() = Some(socket_packet);
+                        // Don't return unfinished packets
+                        return None;
                     }
                 }
                 SocketPacketId::BinaryAck => {
@@ -426,9 +398,14 @@ impl Socket {
                         self.handle_ack(socket_packet);
                     } else {
                         *self.unfinished_packet.write().unwrap() = Some(socket_packet);
+                        // Don't return unfinished packets
+                        return None;
                     }
                 }
             }
+            Some(output)
+        } else {
+            None
         }
     }
 
@@ -591,6 +568,69 @@ impl Debug for Socket {
     }
 }
 
+pub struct Iter<'a> {
+    socket: &'a Socket,
+    engine_iter: crate::engineio::client::Iter<'a>,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = Result<SocketPacket>;
+    fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
+        loop {
+            let next: Result<EnginePacket> = self.engine_iter.next()?;
+
+            if let Err(err) = next {
+                return Some(Err(err));
+            }
+            let next = next.unwrap();
+
+            match next.packet_id {
+                EnginePacketId::MessageBase64 => {
+                    // This is an attachment
+                    let packet = self.socket.handle_new_message(next.data);
+                    if let Some(packet) = packet {
+                        return Some(Ok(packet));
+                    }
+                }
+                EnginePacketId::Message => {
+                    let packet = self.socket.handle_new_message(next.data);
+                    if let Some(packet) = packet {
+                        return Some(Ok(packet));
+                    }
+                    // Wrong namespace keep going.
+                }
+                EnginePacketId::Open => {
+                    if let Some(function) = self.socket.get_event_callback(&Event::Connect) {
+                        let mut lock = function.1.write().unwrap();
+                        // TODO: refactor
+                        lock(
+                            Payload::String(String::from("Connection is opened")),
+                            SocketIoSocket {
+                                socket: self.socket.clone(),
+                            },
+                        );
+                        drop(lock)
+                    }
+                }
+                EnginePacketId::Close => {
+                    if let Some(function) = self.socket.get_event_callback(&Event::Close) {
+                        let mut lock = function.1.write().unwrap();
+                        // TODO: refactor
+                        lock(
+                            Payload::String(String::from("Connection is closed")),
+                            SocketIoSocket {
+                                socket: self.socket.clone(),
+                            },
+                        );
+                        drop(lock)
+                    }
+                }
+                _ => (),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::time::Duration;
@@ -617,7 +657,79 @@ mod test {
 
         assert!(socket.on("Close".into(), Box::new(|_, _| {})).is_ok());
 
-        socket.connect().unwrap();
+        // Tests need to consume packets rather than forward to callbacks.
+        socket.connect_with_thread(false).unwrap();
+
+        let mut iter = socket
+            .iter()
+            .map(|packet| packet.unwrap())
+            .filter(|packet| packet.packet_type != SocketPacketId::Connect);
+
+        let packet: Option<SocketPacket> = iter.next();
+        assert!(packet.is_some());
+
+        let packet = packet.unwrap();
+
+        assert_eq!(
+            packet,
+            SocketPacket::new(
+                SocketPacketId::Event,
+                "/".to_owned(),
+                Some("[\"Hello from the message event!\"]".to_owned()),
+                None,
+                None,
+                None
+            )
+        );
+
+        let packet: Option<SocketPacket> = iter.next();
+        assert!(packet.is_some());
+
+        let packet = packet.unwrap();
+
+        assert_eq!(
+            packet,
+            SocketPacket::new(
+                SocketPacketId::Event,
+                "/".to_owned(),
+                Some("[\"test\",\"Hello from the test event!\"]".to_owned()),
+                None,
+                None,
+                None
+            )
+        );
+
+        let packet: Option<SocketPacket> = iter.next();
+        assert!(packet.is_some());
+
+        let packet = packet.unwrap();
+        assert_eq!(
+            packet,
+            SocketPacket::new(
+                SocketPacketId::BinaryEvent,
+                "/".to_owned(),
+                None,
+                Some(Bytes::from_static(&[4, 5, 6])),
+                None,
+                Some(1)
+            )
+        );
+
+        let packet: Option<SocketPacket> = iter.next();
+        assert!(packet.is_some());
+
+        let packet = packet.unwrap();
+        assert_eq!(
+            packet,
+            SocketPacket::new(
+                SocketPacketId::BinaryEvent,
+                "/".to_owned(),
+                Some("\"test\"".to_owned()),
+                Some(Bytes::from_static(&[1, 2, 3])),
+                None,
+                Some(1)
+            )
+        );
 
         let ack_callback = |message: Payload, _| {
             println!("Yehaa! My ack got acked?");
@@ -635,6 +747,7 @@ mod test {
                 ack_callback
             )
             .is_ok());
+
         Ok(())
     }
 
