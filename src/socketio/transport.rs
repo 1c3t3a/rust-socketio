@@ -1,12 +1,12 @@
-use crate::engineio::socket::SocketBuilder as EngineIoSocketBuilder;
 use crate::error::{Error, Result};
 use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
 use crate::{
     engineio::{
+        client::Socket as EngineIoSocket,
+        client::SocketBuilder as EngineIoSocketBuilder,
         packet::{Packet as EnginePacket, PacketId as EnginePacketId},
-        socket::Socket as EngineIoSocket,
     },
-    Socket,
+    socketio::client::Socket,
 };
 use bytes::Bytes;
 use native_tls::TlsConnector;
@@ -116,8 +116,8 @@ impl TransportClient {
             // `Result::Ok`, the server receives a close frame so it's safe to
             // terminate
             loop {
-                match engine_socket.read().unwrap().poll_cycle() {
-                    Ok(_) => break,
+                match engine_socket.read().unwrap().poll() {
+                    Ok(None) => break,
                     e @ Err(Error::IncompleteHttp(_))
                     | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
                         panic!("{}", e.unwrap_err())
