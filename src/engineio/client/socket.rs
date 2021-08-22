@@ -239,7 +239,7 @@ impl Socket {
 
     /// Opens the connection to a specified server. The first Pong packet is sent
     /// to the server to trigger the Ping-cycle.
-    pub fn connect(&mut self) -> Result<()> {
+    pub fn connect(&self) -> Result<()> {
         self.socket.connect()
     }
 
@@ -259,9 +259,9 @@ impl Socket {
 
         let payload = payload.unwrap();
 
-        let mut iter = payload.iter();
+        let iter = payload.iter();
 
-        while let Some(packet) = iter.next() {
+        for packet in iter {
             // check for the appropriate action or callback
             self.socket.handle_packet(packet.clone())?;
             match packet.packet_id {
@@ -311,6 +311,7 @@ impl Socket {
     }
 }
 
+#[derive(Clone)]
 pub struct Iter<'a> {
     socket: &'a Socket,
     iter: Option<crate::engineio::packet::IntoIter>,
@@ -328,17 +329,14 @@ impl<'a> Iterator for Iter<'a> {
             if let Err(error) = result {
                 return Some(Err(error));
             } else if let Ok(Some(payload)) = result {
-                self.iter = Some(payload.into_iter());
+                let mut iter = payload.into_iter();
+                next = iter.next();
+                self.iter = Some(iter);
             } else {
                 return None;
             }
         }
-        if let Some(iter) = self.iter.as_mut() {
-            let result = iter.next();
-            result.map(Ok)
-        } else {
-            None
-        }
+        next.map(Ok)
     }
 }
 
