@@ -1,2 +1,3 @@
 mod socket;
-pub use {socket::Socket, socket::SocketBuilder};
+pub(crate) use socket::Iter;
+pub use {socket::Iter as SocketIter, socket::Socket, socket::SocketBuilder};

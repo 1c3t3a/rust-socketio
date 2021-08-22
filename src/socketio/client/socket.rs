@@ -1,21 +1,21 @@
 pub use super::super::{event::Event, payload::Payload};
-use crate::error::Error;
+use crate::socketio::packet::Packet as SocketPacket;
 use native_tls::TlsConnector;
 pub use reqwest::header::{HeaderMap, HeaderValue, IntoHeaderName};
 
 use crate::error::Result;
 use std::{time::Duration, vec};
 
-use crate::socketio::transport::TransportClient;
+use crate::socketio::socket::Socket as InnerSocket;
 
 /// A socket which handles communication with the server. It's initialized with
 /// a specific address as well as an optional namespace to connect to. If `None`
 /// is given the server will connect to the default namespace `"/"`.
 #[derive(Debug, Clone)]
 pub struct Socket {
-    /// The inner transport client to delegate the methods to.
+    /// The inner socket client to delegate the methods to.
     // TODO: Make this private
-    pub transport: TransportClient,
+    pub socket: InnerSocket,
 }
 
 type SocketCallback = dyn FnMut(Payload, Socket) + 'static + Sync + Send;
@@ -211,7 +211,7 @@ impl SocketBuilder {
 }
 
 impl Socket {
-    /// Creates a socket with a certain adress to connect to as well as a
+    /// Creates a socket with a certain address to connect to as well as a
     /// namespace. If `None` is passed in as namespace, the default namespace
     /// `"/"` is taken.
     /// ```
@@ -222,7 +222,7 @@ impl Socket {
         opening_headers: Option<HeaderMap>,
     ) -> Result<Self> {
         Ok(Socket {
-            transport: TransportClient::new(address, namespace, tls_config, opening_headers)?,
+            socket: InnerSocket::new(address, namespace, tls_config, opening_headers)?,
         })
     }
 
@@ -231,16 +231,16 @@ impl Socket {
     /// after a call to the `connect` method.
     pub(crate) fn on<F>(&mut self, event: Event, callback: Box<F>) -> Result<()>
     where
-        F: FnMut(Payload, Socket) + 'static + Sync + Send,
+        F: FnMut(Payload, Self) + 'static + Sync + Send,
     {
-        self.transport.on(event, callback)
+        self.socket.on(event, callback)
     }
 
     /// Connects the client to a server. Afterwards the `emit_*` methods can be
     /// called to interact with the server. Attention: it's not allowed to add a
     /// callback after a call to this method.
     pub(crate) fn connect(&mut self) -> Result<()> {
-        self.transport.connect()
+        self.socket.connect()
     }
 
     /// Sends a message to the server using the underlying `engine.io` protocol.
@@ -251,11 +251,11 @@ impl Socket {
     ///
     /// # Example
     /// ```
-    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use rust_socketio::{SocketBuilder, Socket, Payload};
     /// use serde_json::json;
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, mut socket| {
+    ///     .on("test", |payload: Payload, socket: Socket| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     ///      })
@@ -269,23 +269,23 @@ impl Socket {
     /// assert!(result.is_ok());
     /// ```
     #[inline]
-    pub fn emit<E, D>(&mut self, event: E, data: D) -> Result<()>
+    pub fn emit<E, D>(&self, event: E, data: D) -> Result<()>
     where
         E: Into<Event>,
         D: Into<Payload>,
     {
-        self.transport.emit(event.into(), data.into())
+        self.socket.emit(event.into(), data.into())
     }
 
     /// Disconnects this client from the server by sending a `socket.io` closing
     /// packet.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use rust_socketio::{SocketBuilder, Payload, Socket};
     /// use serde_json::json;
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, mut socket| {
+    ///     .on("test", |payload: Payload, socket: Socket| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     ///      })
@@ -301,7 +301,7 @@ impl Socket {
     ///
     /// ```
     pub fn disconnect(&mut self) -> Result<()> {
-        self.transport.disconnect()
+        self.socket.disconnect()
     }
 
     /// Sends a message to the server but `alloc`s an `ack` to check whether the
@@ -343,7 +343,7 @@ impl Socket {
     /// ```
     #[inline]
     pub fn emit_with_ack<F, E, D>(
-        &mut self,
+        &self,
         event: E,
         data: D,
         timeout: Duration,
@@ -354,8 +354,25 @@ impl Socket {
         E: Into<Event>,
         D: Into<Payload>,
     {
-        self.transport
+        self.socket
             .emit_with_ack(event.into(), data.into(), timeout, callback)
+    }
+
+    pub fn iter(&self) -> Iter {
+        Iter {
+            socket_iter: self.socket.iter(),
+        }
+    }
+}
+
+pub struct Iter<'a> {
+    socket_iter: crate::socketio::socket::Iter<'a>,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = Result<SocketPacket>;
+    fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
+        self.socket_iter.next()
     }
 }
 
@@ -374,6 +391,7 @@ mod test {
 
     #[test]
     fn socket_io_integration() -> Result<()> {
+        //TODO: check to make sure we are receiving packets rather than logging.
         let url = crate::socketio::test::socket_io_server()?;
 
         let mut socket = Socket::new(url, None, None, None)?;
@@ -395,8 +413,8 @@ mod test {
 
         assert!(result.is_ok());
 
-        let ack_callback = move |message: Payload, mut socket_: Socket| {
-            let result = socket_.emit(
+        let ack_callback = move |message: Payload, socket: Socket| {
+            let result = socket.emit(
                 "test",
                 Payload::String(json!({"got ack": true}).to_string()),
             );
@@ -448,7 +466,7 @@ mod test {
 
         assert!(socket.is_ok());
 
-        let mut socket = socket.unwrap();
+        let socket = socket.unwrap();
         assert!(socket.emit("message", json!("Hello World")).is_ok());
 
         assert!(socket.emit("binary", Bytes::from_static(&[46, 88])).is_ok());

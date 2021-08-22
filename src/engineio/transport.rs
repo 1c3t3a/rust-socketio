@@ -1,5 +1,4 @@
 use super::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
-use crate::engineio::packet::{Packet, Payload};
 use crate::error::Result;
 use adler32::adler32;
 use bytes::Bytes;
