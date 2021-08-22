@@ -9,7 +9,7 @@
 //! // define a callback which is called when a payload is received
 //! // this callback gets the payload as well as an instance of the
 //! // socket to communicate with the server
-//! let callback = |payload: Payload, mut socket: Socket| {
+//! let callback = |payload: Payload, socket: Socket| {
 //!        match payload {
 //!            Payload::String(str) => println!("Received: {}", str),
 //!            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),

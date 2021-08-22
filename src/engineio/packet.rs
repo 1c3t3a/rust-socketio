@@ -50,14 +50,14 @@ impl TryFrom<u8> for PacketId {
     type Error = Error;
     /// Converts a byte into the corresponding `PacketId`.
     fn try_from(b: u8) -> Result<PacketId> {
-        match b as char {
-            '0' => Ok(PacketId::Open),
-            '1' => Ok(PacketId::Close),
-            '2' => Ok(PacketId::Ping),
-            '3' => Ok(PacketId::Pong),
-            '4' => Ok(PacketId::Message),
-            '5' => Ok(PacketId::Upgrade),
-            '6' => Ok(PacketId::Noop),
+        match b {
+            0 | b'0' => Ok(PacketId::Open),
+            1 | b'1' => Ok(PacketId::Close),
+            2 | b'2' => Ok(PacketId::Ping),
+            3 | b'3' => Ok(PacketId::Pong),
+            4 | b'4' => Ok(PacketId::Message),
+            5 | b'5' => Ok(PacketId::Upgrade),
+            6 | b'6' => Ok(PacketId::Noop),
             _ => Err(Error::InvalidPacketId(b)),
         }
     }
@@ -221,6 +221,7 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct IntoIter {
     iter: std::vec::IntoIter<Packet>,
 }
