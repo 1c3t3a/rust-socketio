@@ -1,12 +1,12 @@
 pub use super::super::{event::Event, payload::Payload};
-use crate::socketio::packet::Packet as SocketPacket;
+use crate::packet::Packet as SocketPacket;
 use native_tls::TlsConnector;
-pub use reqwest::header::{HeaderMap, HeaderValue, IntoHeaderName};
+use rust_engineio::header::{HeaderMap, HeaderValue};
 
 use crate::error::Result;
 use std::{time::Duration, vec};
 
-use crate::socketio::socket::Socket as InnerSocket;
+use crate::socket::Socket as InnerSocket;
 
 /// A socket which handles communication with the server. It's initialized with
 /// a specific address as well as an optional namespace to connect to. If `None`
@@ -146,24 +146,23 @@ impl SocketBuilder {
     /// # Example
     /// ```rust
     /// use rust_socketio::{SocketBuilder, Payload};
-    /// use reqwest::header::{ACCEPT_ENCODING};
     ///
     ///
     /// let socket = SocketBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
-    ///     .opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
+    ///     .opening_header("accept-encoding", "application/json")
     ///     .connect();
     ///
     /// ```
-    pub fn opening_header<K: IntoHeaderName>(mut self, key: K, val: HeaderValue) -> Self {
+    pub fn opening_header<T: Into<HeaderValue>, K: Into<String>>(mut self, key: K, val: T) -> Self {
         match self.opening_headers {
             Some(ref mut map) => {
-                map.insert(key, val);
+                map.insert(key.into(), val.into());
             }
             None => {
                 let mut map = HeaderMap::new();
-                map.insert(key, val);
+                map.insert(key.into(), val.into());
                 self.opening_headers = Some(map);
             }
         }
@@ -366,7 +365,7 @@ impl Socket {
 }
 
 pub struct Iter<'a> {
-    socket_iter: crate::socketio::socket::Iter<'a>,
+    socket_iter: crate::socket::Iter<'a>,
 }
 
 impl<'a> Iterator for Iter<'a> {
@@ -382,17 +381,16 @@ mod test {
     use std::thread::sleep;
 
     use super::*;
-    use crate::socketio::payload::Payload;
+    use crate::payload::Payload;
     use bytes::Bytes;
     use native_tls::TlsConnector;
-    use reqwest::header::{ACCEPT_ENCODING, HOST};
     use serde_json::json;
     use std::time::Duration;
 
     #[test]
     fn socket_io_integration() -> Result<()> {
         //TODO: check to make sure we are receiving packets rather than logging.
-        let url = crate::socketio::test::socket_io_server()?;
+        let url = crate::test::socket_io_server()?;
 
         let mut socket = Socket::new(url, None, None, None)?;
 
@@ -445,7 +443,7 @@ mod test {
 
     #[test]
     fn socket_io_builder_integration() -> Result<()> {
-        let url = crate::socketio::test::socket_io_server()?;
+        let url = crate::test::socket_io_server()?;
 
         // test socket build logic
         let socket_builder = SocketBuilder::new(url);
@@ -458,8 +456,8 @@ mod test {
         let socket = socket_builder
             .namespace("/")
             .tls_config(tls_connector)
-            .opening_header(HOST, "localhost".parse().unwrap())
-            .opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
+            .opening_header("host", "localhost")
+            .opening_header("accept-encoding", "application/json")
             .on("test", |str, _| println!("Received: {:#?}", str))
             .on("message", |payload, _| println!("{:#?}", payload))
             .connect();
