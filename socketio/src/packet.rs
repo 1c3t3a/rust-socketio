@@ -132,7 +132,7 @@ impl TryFrom<&Bytes> for Packet {
     /// send in another packet.
     fn try_from(payload: &Bytes) -> Result<Packet> {
         let mut i = 0;
-        let packet_id = PacketId::try_from(*payload.first().ok_or(Error::EmptyPacket())?)?;
+        let packet_id = PacketId::try_from(*payload.first().ok_or(Error::IncompletePacket())?)?;
 
         let attachments = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
             let start = i + 1;
