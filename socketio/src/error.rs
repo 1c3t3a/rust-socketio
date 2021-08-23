@@ -15,8 +15,6 @@ pub enum Error {
     // Negative verb-object
     #[error("Invalid packet id: {0}")]
     InvalidPacketId(u8),
-    #[error("Error while parsing an empty packet")]
-    EmptyPacket(),
     #[error("Error while parsing an incomplete packet")]
     IncompletePacket(),
     #[error("Got an invalid packet which did not follow the protocol format")]
@@ -35,8 +33,6 @@ pub enum Error {
     IllegalActionBeforeOpen(),
     #[error("string is not json serializable: {0}")]
     InvalidJson(#[from] JsonError),
-    #[error("Did not receive an ack for id: {0}")]
-    MissingAck(i32),
     #[error("An illegal action (such as setting a callback after being connected) was triggered")]
     //TODO: make these impossible by using builders and immutable data.
     IllegalActionAfterOpen(),
@@ -44,12 +40,8 @@ pub enum Error {
     InvalidPoisonedLock(),
     #[error("Got an IO-Error: {0}")]
     IncompleteIo(#[from] IoError),
-    #[error("The socket is closed")]
-    IllegalActionAfterClose(),
     #[error("Error while parsing an integer")]
     InvalidInteger(#[from] ParseIntError),
-    #[error("Missing URL")]
-    MissingUrl(),
     #[error("EngineIO Error")]
     IncompleteResponseFromEngineIo(#[from] rust_engineio::Error),
 }
