@@ -1,7 +1,7 @@
-use crate::engineio::packet::Packet;
-use crate::engineio::packet::PacketId;
-use crate::engineio::transport::Transport;
 use crate::error::{Error, Result};
+use crate::packet::Packet;
+use crate::packet::PacketId;
+use crate::transport::Transport;
 use bytes::{BufMut, Bytes, BytesMut};
 use std::borrow::Cow;
 use std::str::from_utf8;
@@ -135,7 +135,7 @@ mod test {
     use std::str::FromStr;
 
     fn new() -> Result<WebsocketTransport> {
-        let url = crate::engineio::test::engine_io_server()?.to_string() + "engine.io/?EIO=4";
+        let url = crate::test::engine_io_server()?.to_string() + "engine.io/?EIO=4";
         Ok(WebsocketTransport::new(
             Url::from_str(&url[..]).unwrap(),
             None,
@@ -145,7 +145,7 @@ mod test {
     #[test]
     fn websocket_transport_base_url() -> Result<()> {
         let transport = new()?;
-        let mut url = crate::engineio::test::engine_io_server()?;
+        let mut url = crate::test::engine_io_server()?;
         url.set_path("/engine.io/");
         url.query_pairs_mut()
             .append_pair("EIO", "4")
