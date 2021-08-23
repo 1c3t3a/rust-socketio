@@ -1,7 +1,7 @@
-use crate::engineio::transport::TransportType;
+use crate::transport::TransportType;
 
-use crate::engineio::packet::{HandshakePacket, Packet, PacketId, Payload};
 use crate::error::{Error, Result};
+use crate::packet::{HandshakePacket, Packet, PacketId, Payload};
 use bytes::Bytes;
 use std::convert::TryFrom;
 use std::{fmt::Debug, sync::atomic::Ordering};
