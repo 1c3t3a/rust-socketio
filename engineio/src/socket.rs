@@ -178,7 +178,7 @@ impl Socket {
 
             Ok(Some(Payload::try_from(data)?))
         } else {
-            Ok(None)
+            Err(Error::IllegalActionBeforeOpen())
         }
     }
 
