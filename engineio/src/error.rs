@@ -2,7 +2,6 @@ use base64::DecodeError;
 use reqwest::Error as ReqwestError;
 use serde_json::Error as JsonError;
 use std::io::Error as IoError;
-use std::num::ParseIntError;
 use std::str::Utf8Error;
 use thiserror::Error;
 use url::ParseError as UrlParseError;
@@ -41,8 +40,6 @@ pub enum Error {
     IllegalActionBeforeOpen(),
     #[error("string is not json serializable: {0}")]
     InvalidJson(#[from] JsonError),
-    #[error("Did not receive an ack for id: {0}")]
-    MissingAck(i32),
     #[error("An illegal action (such as setting a callback after being connected) was triggered")]
     //TODO: make these impossible by using builders and immutable data.
     IllegalActionAfterOpen(),
@@ -56,12 +53,14 @@ pub enum Error {
     IncompleteIo(#[from] IoError),
     #[error("The socket is closed")]
     IllegalActionAfterClose(),
-    #[error("Error while parsing an integer")]
-    InvalidInteger(#[from] ParseIntError),
     #[error("Missing URL")]
     MissingUrl(),
     #[error("Server did not allow upgrading to websockets")]
     IllegalWebsocketUpgrade(),
+    #[error("Invalid header name")]
+    InvalidHeaderNameFromReqwest(#[from] reqwest::header::InvalidHeaderName),
+    #[error("Invalid header value")]
+    InvalidHeaderValueFromReqwest(#[from] reqwest::header::InvalidHeaderValue),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;

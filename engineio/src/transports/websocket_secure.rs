@@ -1,8 +1,8 @@
-use crate::engineio::packet::Packet;
-use crate::engineio::packet::PacketId;
-use crate::engineio::transport::Transport;
 use crate::error::Error;
 use crate::error::Result;
+use crate::packet::Packet;
+use crate::packet::PacketId;
+use crate::transport::Transport;
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
 use std::borrow::Cow;
@@ -141,8 +141,7 @@ mod test {
     use super::*;
     use std::str::FromStr;
     fn new() -> Result<WebsocketSecureTransport> {
-        let url =
-            crate::engineio::test::engine_io_server_secure()?.to_string() + "engine.io/?EIO=4";
+        let url = crate::test::engine_io_server_secure()?.to_string() + "engine.io/?EIO=4";
         Ok(WebsocketSecureTransport::new(
             Url::from_str(&url[..]).unwrap(),
             Some(crate::test::tls_connector()?),
@@ -152,7 +151,7 @@ mod test {
     #[test]
     fn websocket_secure_transport_base_url() -> Result<()> {
         let transport = new()?;
-        let mut url = crate::engineio::test::engine_io_server_secure()?;
+        let mut url = crate::test::engine_io_server_secure()?;
         url.set_path("/engine.io/");
         url.query_pairs_mut()
             .append_pair("EIO", "4")
