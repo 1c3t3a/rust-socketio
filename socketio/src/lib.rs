@@ -90,28 +90,38 @@ macro_rules! spawn_scoped {
     };
 }
 
-/// Contains the types and the code concerning the `engine.io` protocol.
-mod engineio;
-/// Contains the types and the code concerning the `socket.io` protocol.
-pub mod socketio;
+/// Defines client only structs
+pub mod client;
+/// Defines the events that could be sent or received.
+pub mod event;
+pub(crate) mod packet;
+/// Defines the types of payload (binary or string), that
+/// could be sent or received.
+pub mod payload;
+pub(self) mod socket;
 
 /// Contains the error type which will be returned with every result in this
 /// crate. Handles all kinds of errors.
 pub mod error;
 
-pub use reqwest::header::{HeaderMap, HeaderValue, IntoHeaderName};
-pub use socketio::{event::Event, payload::Payload};
+pub use rust_engineio::header::{HeaderMap, HeaderValue};
+pub use {event::Event, payload::Payload};
 
-pub use socketio::client::{Socket, SocketBuilder};
+pub use client::{Socket, SocketBuilder};
 
 #[cfg(test)]
+#[allow(unused)]
 pub(crate) mod test {
     use super::*;
-    use native_tls::TlsConnector;
-    const CERT_PATH: &str = "ci/cert/ca.crt";
     use native_tls::Certificate;
+    use native_tls::TlsConnector;
     use std::fs::File;
     use std::io::Read;
+    use url::Url;
+
+    const CERT_PATH: &str = "../ci/cert/ca.crt";
+    /// The socket.io server for testing runs on port 4200
+    const SERVER_URL: &str = "http://localhost:4200";
 
     pub(crate) fn tls_connector() -> error::Result<TlsConnector> {
         let cert_path = std::env::var("CA_CERT_PATH").unwrap_or_else(|_| CERT_PATH.to_owned());
@@ -125,5 +135,16 @@ pub(crate) mod test {
             .add_root_certificate(cert)
             .build()
             .unwrap())
+    }
+
+    pub(crate) fn socket_io_server() -> crate::error::Result<Url> {
+        let url = std::env::var("SOCKET_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+        let mut url = Url::parse(&url)?;
+
+        if url.path() == "/" {
+            url.set_path("/socket.io/");
+        }
+
+        Ok(url)
     }
 }

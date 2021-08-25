@@ -1,17 +1,16 @@
 use super::super::socket::Socket as InnerSocket;
-use crate::engineio::transport::Transport;
+use crate::transport::Transport;
 
-use super::super::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
-use crate::engineio::packet::{HandshakePacket, Packet, PacketId, Payload};
 use crate::error::{Error, Result};
+use crate::header::HeaderMap;
+use crate::packet::{HandshakePacket, Packet, PacketId, Payload};
+use crate::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
 use bytes::Bytes;
 use native_tls::TlsConnector;
-use reqwest::header::HeaderMap;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt::Debug;
 use url::Url;
-use websocket::header::Headers;
 
 #[derive(Clone, Debug)]
 pub struct Socket {
@@ -61,8 +60,11 @@ impl SocketBuilder {
         }
 
         // Start with polling transport
-        let transport =
-            PollingTransport::new(url.clone(), self.tls_config.clone(), self.headers.clone());
+        let transport = PollingTransport::new(
+            url.clone(),
+            self.tls_config.clone(),
+            self.headers.clone().map(|v| v.try_into().unwrap()),
+        );
 
         let handshake: HandshakePacket = Packet::try_from(transport.poll()?)?.try_into()?;
 
@@ -94,7 +96,11 @@ impl SocketBuilder {
         self.handshake()?;
 
         // Make a polling transport with new sid
-        let transport = PollingTransport::new(self.url, self.tls_config, self.headers);
+        let transport = PollingTransport::new(
+            self.url,
+            self.tls_config,
+            self.headers.map(|v| v.try_into().unwrap()),
+        );
 
         // SAFETY: handshake function called previously.
         Ok(Socket {
@@ -111,7 +117,10 @@ impl SocketBuilder {
 
         if self.websocket_upgrade()? {
             if url.scheme() == "http" {
-                let transport = WebsocketTransport::new(url, self.get_ws_headers()?);
+                let transport = WebsocketTransport::new(
+                    url,
+                    self.headers.map(|headers| headers.try_into().unwrap()),
+                );
                 transport.upgrade()?;
                 // SAFETY: handshake function called previously.
                 Ok(Socket {
@@ -137,7 +146,7 @@ impl SocketBuilder {
                 let transport = WebsocketSecureTransport::new(
                     url,
                     self.tls_config.clone(),
-                    self.get_ws_headers()?,
+                    self.headers.map(|v| v.try_into().unwrap()),
                 );
                 transport.upgrade()?;
                 // SAFETY: handshake function called previously.
@@ -175,20 +184,6 @@ impl SocketBuilder {
             .upgrades
             .iter()
             .any(|upgrade| upgrade.to_lowercase() == *"websocket"))
-    }
-
-    /// Converts Reqwest headers to Websocket headers
-    fn get_ws_headers(&self) -> Result<Option<Headers>> {
-        let mut headers = Headers::new();
-        if self.headers.is_some() {
-            let opening_headers = self.headers.clone();
-            for (key, val) in opening_headers.unwrap() {
-                headers.append_raw(key.unwrap().to_string(), val.as_bytes().to_owned());
-            }
-            Ok(Some(headers))
-        } else {
-            Ok(None)
-        }
     }
 }
 
@@ -298,8 +293,8 @@ impl Socket {
         Ok(Some(payload))
     }
 
-    // Check if the underlying transport client is connected.
-    pub(crate) fn is_connected(&self) -> Result<bool> {
+    /// Check if the underlying transport client is connected.
+    pub fn is_connected(&self) -> Result<bool> {
         self.socket.is_connected()
     }
 
@@ -314,7 +309,7 @@ impl Socket {
 #[derive(Clone)]
 pub struct Iter<'a> {
     socket: &'a Socket,
-    iter: Option<crate::engineio::packet::IntoIter>,
+    iter: Option<crate::packet::IntoIter>,
 }
 
 impl<'a> Iterator for Iter<'a> {
@@ -343,13 +338,13 @@ impl<'a> Iterator for Iter<'a> {
 #[cfg(test)]
 mod test {
 
-    use crate::engineio::packet::PacketId;
+    use crate::packet::PacketId;
 
     use super::*;
 
     #[test]
     fn test_illegal_actions() -> Result<()> {
-        let url = crate::engineio::test::engine_io_server()?;
+        let url = crate::test::engine_io_server()?;
         let mut sut = SocketBuilder::new(url.clone()).build()?;
 
         assert!(sut
@@ -379,7 +374,7 @@ mod test {
     }
     use reqwest::header::HOST;
 
-    use crate::engineio::packet::Packet;
+    use crate::packet::Packet;
 
     fn test_connection(socket: Socket) -> Result<()> {
         let mut socket = socket;
@@ -428,14 +423,14 @@ mod test {
 
     #[test]
     fn test_connection_dynamic() -> Result<()> {
-        let url = crate::engineio::test::engine_io_server()?;
+        let url = crate::test::engine_io_server()?;
         let socket = SocketBuilder::new(url).build()?;
         test_connection(socket)
     }
 
     #[test]
     fn test_connection_dynamic_secure() -> Result<()> {
-        let url = crate::engineio::test::engine_io_server_secure()?;
+        let url = crate::test::engine_io_server_secure()?;
         let mut builder = SocketBuilder::new(url);
         builder = builder.tls_config(crate::test::tls_connector()?);
         let socket = builder.build()?;
@@ -444,7 +439,7 @@ mod test {
 
     #[test]
     fn test_connection_polling() -> Result<()> {
-        let url = crate::engineio::test::engine_io_server()?;
+        let url = crate::test::engine_io_server()?;
         let socket = SocketBuilder::new(url).build_polling()?;
         test_connection(socket)
     }
@@ -453,10 +448,10 @@ mod test {
     fn test_connection_wss() -> Result<()> {
         let host =
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
-        let url = crate::engineio::test::engine_io_server_secure()?;
+        let url = crate::test::engine_io_server_secure()?;
 
         let mut headers = HeaderMap::new();
-        headers.insert(HOST, host.parse().unwrap());
+        headers.insert(HOST, host);
         let mut builder = SocketBuilder::new(url);
 
         builder = builder.tls_config(crate::test::tls_connector()?);
@@ -468,7 +463,7 @@ mod test {
 
     #[test]
     fn test_connection_ws() -> Result<()> {
-        let url = crate::engineio::test::engine_io_server()?;
+        let url = crate::test::engine_io_server()?;
 
         let builder = SocketBuilder::new(url);
         let socket = builder.build_websocket()?;
@@ -478,7 +473,7 @@ mod test {
 
     #[test]
     fn test_open_invariants() -> Result<()> {
-        let url = crate::engineio::test::engine_io_server()?;
+        let url = crate::test::engine_io_server()?;
         let illegal_url = "this is illegal";
 
         assert!(Url::parse(&illegal_url).is_err());
@@ -498,7 +493,7 @@ mod test {
         let mut headers = HeaderMap::new();
         let host =
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
-        headers.insert(HOST, host.parse().unwrap());
+        headers.insert(HOST, host);
 
         let _ = SocketBuilder::new(url.clone())
             .tls_config(

@@ -155,10 +155,12 @@ impl Payload {
     // see https://en.wikipedia.org/wiki/Delimiter#ASCII_delimited_text
     const SEPARATOR: char = '\x1e';
 
+    #[cfg(test)]
     pub fn new(packets: Vec<Packet>) -> Self {
         Payload(packets)
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.0.len()
     }

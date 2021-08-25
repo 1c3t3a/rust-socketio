@@ -1,5 +1,5 @@
-use crate::engineio::transport::Transport;
 use crate::error::{Error, Result};
+use crate::transport::Transport;
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
 use reqwest::{
@@ -105,7 +105,7 @@ mod test {
     use std::str::FromStr;
     #[test]
     fn polling_transport_base_url() -> Result<()> {
-        let url = crate::engineio::test::engine_io_server()?.to_string();
+        let url = crate::test::engine_io_server()?.to_string();
         let transport = PollingTransport::new(Url::from_str(&url[..]).unwrap(), None, None);
         assert_eq!(
             transport.base_url()?.to_string(),
@@ -129,7 +129,7 @@ mod test {
 
     #[test]
     fn transport_debug() -> Result<()> {
-        let mut url = crate::engineio::test::engine_io_server()?;
+        let mut url = crate::test::engine_io_server()?;
         let transport =
             PollingTransport::new(Url::from_str(&url.to_string()[..]).unwrap(), None, None);
         url.query_pairs_mut().append_pair("transport", "polling");

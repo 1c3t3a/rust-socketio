@@ -1,15 +1,14 @@
-use crate::engineio::{
-    client::Socket as EngineIoSocket,
-    client::SocketBuilder as EngineIoSocketBuilder,
-    packet::{Packet as EnginePacket, PacketId as EnginePacketId},
-};
+use crate::client::Socket as SocketIoSocket;
 use crate::error::{Error, Result};
-use crate::socketio::client::Socket as SocketIoSocket;
-use crate::socketio::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
+use crate::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
 use bytes::Bytes;
 use native_tls::TlsConnector;
 use rand::{thread_rng, Rng};
-use reqwest::header::HeaderMap;
+use rust_engineio::header::HeaderMap;
+use rust_engineio::{
+    Packet as EnginePacket, PacketId as EnginePacketId, Socket as EngineIoSocket,
+    SocketBuilder as EngineIoSocketBuilder,
+};
 use std::convert::TryFrom;
 use std::thread;
 use std::{
@@ -138,12 +137,8 @@ impl Socket {
                 // terminate
                 let iter = clone_self.iter();
                 for packet in iter {
-                    match packet {
-                        e @ Err(Error::IncompleteHttp(_))
-                        | e @ Err(Error::IncompleteResponseFromReqwest(_)) => {
-                            panic!("{}", e.unwrap_err())
-                        }
-                        _ => (),
+                    if let e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
+                        panic!("{}", e.unwrap_err())
                     }
                 }
             });
@@ -203,7 +198,9 @@ impl Socket {
         // the packet, encoded as an engine.io message packet
         let engine_packet = EnginePacket::new(EnginePacketId::Message, Bytes::from(packet));
 
-        self.engine_socket.emit(engine_packet, false)
+        self.engine_socket.emit(engine_packet, false)?;
+
+        Ok(())
     }
 
     /// Sends a single binary attachment to the server. This method
@@ -216,7 +213,9 @@ impl Socket {
         }
 
         self.engine_socket
-            .emit(EnginePacket::new(EnginePacketId::Message, attachment), true)
+            .emit(EnginePacket::new(EnginePacketId::Message, attachment), true)?;
+
+        Ok(())
     }
 
     /// Emits to certain event with given data. The data needs to be JSON,
@@ -543,7 +542,7 @@ impl Socket {
     }
 
     fn is_engineio_connected(&self) -> Result<bool> {
-        self.engine_socket.is_connected()
+        Ok(self.engine_socket.is_connected()?)
     }
 }
 
@@ -570,17 +569,18 @@ impl Debug for Socket {
 
 pub struct Iter<'a> {
     socket: &'a Socket,
-    engine_iter: crate::engineio::client::Iter<'a>,
+    engine_iter: rust_engineio::client::Iter<'a>,
 }
 
 impl<'a> Iterator for Iter<'a> {
     type Item = Result<SocketPacket>;
     fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
         loop {
-            let next: Result<EnginePacket> = self.engine_iter.next()?;
+            let next: std::result::Result<EnginePacket, rust_engineio::Error> =
+                self.engine_iter.next()?;
 
             if let Err(err) = next {
-                return Some(Err(err));
+                return Some(Err(err.into()));
             }
             let next = next.unwrap();
 
@@ -753,7 +753,7 @@ mod test {
 
     #[test]
     fn test_connection() -> Result<()> {
-        let url = crate::socketio::test::socket_io_server()?;
+        let url = crate::test::socket_io_server()?;
 
         let socket = Socket::new(url, None, None, None)?;
 
@@ -762,7 +762,7 @@ mod test {
 
     #[test]
     fn test_connection_failable() -> Result<()> {
-        let url = crate::socketio::test::socket_io_server()?;
+        let url = crate::test::socket_io_server()?;
 
         let engine_socket = EngineIoSocketBuilder::new(url.clone()).build()?;
 
@@ -774,7 +774,7 @@ mod test {
     //TODO: make all engineio code-paths reachable from engineio, (is_binary_attr is only used in socketio)
     #[test]
     fn test_connection_polling() -> Result<()> {
-        let url = crate::socketio::test::socket_io_server()?;
+        let url = crate::test::socket_io_server()?;
 
         let engine_socket = EngineIoSocketBuilder::new(url.clone()).build_polling()?;
 
@@ -785,7 +785,7 @@ mod test {
 
     #[test]
     fn test_connection_websocket() -> Result<()> {
-        let url = crate::socketio::test::socket_io_server()?;
+        let url = crate::test::socket_io_server()?;
 
         let engine_socket = EngineIoSocketBuilder::new(url.clone()).build_websocket()?;
 
