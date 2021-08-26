@@ -493,7 +493,7 @@ mod test {
         let url = crate::test::socket_io_server()?;
 
         // test socket build logic
-        let socket_builder = SocketBuilder::new(url);
+        let socket_builder = SocketBuilder::new(url.clone());
 
         let tls_connector = TlsConnector::builder()
             .use_sni(true)
@@ -509,9 +509,6 @@ mod test {
             .on("message", |payload, _| println!("{:#?}", payload))
             .connect()?;
 
-        assert!(socket.is_ok());
-
-        let socket = socket.unwrap();
         assert!(socket.emit("message", json!("Hello World")).is_ok());
 
         assert!(socket.emit("binary", Bytes::from_static(&[46, 88])).is_ok());
