@@ -49,7 +49,7 @@ macro_rules! spawn_scoped {
         .unwrap();
     };
 }
-
+mod callback;
 pub mod client;
 /// Generic header map
 pub mod header;
