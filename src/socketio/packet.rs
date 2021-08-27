@@ -21,8 +21,12 @@ pub struct Packet {
     pub packet_type: PacketId,
     pub nsp: String,
     pub data: Option<String>,
+    #[deprecated(
+        note = "This will be the 0th element in attachments (attachments: Vec<Bytes>) in 0.3.0"
+    )]
     pub binary_data: Option<Bytes>,
     pub id: Option<i32>,
+    #[deprecated(note = "This will be attachment_count (attachment_count: u8) in 0.3.0")]
     pub attachments: Option<u8>,
 }
 
