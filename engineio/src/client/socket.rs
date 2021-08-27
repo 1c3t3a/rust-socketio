@@ -247,10 +247,9 @@ impl Socket {
         self.socket.connect()
     }
 
-    /// Sends a packet to the server. This optionally handles sending of a
-    /// socketio binary attachment via the boolean attribute `is_binary_att`.
-    pub fn emit(&self, packet: Packet, is_binary_att: bool) -> Result<()> {
-        self.socket.emit(packet, is_binary_att)
+    /// Sends a packet to the server.
+    pub fn emit(&self, packet: Packet) -> Result<()> {
+        self.socket.emit(packet)
     }
 
     /// Polls for next payload
@@ -269,7 +268,7 @@ impl Socket {
             // check for the appropriate action or callback
             self.socket.handle_packet(packet.clone())?;
             match packet.packet_id {
-                PacketId::MessageBase64 => {
+                PacketId::MessageBinary => {
                     self.socket.handle_data(packet.data.clone())?;
                 }
                 PacketId::Message => {
@@ -289,7 +288,7 @@ impl Socket {
                 }
                 PacketId::Ping => {
                     self.socket.pinged()?;
-                    self.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
+                    self.emit(Packet::new(PacketId::Pong, Bytes::new()))?;
                 }
                 PacketId::Pong => {
                     // this will never happen as the pong packet is
@@ -357,13 +356,7 @@ mod test {
         let mut sut = SocketBuilder::new(url.clone()).build()?;
 
         assert!(sut
-            .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
-            .is_err());
-        assert!(sut
-            .emit(
-                Packet::new(PacketId::Message, Bytes::from_static(b"")),
-                true
-            )
+            .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")))
             .is_err());
 
         sut.connect()?;
@@ -420,7 +413,7 @@ mod test {
             Some(Packet::new(PacketId::Message, "hello client"))
         );
 
-        socket.emit(Packet::new(PacketId::Message, "respond"), false)?;
+        socket.emit(Packet::new(PacketId::Message, "respond"))?;
 
         assert_eq!(
             iter.next(),
@@ -500,7 +493,7 @@ mod test {
 
         let sut = SocketBuilder::new(url.clone()).build()?;
         let _error = sut
-            .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)
+            .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")))
             .expect_err("error");
         assert!(matches!(Error::IllegalActionBeforeOpen(), _error));
 

@@ -44,6 +44,8 @@ pub enum Error {
     InvalidInteger(#[from] ParseIntError),
     #[error("EngineIO Error")]
     IncompleteResponseFromEngineIo(#[from] rust_engineio::Error),
+    #[error("Invalid packet type while reading attachments")]
+    InvalidAttachmentPacketType(u8),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;

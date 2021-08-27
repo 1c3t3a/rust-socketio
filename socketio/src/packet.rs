@@ -22,13 +22,10 @@ pub struct Packet {
     pub packet_type: PacketId,
     pub nsp: String,
     pub data: Option<String>,
-    #[deprecated(
-        note = "This will be the 0th element in attachments (attachments: Vec<Bytes>) in 0.3.0"
-    )]
-    pub binary_data: Option<Bytes>,
     pub id: Option<i32>,
-    #[deprecated(note = "This will be attachment_count (attachment_count: u8) in 0.3.0")]
-    pub attachments: Option<u8>,
+    //TODO: Optional redundant for literal. Other packets can return 0 for count
+    pub attachment_count: Option<u8>,
+    pub attachments: Option<Vec<Bytes>>,
 }
 
 impl TryFrom<u8> for PacketId {
@@ -49,22 +46,28 @@ impl TryFrom<u8> for PacketId {
 
 impl Packet {
     /// Creates an instance.
-    pub const fn new(
+    pub(crate) const fn new(
         packet_type: PacketId,
         nsp: String,
         data: Option<String>,
-        binary_data: Option<Bytes>,
         id: Option<i32>,
-        attachments: Option<u8>,
+        attachment_count: Option<u8>,
+        attachments: Option<Vec<Bytes>>,
     ) -> Self {
         Packet {
             packet_type,
             nsp,
             data,
-            binary_data,
             id,
+            attachment_count,
             attachments,
         }
+    }
+}
+
+impl From<Packet> for Bytes {
+    fn from(packet: Packet) -> Self {
+        Bytes::from(&packet)
     }
 }
 
@@ -78,7 +81,7 @@ impl From<&Packet> for Bytes {
 
         // eventually a number of attachments, followed by '-'
         if let PacketId::BinaryAck | PacketId::BinaryEvent = packet.packet_type {
-            string.push_str(&packet.attachments.as_ref().unwrap().to_string());
+            string.push_str(&packet.attachment_count.as_ref().unwrap().to_string());
             string.push('-');
         }
 
@@ -96,18 +99,18 @@ impl From<&Packet> for Bytes {
 
         let mut buffer = BytesMut::new();
         buffer.put(string.as_ref());
-        if packet.binary_data.as_ref().is_some() {
+        if packet.attachments.as_ref().is_some() {
             // check if an event type is present
             let placeholder = if let Some(event_type) = packet.data.as_ref() {
                 format!(
                     "[{},{{\"_placeholder\":true,\"num\":{}}}]",
                     event_type,
-                    packet.attachments.unwrap() - 1,
+                    packet.attachment_count.unwrap() - 1,
                 )
             } else {
                 format!(
                     "[{{\"_placeholder\":true,\"num\":{}}}]",
-                    packet.attachments.unwrap() - 1,
+                    packet.attachment_count.unwrap() - 1,
                 )
             };
 
@@ -118,6 +121,13 @@ impl From<&Packet> for Bytes {
         }
 
         buffer.freeze()
+    }
+}
+
+impl TryFrom<Bytes> for Packet {
+    type Error = Error;
+    fn try_from(value: Bytes) -> Result<Self> {
+        Packet::try_from(&value)
     }
 }
 
@@ -134,7 +144,7 @@ impl TryFrom<&Bytes> for Packet {
         let mut i = 0;
         let packet_id = PacketId::try_from(*payload.first().ok_or(Error::IncompletePacket())?)?;
 
-        let attachments = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
+        let attachment_count = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
             let start = i + 1;
 
             while payload.get(i).ok_or(Error::IncompletePacket())? != &b'-' && i < payload.len() {
@@ -250,9 +260,9 @@ impl TryFrom<&Bytes> for Packet {
             packet_id,
             nsp.to_owned(),
             data,
-            None,
             id,
-            attachments,
+            attachment_count,
+            None,
         ))
     }
 }
@@ -338,8 +348,8 @@ mod test {
                 PacketId::Event,
                 "/admin".to_owned(),
                 Some(String::from("[\"project:delete\",123]")),
-                None,
                 Some(456),
+                None,
                 None,
             ),
             packet.unwrap()
@@ -354,8 +364,8 @@ mod test {
                 PacketId::Ack,
                 "/admin".to_owned(),
                 Some(String::from("[]")),
-                None,
                 Some(456),
+                None,
                 None,
             ),
             packet.unwrap()
@@ -387,8 +397,8 @@ mod test {
                 "/".to_owned(),
                 Some(String::from("\"hello\"")),
                 None,
-                None,
                 Some(1),
+                None,
             ),
             packet.unwrap()
         );
@@ -404,9 +414,9 @@ mod test {
                 PacketId::BinaryEvent,
                 "/admin".to_owned(),
                 Some(String::from("\"project:delete\"")),
-                None,
                 Some(456),
                 Some(1),
+                None,
             ),
             packet.unwrap()
         );
@@ -420,9 +430,9 @@ mod test {
                 PacketId::BinaryAck,
                 "/admin".to_owned(),
                 None,
-                None,
                 Some(456),
                 Some(1),
+                None,
             ),
             packet.unwrap()
         );
@@ -489,8 +499,8 @@ mod test {
             PacketId::Event,
             "/admin".to_owned(),
             Some(String::from("[\"project:delete\",123]")),
-            None,
             Some(456),
+            None,
             None,
         );
 
@@ -505,8 +515,8 @@ mod test {
             PacketId::Ack,
             "/admin".to_owned(),
             Some(String::from("[]")),
-            None,
             Some(456),
+            None,
             None,
         );
 
@@ -535,9 +545,9 @@ mod test {
             PacketId::BinaryEvent,
             "/".to_owned(),
             Some(String::from("\"hello\"")),
-            Some(Bytes::from_static(&[1, 2, 3])),
             None,
             Some(1),
+            Some(vec![Bytes::from_static(&[1, 2, 3])]),
         );
 
         assert_eq!(
@@ -551,9 +561,9 @@ mod test {
             PacketId::BinaryEvent,
             "/admin".to_owned(),
             Some(String::from("\"project:delete\"")),
-            Some(Bytes::from_static(&[1, 2, 3])),
             Some(456),
             Some(1),
+            Some(vec![Bytes::from_static(&[1, 2, 3])]),
         );
 
         assert_eq!(
@@ -567,9 +577,9 @@ mod test {
             PacketId::BinaryAck,
             "/admin".to_owned(),
             None,
-            Some(Bytes::from_static(&[3, 2, 1])),
             Some(456),
             Some(1),
+            Some(vec![Bytes::from_static(&[3, 2, 1])]),
         );
 
         assert_eq!(
