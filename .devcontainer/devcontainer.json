@@ -13,7 +13,17 @@
         // VS Code don't watch files under ./target
         "files.watcherExclude": {
             "**/target/**": true
-        }
+        }/*,
+        // If you prefer rust-analzyer to be less noisy consider these settings to your settings.json
+        "editor.semanticTokenColorCustomizations": {
+            "rules": {
+                "*.mutable": {
+                    "underline": false
+                }
+            }
+        },
+        "rust-analyzer.inlayHints.parameterHints": false
+        */
     },
 
     // Add the IDs of extensions you want installed when the container is created.
