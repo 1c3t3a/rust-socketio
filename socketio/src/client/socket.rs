@@ -357,14 +357,14 @@ impl Socket {
             .emit_with_ack(event.into(), data.into(), timeout, callback)
     }
 
-    pub fn iter(&self) -> Iter {
+    pub(crate) fn iter(&self) -> Iter {
         Iter {
             socket_iter: self.socket.iter(),
         }
     }
 }
 
-pub struct Iter<'a> {
+pub(crate) struct Iter<'a> {
     socket_iter: crate::socket::Iter<'a>,
 }
 
