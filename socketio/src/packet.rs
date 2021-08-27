@@ -23,8 +23,7 @@ pub struct Packet {
     pub nsp: String,
     pub data: Option<String>,
     pub id: Option<i32>,
-    //TODO: Optional redundant for literal. Other packets can return 0 for count
-    pub attachment_count: Option<u8>,
+    pub attachment_count: u8,
     pub attachments: Option<Vec<Bytes>>,
 }
 
@@ -51,7 +50,7 @@ impl Packet {
         nsp: String,
         data: Option<String>,
         id: Option<i32>,
-        attachment_count: Option<u8>,
+        attachment_count: u8,
         attachments: Option<Vec<Bytes>>,
     ) -> Self {
         Packet {
@@ -81,7 +80,7 @@ impl From<&Packet> for Bytes {
 
         // eventually a number of attachments, followed by '-'
         if let PacketId::BinaryAck | PacketId::BinaryEvent = packet.packet_type {
-            string.push_str(&packet.attachment_count.as_ref().unwrap().to_string());
+            string.push_str(&packet.attachment_count.to_string());
             string.push('-');
         }
 
@@ -105,12 +104,12 @@ impl From<&Packet> for Bytes {
                 format!(
                     "[{},{{\"_placeholder\":true,\"num\":{}}}]",
                     event_type,
-                    packet.attachment_count.unwrap() - 1,
+                    packet.attachment_count - 1,
                 )
             } else {
                 format!(
                     "[{{\"_placeholder\":true,\"num\":{}}}]",
-                    packet.attachment_count.unwrap() - 1,
+                    packet.attachment_count - 1,
                 )
             };
 
@@ -150,17 +149,15 @@ impl TryFrom<&Bytes> for Packet {
             while payload.get(i).ok_or(Error::IncompletePacket())? != &b'-' && i < payload.len() {
                 i += 1;
             }
-            Some(
-                payload
-                    .iter()
-                    .skip(start)
-                    .take(i - start)
-                    .map(|byte| *byte as char)
-                    .collect::<String>()
-                    .parse::<u8>()?,
-            )
+            payload
+                .iter()
+                .skip(start)
+                .take(i - start)
+                .map(|byte| *byte as char)
+                .collect::<String>()
+                .parse::<u8>()?
         } else {
-            None
+            0
         };
 
         let nsp: &str = if payload.get(i + 1).ok_or(Error::IncompletePacket())? == &b'/' {
@@ -285,7 +282,7 @@ mod test {
                 "/".to_owned(),
                 Some(String::from("{\"token\":\"123\"}")),
                 None,
-                None,
+                0,
                 None,
             ),
             packet.unwrap()
@@ -301,7 +298,7 @@ mod test {
                 "/admin".to_owned(),
                 Some(String::from("{\"token\":\"123\"}")),
                 None,
-                None,
+                0,
                 None,
             ),
             packet.unwrap()
@@ -317,7 +314,7 @@ mod test {
                 "/admin".to_owned(),
                 None,
                 None,
-                None,
+                0,
                 None,
             ),
             packet.unwrap()
@@ -333,7 +330,7 @@ mod test {
                 "/".to_owned(),
                 Some(String::from("[\"hello\",1]")),
                 None,
-                None,
+                0,
                 None,
             ),
             packet.unwrap()
@@ -349,7 +346,7 @@ mod test {
                 "/admin".to_owned(),
                 Some(String::from("[\"project:delete\",123]")),
                 Some(456),
-                None,
+                0,
                 None,
             ),
             packet.unwrap()
@@ -365,7 +362,7 @@ mod test {
                 "/admin".to_owned(),
                 Some(String::from("[]")),
                 Some(456),
-                None,
+                0,
                 None,
             ),
             packet.unwrap()
@@ -381,7 +378,7 @@ mod test {
                 "/admin".to_owned(),
                 Some(String::from("{\"message\":\"Not authorized\"}")),
                 None,
-                None,
+                0,
                 None,
             ),
             packet.unwrap()
@@ -397,7 +394,7 @@ mod test {
                 "/".to_owned(),
                 Some(String::from("\"hello\"")),
                 None,
-                Some(1),
+                1,
                 None,
             ),
             packet.unwrap()
@@ -415,7 +412,7 @@ mod test {
                 "/admin".to_owned(),
                 Some(String::from("\"project:delete\"")),
                 Some(456),
-                Some(1),
+                1,
                 None,
             ),
             packet.unwrap()
@@ -431,7 +428,7 @@ mod test {
                 "/admin".to_owned(),
                 None,
                 Some(456),
-                Some(1),
+                1,
                 None,
             ),
             packet.unwrap()
@@ -447,7 +444,7 @@ mod test {
             "/".to_owned(),
             Some(String::from("{\"token\":\"123\"}")),
             None,
-            None,
+            0,
             None,
         );
 
@@ -461,7 +458,7 @@ mod test {
             "/admin".to_owned(),
             Some(String::from("{\"token\":\"123\"}")),
             None,
-            None,
+            0,
             None,
         );
 
@@ -475,7 +472,7 @@ mod test {
             "/admin".to_owned(),
             None,
             None,
-            None,
+            0,
             None,
         );
 
@@ -486,7 +483,7 @@ mod test {
             "/".to_owned(),
             Some(String::from("[\"hello\",1]")),
             None,
-            None,
+            0,
             None,
         );
 
@@ -500,7 +497,7 @@ mod test {
             "/admin".to_owned(),
             Some(String::from("[\"project:delete\",123]")),
             Some(456),
-            None,
+            0,
             None,
         );
 
@@ -516,7 +513,7 @@ mod test {
             "/admin".to_owned(),
             Some(String::from("[]")),
             Some(456),
-            None,
+            0,
             None,
         );
 
@@ -530,7 +527,7 @@ mod test {
             "/admin".to_owned(),
             Some(String::from("{\"message\":\"Not authorized\"}")),
             None,
-            None,
+            0,
             None,
         );
 
@@ -546,7 +543,7 @@ mod test {
             "/".to_owned(),
             Some(String::from("\"hello\"")),
             None,
-            Some(1),
+            1,
             Some(vec![Bytes::from_static(&[1, 2, 3])]),
         );
 
@@ -562,7 +559,7 @@ mod test {
             "/admin".to_owned(),
             Some(String::from("\"project:delete\"")),
             Some(456),
-            Some(1),
+            1,
             Some(vec![Bytes::from_static(&[1, 2, 3])]),
         );
 
@@ -578,7 +575,7 @@ mod test {
             "/admin".to_owned(),
             None,
             Some(456),
-            Some(1),
+            1,
             Some(vec![Bytes::from_static(&[3, 2, 1])]),
         );
 

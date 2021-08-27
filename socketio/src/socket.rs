@@ -150,7 +150,7 @@ impl Socket {
                 .to_owned(),
             None,
             None,
-            None,
+            0,
             None,
         );
 
@@ -176,7 +176,7 @@ impl Socket {
                 .to_owned(),
             None,
             None,
-            None,
+            0,
             None,
         );
 
@@ -237,7 +237,7 @@ impl Socket {
                 nsp.to_owned(),
                 Some(serde_json::Value::String(event.into()).to_string()),
                 id,
-                Some(1),
+                1,
                 Some(vec![bin_data]),
             )),
             Payload::String(str_data) => {
@@ -250,7 +250,7 @@ impl Socket {
                     nsp.to_owned(),
                     Some(payload),
                     id,
-                    None,
+                    0,
                     None,
                 ))
             }
@@ -536,44 +536,40 @@ impl<'a> Iterator for Iter<'a> {
                 //TODO: refactor me
                 EnginePacketId::MessageBinary | EnginePacketId::Message => {
                     let socket_packet = SocketPacket::try_from(&next.data);
-                    if let Ok(mut socket_packet) = socket_packet {
-                        // Only handle attachments if there are any
-                        if let Some(attachments) = socket_packet.attachment_count {
-                            let mut attachments_left = attachments;
-                            // Make sure there are actual attachments
-                            if attachments_left > 0 {
-                                let mut attachments = Vec::new();
-                                while attachments_left > 0 {
-                                    let next = self.engine_iter.next()?;
-                                    if let Ok(packet) = next {
-                                        match packet.packet_id {
-                                            EnginePacketId::MessageBinary
-                                            | EnginePacketId::Message => {
-                                                attachments.push(packet.data);
-                                                attachments_left = attachments_left - 1;
-                                            }
-                                            _ => {
-                                                return Some(Err(
-                                                    Error::InvalidAttachmentPacketType(
-                                                        packet.packet_id.into(),
-                                                    ),
-                                                ));
-                                            }
-                                        }
-                                    } else if let Err(err) = next {
-                                        return Some(Err(err.into()));
-                                    }
+                    if let Err(err) = socket_packet {
+                        return Some(Err(err));
+                    }
+                    // SAFETY: checked above to see if it was Err
+                    let mut socket_packet = socket_packet.unwrap();
+                    // Only handle attachments if there are any
+                    if socket_packet.attachment_count > 0 {
+                        let mut attachments_left = socket_packet.attachment_count;
+                        let mut attachments = Vec::new();
+                        while attachments_left > 0 {
+                            let next = self.engine_iter.next()?;
+                            if let Err(err) = next {
+                                return Some(Err(err.into()));
+                            }
+                            // SAFETY: Checked to see if it was error above.
+                            let packet = next.unwrap();
+                            match packet.packet_id {
+                                EnginePacketId::MessageBinary | EnginePacketId::Message => {
+                                    attachments.push(packet.data);
+                                    attachments_left = attachments_left - 1;
                                 }
-                                socket_packet.attachments = Some(attachments);
+                                _ => {
+                                    return Some(Err(Error::InvalidAttachmentPacketType(
+                                        packet.packet_id.into(),
+                                    )));
+                                }
                             }
                         }
+                        socket_packet.attachments = Some(attachments);
+                    }
 
-                        let packet = self.socket.handle_new_packet(socket_packet);
-                        if let Some(packet) = packet {
-                            return Some(Ok(packet));
-                        }
-                    } else if let Err(err) = socket_packet {
-                        return Some(Err(err));
+                    let packet = self.socket.handle_new_packet(socket_packet);
+                    if let Some(packet) = packet {
+                        return Some(Ok(packet));
                     }
                 }
                 EnginePacketId::Open => {
@@ -654,7 +650,7 @@ mod test {
                 "/".to_owned(),
                 Some("[\"Hello from the message event!\"]".to_owned()),
                 None,
-                None,
+                0,
                 None,
             )
         );
@@ -671,7 +667,7 @@ mod test {
                 "/".to_owned(),
                 Some("[\"test\",\"Hello from the test event!\"]".to_owned()),
                 None,
-                None,
+                0,
                 None
             )
         );
@@ -687,7 +683,7 @@ mod test {
                 "/".to_owned(),
                 None,
                 None,
-                Some(1),
+                1,
                 Some(vec![Bytes::from_static(&[4, 5, 6])]),
             )
         );
@@ -703,7 +699,7 @@ mod test {
                 "/".to_owned(),
                 Some("\"test\"".to_owned()),
                 None,
-                Some(1),
+                1,
                 Some(vec![Bytes::from_static(&[1, 2, 3])]),
             )
         );
