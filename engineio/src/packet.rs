@@ -17,7 +17,7 @@ pub enum PacketId {
     Pong,
     Message,
     // A type of message that is base64 encoded
-    MessageBase64,
+    MessageBinary,
     Upgrade,
     Noop,
 }
@@ -25,7 +25,7 @@ pub enum PacketId {
 impl From<PacketId> for String {
     fn from(packet: PacketId) -> Self {
         match packet {
-            PacketId::MessageBase64 => "b".to_owned(),
+            PacketId::MessageBinary => "b".to_owned(),
             _ => (u8::from(packet)).to_string(),
         }
     }
@@ -39,7 +39,7 @@ impl From<PacketId> for u8 {
             PacketId::Ping => 2,
             PacketId::Pong => 3,
             PacketId::Message => 4,
-            PacketId::MessageBase64 => 4,
+            PacketId::MessageBinary => 4,
             PacketId::Upgrade => 5,
             PacketId::Noop => 6,
         }
@@ -112,7 +112,7 @@ impl TryFrom<Bytes> for Packet {
 
         // only 'messages' packets could be encoded
         let packet_id = if is_base64 {
-            PacketId::MessageBase64
+            PacketId::MessageBinary
         } else {
             (*bytes.get(0).ok_or(Error::IncompletePacket())? as u8).try_into()?
         };
@@ -139,7 +139,7 @@ impl From<Packet> for Bytes {
     fn from(packet: Packet) -> Self {
         let mut result = BytesMut::with_capacity(packet.data.len() + 1);
         result.put(String::from(packet.packet_id).as_bytes());
-        if packet.packet_id == PacketId::MessageBase64 {
+        if packet.packet_id == PacketId::MessageBinary {
             result.extend(encode(packet.data).into_bytes());
         } else {
             result.put(packet.data);
@@ -280,7 +280,7 @@ mod tests {
         let data = Bytes::from_static(b"bSGVsbG8=");
         let packet = Packet::try_from(data.clone()).unwrap();
 
-        assert_eq!(packet.packet_id, PacketId::MessageBase64);
+        assert_eq!(packet.packet_id, PacketId::MessageBinary);
         assert_eq!(packet.data, Bytes::from_static(b"Hello"));
 
         assert_eq!(Bytes::from(packet), data);
@@ -308,11 +308,11 @@ mod tests {
         let packets = Payload::try_from(data.clone()).unwrap();
 
         assert!(packets.len() == 3);
-        assert_eq!(packets[0].packet_id, PacketId::MessageBase64);
+        assert_eq!(packets[0].packet_id, PacketId::MessageBinary);
         assert_eq!(packets[0].data, Bytes::from_static(b"Hello"));
-        assert_eq!(packets[1].packet_id, PacketId::MessageBase64);
+        assert_eq!(packets[1].packet_id, PacketId::MessageBinary);
         assert_eq!(packets[1].data, Bytes::from_static(b"HelloWorld"));
-        assert_eq!(packets[2].packet_id, PacketId::MessageBase64);
+        assert_eq!(packets[2].packet_id, PacketId::MessageBinary);
         assert_eq!(packets[2].data, Bytes::from_static(b"Hello"));
 
         assert_eq!(Bytes::try_from(packets).unwrap(), data);
