@@ -347,7 +347,7 @@ mod test {
         let mut sut = SocketBuilder::new(url.clone()).build()?;
 
         assert!(sut
-            .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")))
+            .emit(Packet::new(PacketId::Close, Bytes::new()))
             .is_err());
 
         sut.connect()?;
@@ -478,7 +478,7 @@ mod test {
 
         let sut = SocketBuilder::new(url.clone()).build()?;
         let _error = sut
-            .emit(Packet::new(PacketId::Close, Bytes::from_static(b"")))
+            .emit(Packet::new(PacketId::Close, Bytes::new()))
             .expect_err("error");
         assert!(matches!(Error::IllegalActionBeforeOpen(), _error));
 
