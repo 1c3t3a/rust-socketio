@@ -27,6 +27,13 @@ pub struct SocketBuilder {
 
 impl SocketBuilder {
     pub fn new(url: Url) -> Self {
+        let mut url = url;
+        url.query_pairs_mut().append_pair("EIO", "4");
+
+        // No path add engine.io
+        if url.path() == "/" {
+            url.set_path("/engine.io/");
+        }
         SocketBuilder {
             url,
             headers: None,
@@ -45,26 +52,13 @@ impl SocketBuilder {
         self
     }
 
-    fn handshake(&mut self) -> Result<()> {
+    fn handshake_with_transport<T: Transport>(&mut self, transport: &T) -> Result<()> {
         // No need to handshake twice
         if self.handshake.is_some() {
             return Ok(());
         }
 
         let mut url = self.url.clone();
-        url.query_pairs_mut().append_pair("EIO", "4");
-
-        // No path add engine.io
-        if url.path() == "/" {
-            url.set_path("/engine.io/");
-        }
-
-        // Start with polling transport
-        let transport = PollingTransport::new(
-            url.clone(),
-            self.tls_config.clone(),
-            self.headers.clone().map(|v| v.try_into().unwrap()),
-        );
 
         let handshake: HandshakePacket = Packet::try_from(transport.poll()?)?.try_into()?;
 
@@ -78,12 +72,28 @@ impl SocketBuilder {
         Ok(())
     }
 
+    fn handshake(&mut self) -> Result<()> {
+        if self.handshake.is_some() {
+            return Ok(());
+        }
+
+        // Start with polling transport
+        let transport = PollingTransport::new(
+            self.url.clone(),
+            self.tls_config.clone(),
+            self.headers.clone().map(|v| v.try_into().unwrap()),
+        );
+
+        self.handshake_with_transport(&transport)
+    }
+
     /// Build websocket if allowed, if not fall back to polling
     pub fn build(mut self) -> Result<Socket> {
+        self.handshake()?;
+
         if self.websocket_upgrade()? {
             match self.url.scheme() {
-                "http" => self.build_websocket(),
-                "https" => self.build_websocket_secure(),
+                "http" | "https" => self.build_websocket_with_upgrade(),
                 _ => self.build_polling(),
             }
         } else {
@@ -108,56 +118,57 @@ impl SocketBuilder {
         })
     }
 
-    /// Build socket with insecure websocket transport
-    pub fn build_websocket(mut self) -> Result<Socket> {
+    /// Build socket with a polling transport then upgrade to websocket transport
+    pub fn build_websocket_with_upgrade(mut self) -> Result<Socket> {
         self.handshake()?;
 
-        // SAFETY: Already a Url
-        let url = websocket::client::Url::parse(&self.url.to_string())?;
-
         if self.websocket_upgrade()? {
-            if url.scheme() == "http" {
-                let transport = WebsocketTransport::new(
-                    url,
-                    self.headers.map(|headers| headers.try_into().unwrap()),
-                );
-                transport.upgrade()?;
-                // SAFETY: handshake function called previously.
-                Ok(Socket {
-                    socket: InnerSocket::new(transport.into(), self.handshake.unwrap()),
-                })
-            } else {
-                Err(Error::InvalidUrlScheme(url.scheme().to_string()))
-            }
+            self.build_websocket()
         } else {
             Err(Error::IllegalWebsocketUpgrade())
         }
     }
 
-    /// Build socket with secure websocket transport
-    pub fn build_websocket_secure(mut self) -> Result<Socket> {
-        self.handshake()?;
-
+    /// Build socket with only a websocket transport
+    pub fn build_websocket(mut self) -> Result<Socket> {
         // SAFETY: Already a Url
         let url = websocket::client::Url::parse(&self.url.to_string())?;
 
-        if self.websocket_upgrade()? {
-            if url.scheme() == "https" {
-                let transport = WebsocketSecureTransport::new(
-                    url,
-                    self.tls_config.clone(),
-                    self.headers.map(|v| v.try_into().unwrap()),
-                );
+        if url.scheme() == "http" {
+            let transport = WebsocketTransport::new(
+                url,
+                self.headers
+                    .clone()
+                    .map(|headers| headers.try_into().unwrap()),
+            );
+            if self.handshake.is_some() {
                 transport.upgrade()?;
-                // SAFETY: handshake function called previously.
-                Ok(Socket {
-                    socket: InnerSocket::new(transport.into(), self.handshake.unwrap()),
-                })
             } else {
-                Err(Error::InvalidUrlScheme(url.scheme().to_string()))
+                self.handshake_with_transport(&transport)?;
             }
+            // NOTE: Although self.url contains the sid, it does not propagate to the transport
+            // SAFETY: handshake function called previously.
+            Ok(Socket {
+                socket: InnerSocket::new(transport.into(), self.handshake.unwrap()),
+            })
+        } else if url.scheme() == "https" {
+            let transport = WebsocketSecureTransport::new(
+                url,
+                self.tls_config.clone(),
+                self.headers.clone().map(|v| v.try_into().unwrap()),
+            );
+            if self.handshake.is_some() {
+                transport.upgrade()?;
+            } else {
+                self.handshake_with_transport(&transport)?;
+            }
+            // NOTE: Although self.url contains the sid, it does not propagate to the transport
+            // SAFETY: handshake function called previously.
+            Ok(Socket {
+                socket: InnerSocket::new(transport.into(), self.handshake.unwrap()),
+            })
         } else {
-            Err(Error::IllegalWebsocketUpgrade())
+            Err(Error::InvalidUrlScheme(url.scheme().to_string()))
         }
     }
 
@@ -174,8 +185,6 @@ impl SocketBuilder {
 
     /// Checks the handshake to see if websocket upgrades are allowed
     fn websocket_upgrade(&mut self) -> Result<bool> {
-        // check if we could upgrade to websockets
-        self.handshake()?;
         // SAFETY: handshake set by above function.
         Ok(self
             .handshake
@@ -456,7 +465,11 @@ mod test {
 
         builder = builder.tls_config(crate::test::tls_connector()?);
         builder = builder.headers(headers);
-        let socket = builder.build_websocket_secure()?;
+        let socket = builder.clone().build_websocket_with_upgrade()?;
+
+        test_connection(socket)?;
+
+        let socket = builder.build_websocket()?;
 
         test_connection(socket)
     }
@@ -466,8 +479,10 @@ mod test {
         let url = crate::test::engine_io_server()?;
 
         let builder = SocketBuilder::new(url);
-        let socket = builder.build_websocket()?;
+        let socket = builder.clone().build_websocket()?;
+        test_connection(socket)?;
 
+        let socket = builder.build_websocket_with_upgrade()?;
         test_connection(socket)
     }
 
