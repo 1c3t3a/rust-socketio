@@ -157,7 +157,7 @@ impl Socket {
         // store the connected value as true, if the connection process fails
         // later, the value will be updated
         self.connected.store(true, Ordering::Release);
-        self.send(&open_packet)
+        self.send(open_packet)
     }
 
     /// Disconnects from the server by sending a socket.io `Disconnect` packet. This results
@@ -180,25 +180,24 @@ impl Socket {
             None,
         );
 
-        self.send(&disconnect_packet)?;
+        self.send(disconnect_packet)?;
         self.connected.store(false, Ordering::Release);
         Ok(())
     }
 
     /// Sends a `socket.io` packet to the server using the `engine.io` client.
-    pub fn send(&self, packet: &SocketPacket) -> Result<()> {
+    pub fn send(&self, packet: SocketPacket) -> Result<()> {
         if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
             return Err(Error::IllegalActionBeforeOpen());
         }
 
         // the packet, encoded as an engine.io message packet
-        let engine_packet = EnginePacket::new(EnginePacketId::Message, Bytes::from(packet));
+        let engine_packet = EnginePacket::new(EnginePacketId::Message, Bytes::from(&packet));
         self.engine_socket.emit(engine_packet)?;
 
-        if let Some(ref attachments) = packet.attachments {
+        if let Some(attachments) = packet.attachments {
             for attachment in attachments {
-                let engine_packet =
-                    EnginePacket::new(EnginePacketId::MessageBinary, attachment.clone());
+                let engine_packet = EnginePacket::new(EnginePacketId::MessageBinary, attachment);
                 self.engine_socket.emit(engine_packet)?;
             }
         }
@@ -214,7 +213,7 @@ impl Socket {
 
         let socket_packet = self.build_packet_for_payload(data, event, nsp, None)?;
 
-        self.send(&socket_packet)
+        self.send(socket_packet)
     }
 
     /// Returns a packet for a payload, could be used for bot binary and non binary
@@ -285,7 +284,7 @@ impl Socket {
         // add the ack to the tuple of outstanding acks
         self.outstanding_acks.write()?.push(ack);
 
-        self.send(&socket_packet)?;
+        self.send(socket_packet)?;
         Ok(())
     }
 
