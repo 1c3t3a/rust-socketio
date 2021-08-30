@@ -45,6 +45,7 @@ pub struct Socket {
     engine_socket: Arc<EngineIoSocket>,
     host: Arc<Url>,
     connected: Arc<AtomicBool>,
+    // TODO: Move this to client/socket.rs
     on: Arc<Vec<EventCallback>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
     // namespace, for multiplexing messages
