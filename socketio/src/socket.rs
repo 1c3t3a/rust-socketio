@@ -300,7 +300,7 @@ impl Socket {
     /// This method is later registered as the callback for the `on_data` event of the
     /// engineio client.
     #[inline]
-    fn handle_new_packet(&self, socket_packet: SocketPacket) -> Option<SocketPacket> {
+    fn handle_new_socketio_packet(&self, socket_packet: SocketPacket) -> Option<SocketPacket> {
         let output = socket_packet.clone();
 
         let default = String::from("/");
@@ -350,6 +350,50 @@ impl Socket {
             }
         }
         Some(output)
+    }
+
+    /// Handles new incoming engineio packets
+    pub fn handle_new_engineio_packet(
+        &self,
+        engine_iter: &mut rust_engineio::client::Iter,
+        packet: EnginePacket,
+    ) -> Option<Result<SocketPacket>> {
+        let socket_packet = SocketPacket::try_from(&packet.data);
+        if let Err(err) = socket_packet {
+            return Some(Err(err));
+        }
+        // SAFETY: checked above to see if it was Err
+        let mut socket_packet = socket_packet.unwrap();
+        // Only handle attachments if there are any
+        if socket_packet.attachment_count > 0 {
+            let mut attachments_left = socket_packet.attachment_count;
+            let mut attachments = Vec::new();
+            while attachments_left > 0 {
+                let next = engine_iter.next()?;
+                match next {
+                    Err(err) => return Some(Err(err.into())),
+                    Ok(packet) => match packet.packet_id {
+                        EnginePacketId::MessageBinary | EnginePacketId::Message => {
+                            attachments.push(packet.data);
+                            attachments_left = attachments_left - 1;
+                        }
+                        _ => {
+                            return Some(Err(Error::InvalidAttachmentPacketType(
+                                packet.packet_id.into(),
+                            )));
+                        }
+                    },
+                }
+            }
+            socket_packet.attachments = Some(attachments);
+        }
+
+        let packet = self.handle_new_socketio_packet(socket_packet);
+        if let Some(packet) = packet {
+            return Some(Ok(packet));
+        } else {
+            return None;
+        }
     }
 
     /// Handles the incoming acks and classifies what callbacks to call and how.
@@ -533,41 +577,13 @@ impl<'a> Iterator for Iter<'a> {
             let next = next.unwrap();
 
             match next.packet_id {
-                //TODO: refactor me
                 EnginePacketId::MessageBinary | EnginePacketId::Message => {
-                    let socket_packet = SocketPacket::try_from(&next.data);
-                    if let Err(err) = socket_packet {
-                        return Some(Err(err));
-                    }
-                    // SAFETY: checked above to see if it was Err
-                    let mut socket_packet = socket_packet.unwrap();
-                    // Only handle attachments if there are any
-                    if socket_packet.attachment_count > 0 {
-                        let mut attachments_left = socket_packet.attachment_count;
-                        let mut attachments = Vec::new();
-                        while attachments_left > 0 {
-                            let next = self.engine_iter.next()?;
-                            match next {
-                                Err(err) => return Some(Err(err.into())),
-                                Ok(packet) => match packet.packet_id {
-                                    EnginePacketId::MessageBinary | EnginePacketId::Message => {
-                                        attachments.push(packet.data);
-                                        attachments_left = attachments_left - 1;
-                                    }
-                                    _ => {
-                                        return Some(Err(Error::InvalidAttachmentPacketType(
-                                            packet.packet_id.into(),
-                                        )));
-                                    }
-                                },
-                            }
-                        }
-                        socket_packet.attachments = Some(attachments);
-                    }
-
-                    let packet = self.socket.handle_new_packet(socket_packet);
-                    if let Some(packet) = packet {
-                        return Some(Ok(packet));
+                    match self
+                        .socket
+                        .handle_new_engineio_packet(&mut self.engine_iter, next)
+                    {
+                        None => {}
+                        Some(packet) => return Some(packet),
                     }
                 }
                 EnginePacketId::Open => {
