@@ -546,21 +546,19 @@ impl<'a> Iterator for Iter<'a> {
                         let mut attachments = Vec::new();
                         while attachments_left > 0 {
                             let next = self.engine_iter.next()?;
-                            if let Err(err) = next {
-                                return Some(Err(err.into()));
-                            }
-                            // SAFETY: Checked to see if it was error above.
-                            let packet = next.unwrap();
-                            match packet.packet_id {
-                                EnginePacketId::MessageBinary | EnginePacketId::Message => {
-                                    attachments.push(packet.data);
-                                    attachments_left = attachments_left - 1;
-                                }
-                                _ => {
-                                    return Some(Err(Error::InvalidAttachmentPacketType(
-                                        packet.packet_id.into(),
-                                    )));
-                                }
+                            match next {
+                                Err(err) => return Some(Err(err.into())),
+                                Ok(packet) => match packet.packet_id {
+                                    EnginePacketId::MessageBinary | EnginePacketId::Message => {
+                                        attachments.push(packet.data);
+                                        attachments_left = attachments_left - 1;
+                                    }
+                                    _ => {
+                                        return Some(Err(Error::InvalidAttachmentPacketType(
+                                            packet.packet_id.into(),
+                                        )));
+                                    }
+                                },
                             }
                         }
                         socket_packet.attachments = Some(attachments);
