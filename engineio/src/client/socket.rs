@@ -110,7 +110,7 @@ impl SocketBuilder {
         self
     }
 
-    /// Preforms the handshake
+    /// Performs the handshake
     fn handshake_with_transport<T: Transport>(&mut self, transport: &T) -> Result<()> {
         // No need to handshake twice
         if self.handshake.is_some() {
