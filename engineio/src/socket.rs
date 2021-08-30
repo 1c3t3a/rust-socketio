@@ -117,7 +117,7 @@ impl Socket {
     }
 
     pub fn close(&self) -> Result<()> {
-        self.emit(Packet::new(PacketId::Close, Bytes::from_static(b"")))?;
+        self.emit(Packet::new(PacketId::Close, Bytes::new()))?;
         self.connected.store(false, Ordering::Release);
         Ok(())
     }
