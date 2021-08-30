@@ -433,7 +433,7 @@ mod test {
         );
         assert!(ack.is_ok());
 
-        sleep(Duration::from_secs(3));
+        sleep(Duration::from_secs(10));
 
         assert!(socket.disconnect().is_ok());
 
