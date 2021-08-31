@@ -2,33 +2,40 @@
 // https://github.com/microsoft/vscode-dev-containers/tree/v0.187.0/containers/rust
 {
     "name": "Rust",
-    "dockerComposeFile": ["./docker-compose.yaml"],
+    "dockerComposeFile": [
+        "./docker-compose.yaml"
+    ],
     "service": "rust-client",
     "workspaceFolder": "/workspace/rust-socketio",
     "shutdownAction": "stopCompose",
-
     // Set *default* container specific settings.json values on container create.
-    "settings": { 
+    "settings": {
         "lldb.executable": "/usr/bin/lldb",
         // VS Code don't watch files under ./target
         "files.watcherExclude": {
             "**/target/**": true
-        }
+        } /*,
+        // If you prefer rust-analzyer to be less noisy consider these settings to your settings.json
+        "editor.semanticTokenColorCustomizations": {
+            "rules": {
+                "*.mutable": {
+                    "underline": false
+                }
+            }
+        },
+        "rust-analyzer.inlayHints.parameterHints": false
+        */
     },
-
     // Add the IDs of extensions you want installed when the container is created.
     "extensions": [
-        "rust-lang.rust",
+        "matklad.rust-analyzer",
         "bungcip.better-toml",
         "vadimcn.vscode-lldb",
-        "mutantdino.resourcemonitor",
         "eamodio.gitlens",
         "streetsidesoftware.code-spell-checker"
     ],
-
     // Use 'forwardPorts' to make a list of ports inside the container available locally.
     // "forwardPorts": [],
-
     // Comment out connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
     "remoteUser": "vscode"
 }
