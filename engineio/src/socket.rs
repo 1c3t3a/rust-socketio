@@ -117,7 +117,7 @@ impl Socket {
     }
 
     pub fn close(&self) -> Result<()> {
-        self.emit(Packet::new(PacketId::Close, Bytes::from_static(b"")), false)?;
+        self.emit(Packet::new(PacketId::Close, Bytes::new()))?;
         self.connected.store(false, Ordering::Release);
         Ok(())
     }
@@ -136,30 +136,30 @@ impl Socket {
         *self.last_ping.lock()? = Instant::now();
 
         // emit a pong packet to keep trigger the ping cycle on the server
-        self.emit(Packet::new(PacketId::Pong, Bytes::new()), false)?;
+        self.emit(Packet::new(PacketId::Pong, Bytes::new()))?;
 
         Ok(())
     }
 
-    /// Sends a packet to the server. This optionally handles sending of a
-    /// socketio binary attachment via the boolean attribute `is_binary_att`.
-    //TODO: Add a new PacketId to send raw binary so is_binary_att can be removed.
-    pub fn emit(&self, packet: Packet, is_binary_att: bool) -> Result<()> {
+    /// Sends a packet to the server.
+    pub fn emit(&self, packet: Packet) -> Result<()> {
         if !self.connected.load(Ordering::Acquire) {
             let error = Error::IllegalActionBeforeOpen();
             self.call_error_callback(format!("{}", error))?;
             return Err(error);
         }
 
+        let is_binary = packet.packet_id == PacketId::MessageBinary;
+
         // send a post request with the encoded payload as body
         // if this is a binary attachment, then send the raw bytes
-        let data: Bytes = if is_binary_att {
+        let data: Bytes = if is_binary {
             packet.data
         } else {
             packet.into()
         };
 
-        if let Err(error) = self.transport.as_transport().emit(data, is_binary_att) {
+        if let Err(error) = self.transport.as_transport().emit(data, is_binary) {
             self.call_error_callback(error.to_string())?;
             return Err(error);
         }

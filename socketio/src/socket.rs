@@ -47,9 +47,6 @@ pub struct Socket {
     connected: Arc<AtomicBool>,
     on: Arc<Vec<EventCallback>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
-    // used to detect unfinished binary events as, as the attachments
-    // gets send in a separate packet
-    unfinished_packet: Arc<RwLock<Option<SocketPacket>>>,
     // namespace, for multiplexing messages
     pub(crate) nsp: Arc<Option<String>>,
 }
@@ -100,7 +97,6 @@ impl Socket {
             connected: Arc::new(AtomicBool::default()),
             on: Arc::new(Vec::new()),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
-            unfinished_packet: Arc::new(RwLock::new(None)),
             nsp: Arc::new(nsp),
         })
     }
@@ -154,14 +150,14 @@ impl Socket {
                 .to_owned(),
             None,
             None,
-            None,
+            0,
             None,
         );
 
         // store the connected value as true, if the connection process fails
         // later, the value will be updated
         self.connected.store(true, Ordering::Release);
-        self.send(&open_packet)
+        self.send(open_packet)
     }
 
     /// Disconnects from the server by sending a socket.io `Disconnect` packet. This results
@@ -180,40 +176,31 @@ impl Socket {
                 .to_owned(),
             None,
             None,
-            None,
+            0,
             None,
         );
 
-        self.send(&disconnect_packet)?;
+        self.send(disconnect_packet)?;
         self.connected.store(false, Ordering::Release);
         Ok(())
     }
 
     /// Sends a `socket.io` packet to the server using the `engine.io` client.
-    pub fn send(&self, packet: &SocketPacket) -> Result<()> {
+    pub fn send(&self, packet: SocketPacket) -> Result<()> {
         if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
             return Err(Error::IllegalActionBeforeOpen());
         }
 
         // the packet, encoded as an engine.io message packet
-        let engine_packet = EnginePacket::new(EnginePacketId::Message, Bytes::from(packet));
+        let engine_packet = EnginePacket::new(EnginePacketId::Message, Bytes::from(&packet));
+        self.engine_socket.emit(engine_packet)?;
 
-        self.engine_socket.emit(engine_packet, false)?;
-
-        Ok(())
-    }
-
-    /// Sends a single binary attachment to the server. This method
-    /// should only be called if a `BinaryEvent` or `BinaryAck` was
-    /// send to the server mentioning this attachment in it's
-    /// `attachments` field.
-    fn send_binary_attachment(&self, attachment: Bytes) -> Result<()> {
-        if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
-            return Err(Error::IllegalActionBeforeOpen());
+        if let Some(attachments) = packet.attachments {
+            for attachment in attachments {
+                let engine_packet = EnginePacket::new(EnginePacketId::MessageBinary, attachment);
+                self.engine_socket.emit(engine_packet)?;
+            }
         }
-
-        self.engine_socket
-            .emit(EnginePacket::new(EnginePacketId::Message, attachment), true)?;
 
         Ok(())
     }
@@ -224,19 +211,9 @@ impl Socket {
         let default = String::from("/");
         let nsp = self.nsp.as_ref().as_ref().unwrap_or(&default);
 
-        let is_string_packet = matches!(&data, &Payload::String(_));
         let socket_packet = self.build_packet_for_payload(data, event, nsp, None)?;
 
-        if is_string_packet {
-            self.send(&socket_packet)
-        } else {
-            // first send the raw packet announcing the attachment
-            self.send(&socket_packet)?;
-
-            // then send the attachment
-            // unwrapping here is safe as this is a binary payload
-            self.send_binary_attachment(socket_packet.binary_data.unwrap())
-        }
+        self.send(socket_packet)
     }
 
     /// Returns a packet for a payload, could be used for bot binary and non binary
@@ -258,9 +235,9 @@ impl Socket {
                 },
                 nsp.to_owned(),
                 Some(serde_json::Value::String(event.into()).to_string()),
-                Some(bin_data),
                 id,
-                Some(1),
+                1,
+                Some(vec![bin_data]),
             )),
             Payload::String(str_data) => {
                 serde_json::from_str::<serde_json::Value>(&str_data)?;
@@ -271,8 +248,8 @@ impl Socket {
                     SocketPacketId::Event,
                     nsp.to_owned(),
                     Some(payload),
-                    None,
                     id,
+                    0,
                     None,
                 ))
             }
@@ -307,7 +284,7 @@ impl Socket {
         // add the ack to the tuple of outstanding acks
         self.outstanding_acks.write()?.push(ack);
 
-        self.send(&socket_packet)?;
+        self.send(socket_packet)?;
         Ok(())
     }
 
@@ -322,89 +299,99 @@ impl Socket {
     /// This method is later registered as the callback for the `on_data` event of the
     /// engineio client.
     #[inline]
-    fn handle_new_message(&self, socket_bytes: Bytes) -> Option<SocketPacket> {
-        let mut is_finalized_packet = false;
-        // either this is a complete packet or the rest of a binary packet (as attachments are
-        // sent in a separate packet).
-        let decoded_packet = if self.unfinished_packet.read().unwrap().is_some() {
-            // this must be an attachement, so parse it
-            let mut unfinished_packet = self.unfinished_packet.write().unwrap();
-            let mut finalized_packet = unfinished_packet.take().unwrap();
-            finalized_packet.binary_data = Some(socket_bytes);
+    fn handle_new_socketio_packet(&self, socket_packet: SocketPacket) -> Option<SocketPacket> {
+        let output = socket_packet.clone();
 
-            is_finalized_packet = true;
-            Ok(finalized_packet)
-        } else {
-            // this is a normal packet, so decode it
-            SocketPacket::try_from(&socket_bytes)
-        };
+        let default = String::from("/");
+        //TODO: should nsp logic be here?
+        if socket_packet.nsp != *self.nsp.as_ref().as_ref().unwrap_or(&default) {
+            return None;
+        }
 
-        if let Ok(socket_packet) = decoded_packet {
-            let output = socket_packet.clone();
-
-            let default = String::from("/");
-            if socket_packet.nsp != *self.nsp.as_ref().as_ref().unwrap_or(&default) {
-                return None;
+        match socket_packet.packet_type {
+            SocketPacketId::Connect => {
+                self.connected.store(true, Ordering::Release);
             }
-
-            match socket_packet.packet_type {
-                SocketPacketId::Connect => {
-                    self.connected.store(true, Ordering::Release);
-                }
-                SocketPacketId::ConnectError => {
-                    self.connected.store(false, Ordering::Release);
-                    if let Some(function) = self.get_event_callback(&Event::Error) {
-                        spawn_scoped!({
-                            let mut lock = function.1.write().unwrap();
-                            // TODO: refactor
-                            lock(
-                                Payload::String(
-                                    String::from("Received an ConnectError frame")
-                                        + &socket_packet.data.unwrap_or_else(|| {
-                                            String::from("\"No error message provided\"")
-                                        }),
-                                ),
-                                SocketIoSocket {
-                                    socket: self.clone(),
-                                },
-                            );
-                            drop(lock);
-                        });
-                    }
-                }
-                SocketPacketId::Disconnect => {
-                    self.connected.store(false, Ordering::Release);
-                }
-                SocketPacketId::Event => {
-                    self.handle_event(socket_packet);
-                }
-                SocketPacketId::Ack => {
-                    self.handle_ack(socket_packet);
-                }
-                SocketPacketId::BinaryEvent => {
-                    // in case of a binary event, check if this is the attachement or not and
-                    // then either handle the event or set the open packet
-                    if is_finalized_packet {
-                        self.handle_binary_event(socket_packet);
-                    } else {
-                        *self.unfinished_packet.write().unwrap() = Some(socket_packet);
-                        // Don't return unfinished packets
-                        return None;
-                    }
-                }
-                SocketPacketId::BinaryAck => {
-                    if is_finalized_packet {
-                        self.handle_ack(socket_packet);
-                    } else {
-                        *self.unfinished_packet.write().unwrap() = Some(socket_packet);
-                        // Don't return unfinished packets
-                        return None;
-                    }
+            SocketPacketId::ConnectError => {
+                self.connected.store(false, Ordering::Release);
+                if let Some(function) = self.get_event_callback(&Event::Error) {
+                    spawn_scoped!({
+                        let mut lock = function.1.write().unwrap();
+                        // TODO: refactor
+                        lock(
+                            Payload::String(
+                                String::from("Received an ConnectError frame")
+                                    + &socket_packet.data.unwrap_or_else(|| {
+                                        String::from("\"No error message provided\"")
+                                    }),
+                            ),
+                            SocketIoSocket {
+                                socket: self.clone(),
+                            },
+                        );
+                        drop(lock);
+                    });
                 }
             }
-            Some(output)
+            SocketPacketId::Disconnect => {
+                self.connected.store(false, Ordering::Release);
+            }
+            SocketPacketId::Event => {
+                self.handle_event(socket_packet);
+            }
+            SocketPacketId::Ack | SocketPacketId::BinaryAck => {
+                self.handle_ack(socket_packet);
+            }
+            SocketPacketId::BinaryEvent => {
+                // in case of a binary event, check if this is the attachement or not and
+                // then either handle the event or set the open packet
+                self.handle_binary_event(socket_packet);
+            }
+        }
+        Some(output)
+    }
+
+    /// Handles new incoming engineio packets
+    pub fn handle_new_engineio_packet(
+        &self,
+        engine_iter: &mut rust_engineio::client::Iter,
+        packet: EnginePacket,
+    ) -> Option<Result<SocketPacket>> {
+        let socket_packet = SocketPacket::try_from(&packet.data);
+        if let Err(err) = socket_packet {
+            return Some(Err(err));
+        }
+        // SAFETY: checked above to see if it was Err
+        let mut socket_packet = socket_packet.unwrap();
+        // Only handle attachments if there are any
+        if socket_packet.attachment_count > 0 {
+            let mut attachments_left = socket_packet.attachment_count;
+            let mut attachments = Vec::new();
+            while attachments_left > 0 {
+                let next = engine_iter.next()?;
+                match next {
+                    Err(err) => return Some(Err(err.into())),
+                    Ok(packet) => match packet.packet_id {
+                        EnginePacketId::MessageBinary | EnginePacketId::Message => {
+                            attachments.push(packet.data);
+                            attachments_left = attachments_left - 1;
+                        }
+                        _ => {
+                            return Some(Err(Error::InvalidAttachmentPacketType(
+                                packet.packet_id.into(),
+                            )));
+                        }
+                    },
+                }
+            }
+            socket_packet.attachments = Some(attachments);
+        }
+
+        let packet = self.handle_new_socketio_packet(socket_packet);
+        if let Some(packet) = packet {
+            return Some(Ok(packet));
         } else {
-            None
+            return None;
         }
     }
 
@@ -438,18 +425,20 @@ impl Socket {
                                 drop(function);
                             });
                         }
-                        if let Some(ref payload) = socket_packet.binary_data {
-                            spawn_scoped!({
-                                let mut function = ack.callback.write().unwrap();
-                                // TODO: refactor
-                                function(
-                                    Payload::Binary(payload.to_owned()),
-                                    SocketIoSocket {
-                                        socket: self.clone(),
-                                    },
-                                );
-                                drop(function);
-                            });
+                        if let Some(ref attachments) = socket_packet.attachments {
+                            if let Some(payload) = attachments.get(0) {
+                                spawn_scoped!({
+                                    let mut function = ack.callback.write().unwrap();
+                                    // TODO: refactor
+                                    function(
+                                        Payload::Binary(payload.to_owned()),
+                                        SocketIoSocket {
+                                            socket: self.clone(),
+                                        },
+                                    );
+                                    drop(function);
+                                });
+                            }
                         }
                     }
                 }
@@ -469,19 +458,21 @@ impl Socket {
             Event::Message
         };
 
-        if let Some(binary_payload) = socket_packet.binary_data {
-            if let Some(function) = self.get_event_callback(&event) {
-                spawn_scoped!({
-                    let mut lock = function.1.write().unwrap();
-                    // TODO: refactor
-                    lock(
-                        Payload::Binary(binary_payload),
-                        SocketIoSocket {
-                            socket: self.clone(),
-                        },
-                    );
-                    drop(lock);
-                });
+        if let Some(attachments) = socket_packet.attachments {
+            if let Some(binary_payload) = attachments.get(0) {
+                if let Some(function) = self.get_event_callback(&event) {
+                    spawn_scoped!({
+                        let mut lock = function.1.write().unwrap();
+                        // TODO: refactor
+                        lock(
+                            Payload::Binary(binary_payload.to_owned()),
+                            SocketIoSocket {
+                                socket: self.clone(),
+                            },
+                        );
+                        drop(lock);
+                    });
+                }
             }
         }
     }
@@ -567,7 +558,7 @@ impl Debug for Socket {
     }
 }
 
-pub struct Iter<'a> {
+pub(crate) struct Iter<'a> {
     socket: &'a Socket,
     engine_iter: rust_engineio::client::Iter<'a>,
 }
@@ -585,19 +576,14 @@ impl<'a> Iterator for Iter<'a> {
             let next = next.unwrap();
 
             match next.packet_id {
-                EnginePacketId::MessageBase64 => {
-                    // This is an attachment
-                    let packet = self.socket.handle_new_message(next.data);
-                    if let Some(packet) = packet {
-                        return Some(Ok(packet));
+                EnginePacketId::MessageBinary | EnginePacketId::Message => {
+                    match self
+                        .socket
+                        .handle_new_engineio_packet(&mut self.engine_iter, next)
+                    {
+                        None => {}
+                        Some(packet) => return Some(packet),
                     }
-                }
-                EnginePacketId::Message => {
-                    let packet = self.socket.handle_new_message(next.data);
-                    if let Some(packet) = packet {
-                        return Some(Ok(packet));
-                    }
-                    // Wrong namespace keep going.
                 }
                 EnginePacketId::Open => {
                     if let Some(function) = self.socket.get_event_callback(&Event::Connect) {
@@ -677,8 +663,8 @@ mod test {
                 "/".to_owned(),
                 Some("[\"Hello from the message event!\"]".to_owned()),
                 None,
+                0,
                 None,
-                None
             )
         );
 
@@ -694,7 +680,7 @@ mod test {
                 "/".to_owned(),
                 Some("[\"test\",\"Hello from the test event!\"]".to_owned()),
                 None,
-                None,
+                0,
                 None
             )
         );
@@ -709,9 +695,9 @@ mod test {
                 SocketPacketId::BinaryEvent,
                 "/".to_owned(),
                 None,
-                Some(Bytes::from_static(&[4, 5, 6])),
                 None,
-                Some(1)
+                1,
+                Some(vec![Bytes::from_static(&[4, 5, 6])]),
             )
         );
 
@@ -725,9 +711,9 @@ mod test {
                 SocketPacketId::BinaryEvent,
                 "/".to_owned(),
                 Some("\"test\"".to_owned()),
-                Some(Bytes::from_static(&[1, 2, 3])),
                 None,
-                Some(1)
+                1,
+                Some(vec![Bytes::from_static(&[1, 2, 3])]),
             )
         );
 
