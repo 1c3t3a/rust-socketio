@@ -1,4 +1,5 @@
 use super::super::socket::Socket as InnerSocket;
+use crate::callback::OptionalCallback;
 use crate::transport::Transport;
 
 use crate::error::{Error, Result};
@@ -23,6 +24,11 @@ pub struct SocketBuilder {
     tls_config: Option<TlsConnector>,
     headers: Option<HeaderMap>,
     handshake: Option<HandshakePacket>,
+    on_error: OptionalCallback<String>,
+    on_open: OptionalCallback<()>,
+    on_close: OptionalCallback<()>,
+    on_data: OptionalCallback<Bytes>,
+    on_packet: OptionalCallback<Packet>,
 }
 
 impl SocketBuilder {
@@ -39,19 +45,72 @@ impl SocketBuilder {
             headers: None,
             tls_config: None,
             handshake: None,
+            on_close: OptionalCallback::default(),
+            on_data: OptionalCallback::default(),
+            on_error: OptionalCallback::default(),
+            on_open: OptionalCallback::default(),
+            on_packet: OptionalCallback::default(),
         }
     }
 
+    /// Specify transport's tls config
     pub fn tls_config(mut self, tls_config: TlsConnector) -> Self {
         self.tls_config = Some(tls_config);
         self
     }
 
+    /// Specify transport's HTTP headers
     pub fn headers(mut self, headers: HeaderMap) -> Self {
         self.headers = Some(headers);
         self
     }
 
+    /// Registers the `on_close` callback.
+    pub fn on_close<T>(mut self, callback: T) -> Self
+    where
+        T: Fn(()) + 'static + Sync + Send,
+    {
+        self.on_close = OptionalCallback::new(callback);
+        self
+    }
+
+    /// Registers the `on_data` callback.
+    pub fn on_data<T>(mut self, callback: T) -> Self
+    where
+        T: Fn(Bytes) + 'static + Sync + Send,
+    {
+        self.on_data = OptionalCallback::new(callback);
+        self
+    }
+
+    /// Registers the `on_error` callback.
+    pub fn on_error<T>(mut self, callback: T) -> Self
+    where
+        T: Fn(String) + 'static + Sync + Send,
+    {
+        self.on_error = OptionalCallback::new(callback);
+        self
+    }
+
+    /// Registers the `on_open` callback.
+    pub fn on_open<T>(mut self, callback: T) -> Self
+    where
+        T: Fn(()) + 'static + Sync + Send,
+    {
+        self.on_open = OptionalCallback::new(callback);
+        self
+    }
+
+    /// Registers the `on_packet` callback.
+    pub fn on_packet<T>(mut self, callback: T) -> Self
+    where
+        T: Fn(Packet) + 'static + Sync + Send,
+    {
+        self.on_packet = OptionalCallback::new(callback);
+        self
+    }
+
+    /// Performs the handshake
     fn handshake_with_transport<T: Transport>(&mut self, transport: &T) -> Result<()> {
         // No need to handshake twice
         if self.handshake.is_some() {
@@ -114,7 +173,15 @@ impl SocketBuilder {
 
         // SAFETY: handshake function called previously.
         Ok(Socket {
-            socket: InnerSocket::new(transport.into(), self.handshake.unwrap()),
+            socket: InnerSocket::new(
+                transport.into(),
+                self.handshake.unwrap(),
+                self.on_close,
+                self.on_data,
+                self.on_error,
+                self.on_open,
+                self.on_packet,
+            ),
         })
     }
 
@@ -149,7 +216,15 @@ impl SocketBuilder {
             // NOTE: Although self.url contains the sid, it does not propagate to the transport
             // SAFETY: handshake function called previously.
             Ok(Socket {
-                socket: InnerSocket::new(transport.into(), self.handshake.unwrap()),
+                socket: InnerSocket::new(
+                    transport.into(),
+                    self.handshake.unwrap(),
+                    self.on_close,
+                    self.on_data,
+                    self.on_error,
+                    self.on_open,
+                    self.on_packet,
+                ),
             })
         } else if url.scheme() == "https" {
             let transport = WebsocketSecureTransport::new(
@@ -165,7 +240,15 @@ impl SocketBuilder {
             // NOTE: Although self.url contains the sid, it does not propagate to the transport
             // SAFETY: handshake function called previously.
             Ok(Socket {
-                socket: InnerSocket::new(transport.into(), self.handshake.unwrap()),
+                socket: InnerSocket::new(
+                    transport.into(),
+                    self.handshake.unwrap(),
+                    self.on_close,
+                    self.on_data,
+                    self.on_error,
+                    self.on_open,
+                    self.on_packet,
+                ),
             })
         } else {
             Err(Error::InvalidUrlScheme(url.scheme().to_string()))
@@ -197,46 +280,6 @@ impl SocketBuilder {
 }
 
 impl Socket {
-    /// Registers the `on_open` callback.
-    pub fn on_open<F>(&mut self, function: F) -> Result<()>
-    where
-        F: Fn(()) + 'static + Sync + Send,
-    {
-        self.socket.on_open(function)
-    }
-
-    /// Registers the `on_error` callback.
-    pub fn on_error<F>(&mut self, function: F) -> Result<()>
-    where
-        F: Fn(String) + 'static + Sync + Send,
-    {
-        self.socket.on_error(function)
-    }
-
-    /// Registers the `on_packet` callback.
-    pub fn on_packet<F>(&mut self, function: F) -> Result<()>
-    where
-        F: Fn(Packet) + 'static + Sync + Send,
-    {
-        self.socket.on_packet(function)
-    }
-
-    /// Registers the `on_data` callback.
-    pub fn on_data<F>(&mut self, function: F) -> Result<()>
-    where
-        F: Fn(Bytes) + 'static + Sync + Send,
-    {
-        self.socket.on_data(function)
-    }
-
-    /// Registers the `on_close` callback.
-    pub fn on_close<F>(&mut self, function: F) -> Result<()>
-    where
-        F: Fn(()) + 'static + Sync + Send,
-    {
-        self.socket.on_close(function)
-    }
-
     pub fn close(&mut self) -> Result<()> {
         self.socket.close()
     }
@@ -308,7 +351,7 @@ impl Socket {
 
     pub fn iter(&self) -> Iter {
         Iter {
-            socket: &self,
+            socket: self,
             iter: None,
         }
     }
@@ -353,7 +396,7 @@ mod test {
     #[test]
     fn test_illegal_actions() -> Result<()> {
         let url = crate::test::engine_io_server()?;
-        let mut sut = SocketBuilder::new(url.clone()).build()?;
+        let sut = builder(url.clone()).build()?;
 
         assert!(sut
             .emit(Packet::new(PacketId::Close, Bytes::new()))
@@ -361,15 +404,9 @@ mod test {
 
         sut.connect()?;
 
-        assert!(sut.on_open(|_| {}).is_err());
-        assert!(sut.on_close(|_| {}).is_err());
-        assert!(sut.on_packet(|_| {}).is_err());
-        assert!(sut.on_data(|_| {}).is_err());
-        assert!(sut.on_error(|_| {}).is_err());
-
         assert!(sut.poll().is_ok());
 
-        let sut = SocketBuilder::new(url).build()?;
+        let sut = builder(url).build()?;
         assert!(sut.poll().is_err());
 
         Ok(())
@@ -378,28 +415,28 @@ mod test {
 
     use crate::packet::Packet;
 
+    fn builder(url: Url) -> SocketBuilder {
+        // TODO: confirm callbacks are getting data
+        SocketBuilder::new(url)
+            .on_open(|_| {
+                println!("Open event!");
+            })
+            .on_packet(|packet| {
+                println!("Received packet: {:?}", packet);
+            })
+            .on_data(|data| {
+                println!("Received data: {:?}", std::str::from_utf8(&data));
+            })
+            .on_close(|_| {
+                println!("Close event!");
+            })
+            .on_error(|error| {
+                println!("Error {}", error);
+            })
+    }
+
     fn test_connection(socket: Socket) -> Result<()> {
         let mut socket = socket;
-        // TODO: confirm callbacks are getting data
-        socket.on_open(|_| {
-            println!("Open event!");
-        })?;
-
-        socket.on_packet(|packet| {
-            println!("Received packet: {:?}", packet);
-        })?;
-
-        socket.on_data(|data| {
-            println!("Received data: {:?}", std::str::from_utf8(&data));
-        })?;
-
-        socket.on_close(|_| {
-            println!("Close event!");
-        })?;
-
-        socket.on_error(|error| {
-            println!("Error {}", error);
-        })?;
 
         socket.connect().unwrap();
 
@@ -426,14 +463,14 @@ mod test {
     #[test]
     fn test_connection_dynamic() -> Result<()> {
         let url = crate::test::engine_io_server()?;
-        let socket = SocketBuilder::new(url).build()?;
+        let socket = builder(url).build()?;
         test_connection(socket)
     }
 
     #[test]
     fn test_connection_dynamic_secure() -> Result<()> {
         let url = crate::test::engine_io_server_secure()?;
-        let mut builder = SocketBuilder::new(url);
+        let mut builder = builder(url);
         builder = builder.tls_config(crate::test::tls_connector()?);
         let socket = builder.build()?;
         test_connection(socket)
@@ -442,7 +479,7 @@ mod test {
     #[test]
     fn test_connection_polling() -> Result<()> {
         let url = crate::test::engine_io_server()?;
-        let socket = SocketBuilder::new(url).build_polling()?;
+        let socket = builder(url).build_polling()?;
         test_connection(socket)
     }
 
@@ -454,7 +491,7 @@ mod test {
 
         let mut headers = HeaderMap::new();
         headers.insert(HOST, host);
-        let mut builder = SocketBuilder::new(url);
+        let mut builder = builder(url);
 
         builder = builder.tls_config(crate::test::tls_connector()?);
         builder = builder.headers(headers);
@@ -471,7 +508,7 @@ mod test {
     fn test_connection_ws() -> Result<()> {
         let url = crate::test::engine_io_server()?;
 
-        let builder = SocketBuilder::new(url);
+        let builder = builder(url);
         let socket = builder.clone().build_websocket()?;
         test_connection(socket)?;
 
@@ -484,14 +521,14 @@ mod test {
         let url = crate::test::engine_io_server()?;
         let illegal_url = "this is illegal";
 
-        assert!(Url::parse(&illegal_url).is_err());
+        assert!(Url::parse(illegal_url).is_err());
 
         let invalid_protocol = "file:///tmp/foo";
-        assert!(SocketBuilder::new(Url::parse(&invalid_protocol).unwrap())
+        assert!(builder(Url::parse(invalid_protocol).unwrap())
             .build()
             .is_err());
 
-        let sut = SocketBuilder::new(url.clone()).build()?;
+        let sut = builder(url.clone()).build()?;
         let _error = sut
             .emit(Packet::new(PacketId::Close, Bytes::new()))
             .expect_err("error");
@@ -503,7 +540,7 @@ mod test {
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
         headers.insert(HOST, host);
 
-        let _ = SocketBuilder::new(url.clone())
+        let _ = builder(url.clone())
             .tls_config(
                 TlsConnector::builder()
                     .danger_accept_invalid_certs(true)
@@ -511,7 +548,7 @@ mod test {
                     .unwrap(),
             )
             .build()?;
-        let _ = SocketBuilder::new(url).headers(headers).build()?;
+        let _ = builder(url).headers(headers).build()?;
         Ok(())
     }
 }
