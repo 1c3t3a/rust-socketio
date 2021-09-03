@@ -76,6 +76,7 @@ impl TransportClient {
     }
 
     /// Registers a new event with some callback function `F`.
+    #[deprecated(note = "Register callbacks in builder instead")]
     pub fn on<F>(&mut self, event: Event, callback: Box<F>) -> Result<()>
     where
         F: FnMut(Payload, Socket) + 'static + Sync + Send,
