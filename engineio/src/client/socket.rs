@@ -1,9 +1,10 @@
-use super::super::socket::Socket as InnerSocket;
+use super::super::socket::InnerSocket;
 use crate::callback::OptionalCallback;
 use crate::transport::Transport;
 
 use crate::error::{Error, Result};
 use crate::header::HeaderMap;
+use crate::model::Socket as _;
 use crate::packet::{HandshakePacket, Packet, PacketId, Payload};
 use crate::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
 use bytes::Bytes;
@@ -11,6 +12,7 @@ use native_tls::TlsConnector;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt::Debug;
+use std::time::Instant;
 use url::Url;
 
 #[derive(Clone, Debug)]
@@ -21,6 +23,7 @@ pub struct Socket {
 #[derive(Clone, Debug)]
 pub struct SocketBuilder {
     url: Url,
+    last_heartbeat: Instant,
     tls_config: Option<TlsConnector>,
     headers: Option<HeaderMap>,
     handshake: Option<HandshakePacket>,
@@ -42,6 +45,7 @@ impl SocketBuilder {
         }
         SocketBuilder {
             url,
+            last_heartbeat: Instant::now(),
             headers: None,
             tls_config: None,
             handshake: None,
@@ -121,6 +125,8 @@ impl SocketBuilder {
 
         let handshake: HandshakePacket = Packet::try_from(transport.poll()?)?.try_into()?;
 
+        self.last_heartbeat = Instant::now();
+
         // update the base_url with the new sid
         url.query_pairs_mut().append_pair("sid", &handshake.sid[..]);
 
@@ -172,17 +178,16 @@ impl SocketBuilder {
         );
 
         // SAFETY: handshake function called previously.
-        Ok(Socket {
-            socket: InnerSocket::new(
-                transport.into(),
-                self.handshake.unwrap(),
-                self.on_close,
-                self.on_data,
-                self.on_error,
-                self.on_open,
-                self.on_packet,
-            ),
-        })
+        Ok(Socket::new(InnerSocket::new(
+            transport.into(),
+            self.handshake.unwrap(),
+            self.last_heartbeat,
+            self.on_close,
+            self.on_data,
+            self.on_error,
+            self.on_open,
+            self.on_packet,
+        )))
     }
 
     /// Build socket with a polling transport then upgrade to websocket transport
@@ -215,17 +220,16 @@ impl SocketBuilder {
             }
             // NOTE: Although self.url contains the sid, it does not propagate to the transport
             // SAFETY: handshake function called previously.
-            Ok(Socket {
-                socket: InnerSocket::new(
-                    transport.into(),
-                    self.handshake.unwrap(),
-                    self.on_close,
-                    self.on_data,
-                    self.on_error,
-                    self.on_open,
-                    self.on_packet,
-                ),
-            })
+            Ok(Socket::new(InnerSocket::new(
+                transport.into(),
+                self.handshake.unwrap(),
+                self.last_heartbeat,
+                self.on_close,
+                self.on_data,
+                self.on_error,
+                self.on_open,
+                self.on_packet,
+            )))
         } else if url.scheme() == "https" {
             let transport = WebsocketSecureTransport::new(
                 url,
@@ -239,17 +243,16 @@ impl SocketBuilder {
             }
             // NOTE: Although self.url contains the sid, it does not propagate to the transport
             // SAFETY: handshake function called previously.
-            Ok(Socket {
-                socket: InnerSocket::new(
-                    transport.into(),
-                    self.handshake.unwrap(),
-                    self.on_close,
-                    self.on_data,
-                    self.on_error,
-                    self.on_open,
-                    self.on_packet,
-                ),
-            })
+            Ok(Socket::new(InnerSocket::new(
+                transport.into(),
+                self.handshake.unwrap(),
+                self.last_heartbeat,
+                self.on_close,
+                self.on_data,
+                self.on_error,
+                self.on_open,
+                self.on_packet,
+            )))
         } else {
             Err(Error::InvalidUrlScheme(url.scheme().to_string()))
         }
@@ -279,20 +282,30 @@ impl SocketBuilder {
     }
 }
 
-impl Socket {
-    pub fn close(&mut self) -> Result<()> {
+impl crate::model::Socket for Socket {
+    fn close(&self) -> Result<()> {
         self.socket.close()
     }
 
     /// Opens the connection to a specified server. The first Pong packet is sent
     /// to the server to trigger the Ping-cycle.
-    pub fn connect(&self) -> Result<()> {
+    fn connect(&self) -> Result<()> {
         self.socket.connect()
     }
 
     /// Sends a packet to the server.
-    pub fn emit(&self, packet: Packet) -> Result<()> {
+    fn emit(&self, packet: Packet) -> Result<()> {
         self.socket.emit(packet)
+    }
+
+    fn is_connected(&self) -> Result<bool> {
+        self.socket.is_connected()
+    }
+}
+
+impl Socket {
+    fn new(socket: InnerSocket) -> Self {
+        Socket { socket }
     }
 
     /// Polls for next payload
@@ -309,20 +322,7 @@ impl Socket {
 
         for packet in iter {
             // check for the appropriate action or callback
-            self.socket.handle_packet(packet.clone())?;
             match packet.packet_id {
-                PacketId::MessageBinary => {
-                    self.socket.handle_data(packet.data.clone())?;
-                }
-                PacketId::Message => {
-                    self.socket.handle_data(packet.data.clone())?;
-                }
-
-                PacketId::Close => {
-                    self.socket.handle_close()?;
-                    // set current state to not connected and stop polling
-                    self.socket.close()?;
-                }
                 PacketId::Open => {
                     unreachable!("Won't happen as we open the connection beforehand");
                 }
@@ -330,7 +330,7 @@ impl Socket {
                     // this is already checked during the handshake, so just do nothing here
                 }
                 PacketId::Ping => {
-                    self.socket.pinged()?;
+                    self.socket.heartbeat()?;
                     self.emit(Packet::new(PacketId::Pong, Bytes::new()))?;
                 }
                 PacketId::Pong => {
@@ -338,7 +338,7 @@ impl Socket {
                     // only sent by the client
                     unreachable!();
                 }
-                PacketId::Noop => (),
+                _ => (),
             }
         }
         Ok(Some(payload))
@@ -436,7 +436,7 @@ mod test {
     }
 
     fn test_connection(socket: Socket) -> Result<()> {
-        let mut socket = socket;
+        let socket = socket;
 
         socket.connect().unwrap();
 

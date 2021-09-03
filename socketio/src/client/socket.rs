@@ -1,8 +1,10 @@
 pub use super::super::{event::Event, payload::Payload};
-use crate::packet::Packet as SocketPacket;
+use crate::packet::Packet;
 use native_tls::TlsConnector;
-use rust_engineio::client::{Socket as EngineIoSocket, SocketBuilder as EngineIoSocketBuilder};
-use rust_engineio::header::{HeaderMap, HeaderValue};
+use rust_engineio::{
+    header::{HeaderMap, HeaderValue},
+    Socket as EngineSocket, SocketBuilder as EngineSocketBuilder,
+};
 use url::Url;
 
 use crate::error::Result;
@@ -17,7 +19,7 @@ use crate::socket::Socket as InnerSocket;
 pub struct Socket {
     /// The inner socket client to delegate the methods to.
     // TODO: Make this private
-    pub socket: InnerSocket,
+    pub socket: InnerSocket<EngineSocket>,
 }
 
 type SocketCallback = dyn FnMut(Payload, Socket) + 'static + Sync + Send;
@@ -220,7 +222,7 @@ impl SocketBuilder {
             url.set_path("/socket.io/");
         }
 
-        let mut builder = EngineIoSocketBuilder::new(url);
+        let mut builder = EngineSocketBuilder::new(url);
 
         if let Some(tls_config) = self.tls_config {
             builder = builder.tls_config(tls_config);
@@ -255,21 +257,20 @@ impl Socket {
     pub(crate) fn new<T: Into<String>>(
         address: T,
         namespace: Option<String>,
-        tls_config: Option<TlsConnector>,
-        opening_headers: Option<HeaderMap>,
+        engine_socket: EngineSocket,
     ) -> Result<Self> {
         Ok(Socket {
-            socket: InnerSocket::new(address, namespace, tls_config, opening_headers)?,
+            socket: InnerSocket::new(address, namespace, engine_socket)?,
         })
     }
 
     pub(crate) fn new_with_socket<T: Into<String>>(
         address: T,
         namespace: Option<String>,
-        engine_socket: EngineIoSocket,
+        engine_socket: EngineSocket,
     ) -> Result<Self> {
         Ok(Socket {
-            socket: InnerSocket::new_with_socket(address, namespace, engine_socket)?,
+            socket: InnerSocket::new(address, namespace, engine_socket)?,
         })
     }
 
@@ -413,11 +414,11 @@ impl Socket {
 }
 
 pub(crate) struct Iter<'a> {
-    socket_iter: crate::socket::Iter<'a>,
+    socket_iter: crate::socket::Iter<'a, rust_engineio::client::Socket>,
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = Result<SocketPacket>;
+    type Item = Result<Packet>;
     fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
         self.socket_iter.next()
     }
@@ -429,7 +430,7 @@ mod test {
     use std::thread::sleep;
 
     use super::*;
-    use crate::payload::Payload;
+    use crate::{packet::PacketId, payload::Payload};
     use bytes::Bytes;
     use native_tls::TlsConnector;
     use serde_json::json;
@@ -440,19 +441,15 @@ mod test {
         //TODO: check to make sure we are receiving packets rather than logging.
         let url = crate::test::socket_io_server()?;
 
-        let mut socket = Socket::new(url, None, None, None)?;
-
-        let result = socket.on(
-            "test".into(),
-            Box::new(|msg, _| match msg {
-                Payload::String(str) => println!("Received string: {}", str),
-                Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
-            }),
-        );
-        assert!(result.is_ok());
-
-        let result = socket.connect();
-        assert!(result.is_ok());
+        let mut socket = SocketBuilder::new(url)
+            .on(
+                "test".into(),
+                Box::new(|msg, _| match msg {
+                    Payload::String(str) => println!("Received string: {}", str),
+                    Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
+                }),
+            )
+            .connect()?;
 
         let payload = json!({"token": 123});
         let result = socket.emit("test", Payload::String(payload.to_string()));
@@ -537,6 +534,188 @@ mod test {
             .transport_type(TransportType::Any)
             .connect()?;
 
+        Ok(())
+    }
+
+    fn test_socketio_socket(socket: Socket) -> Result<()> {
+        let mut socket = socket;
+
+        assert!(socket
+            .on(
+                "test".into(),
+                Box::new(|message, _| {
+                    if let Payload::String(st) = message {
+                        println!("{}", st)
+                    }
+                })
+            )
+            .is_ok());
+
+        assert!(socket.on("Error".into(), Box::new(|_, _| {})).is_ok());
+
+        assert!(socket.on("Connect".into(), Box::new(|_, _| {})).is_ok());
+
+        assert!(socket.on("Close".into(), Box::new(|_, _| {})).is_ok());
+
+        // Tests need to consume packets rather than forward to callbacks.
+        socket.socket.connect_with_thread(false).unwrap();
+
+        let mut iter = socket
+            .iter()
+            .map(|packet| packet.unwrap())
+            .filter(|packet| packet.packet_type != PacketId::Connect);
+
+        let packet: Option<Packet> = iter.next();
+        assert!(packet.is_some());
+
+        let packet = packet.unwrap();
+
+        assert_eq!(
+            packet,
+            Packet::new(
+                PacketId::Event,
+                "/".to_owned(),
+                Some("[\"Hello from the message event!\"]".to_owned()),
+                None,
+                0,
+                None,
+            )
+        );
+
+        let packet: Option<Packet> = iter.next();
+        assert!(packet.is_some());
+
+        let packet = packet.unwrap();
+
+        assert_eq!(
+            packet,
+            Packet::new(
+                PacketId::Event,
+                "/".to_owned(),
+                Some("[\"test\",\"Hello from the test event!\"]".to_owned()),
+                None,
+                0,
+                None
+            )
+        );
+
+        let packet: Option<Packet> = iter.next();
+        assert!(packet.is_some());
+
+        let packet = packet.unwrap();
+        assert_eq!(
+            packet,
+            Packet::new(
+                PacketId::BinaryEvent,
+                "/".to_owned(),
+                None,
+                None,
+                1,
+                Some(vec![Bytes::from_static(&[4, 5, 6])]),
+            )
+        );
+
+        let packet: Option<Packet> = iter.next();
+        assert!(packet.is_some());
+
+        let packet = packet.unwrap();
+        assert_eq!(
+            packet,
+            Packet::new(
+                PacketId::BinaryEvent,
+                "/".to_owned(),
+                Some("\"test\"".to_owned()),
+                None,
+                1,
+                Some(vec![Bytes::from_static(&[1, 2, 3])]),
+            )
+        );
+
+        let ack_callback = |message: Payload, _| {
+            println!("Yehaa! My ack got acked?");
+            if let Payload::String(str) = message {
+                println!("Received string ack");
+                println!("Ack data: {}", str);
+            }
+        };
+
+        assert!(socket
+            .emit_with_ack(
+                "test",
+                Payload::String("123".to_owned()),
+                Duration::from_secs(10),
+                ack_callback
+            )
+            .is_ok());
+
+        Ok(())
+    }
+
+    //TODO: Test with SocketBuilder once specifying connection without thread is possible.
+
+    #[test]
+    fn test_connection() -> Result<()> {
+        let url = crate::test::socket_io_server()?;
+
+        let engine_socket = EngineSocketBuilder::new(url.clone()).build_with_fallback()?;
+
+        let socket = Socket::new(url, None, engine_socket)?;
+
+        test_socketio_socket(socket)
+    }
+
+    #[test]
+    fn test_connection_failable() -> Result<()> {
+        let url = crate::test::socket_io_server()?;
+
+        let engine_socket = EngineSocketBuilder::new(url.clone()).build()?;
+
+        let socket = Socket::new(url, None, engine_socket)?;
+
+        test_socketio_socket(socket)
+    }
+
+    //TODO: make all engineio code-paths reachable from engineio, (is_binary_attr is only used in socketio)
+    #[test]
+    fn test_connection_polling() -> Result<()> {
+        let url = crate::test::socket_io_server()?;
+
+        let engine_socket = EngineSocketBuilder::new(url.clone()).build_polling()?;
+
+        let socket = Socket::new(url, None, engine_socket)?;
+
+        test_socketio_socket(socket)
+    }
+
+    #[test]
+    fn test_connection_websocket() -> Result<()> {
+        let url = crate::test::socket_io_server()?;
+
+        let engine_socket = EngineSocketBuilder::new(url.clone()).build_websocket()?;
+
+        let socket = Socket::new(url, None, engine_socket)?;
+
+        test_socketio_socket(socket)
+    }
+
+    // TODO: add secure socketio server
+    /*
+    #[test]
+    fn test_connection_websocket_secure() -> Result<()> {
+        let url = crate::socketio::test::socket_io_server()?;
+
+        let engine_socket = EngineIoSocketBuilder::new(url.clone()).build()?;
+
+        let socket = Socket::new(url, None, engine_socket)?;
+
+        test_socketio_socket(socket)
+    }
+    */
+
+    #[test]
+    fn test_error_cases() -> Result<()> {
+        let result = SocketBuilder::new("http://localhost:123").connect();
+        assert!(result.is_err());
         Ok(())
     }
 }

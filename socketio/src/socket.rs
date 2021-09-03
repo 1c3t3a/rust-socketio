@@ -1,14 +1,11 @@
+use super::{event::Event, payload::Payload};
 use crate::client::Socket as SocketIoSocket;
 use crate::error::{Error, Result};
 use crate::packet::{Packet as SocketPacket, PacketId as SocketPacketId};
 use bytes::Bytes;
-use native_tls::TlsConnector;
 use rand::{thread_rng, Rng};
-use rust_engineio::header::HeaderMap;
-use rust_engineio::{
-    Packet as EnginePacket, PacketId as EnginePacketId, Socket as EngineIoSocket,
-    SocketBuilder as EngineIoSocketBuilder,
-};
+use rust_engineio::model::Socket as _;
+use rust_engineio::{Packet as EnginePacket, PacketId as EnginePacketId};
 use std::convert::TryFrom;
 use std::thread;
 use std::{
@@ -20,8 +17,6 @@ use std::{
     time::{Duration, Instant},
 };
 use url::Url;
-
-use super::{event::Event, payload::Payload};
 
 /// The type of a callback function.
 // TODO: refactor SocketIoSocket out
@@ -41,8 +36,10 @@ pub struct Ack {
 
 /// Handles communication in the `socket.io` protocol.
 #[derive(Clone)]
-pub struct Socket {
-    engine_socket: Arc<EngineIoSocket>,
+pub struct Socket<
+    EngineSocket: rust_engineio::model::Socket + Send + Sync + Clone + 'static + Debug,
+> {
+    engine_socket: Arc<EngineSocket>,
     host: Arc<Url>,
     connected: Arc<AtomicBool>,
     // TODO: Move this to client/socket.rs
@@ -52,39 +49,14 @@ pub struct Socket {
     pub(crate) nsp: Arc<Option<String>>,
 }
 
-impl Socket {
+// TODO: change this to after .clone is refactored
+// impl<EngineSocket: rust_engineio::model::Socket + Send + Sync + Clone + 'static> Socket<EngineSocket> {
+impl Socket<rust_engineio::client::Socket> {
     /// Creates an instance of `Socket`.
     pub(super) fn new<T: Into<String>>(
         address: T,
         nsp: Option<String>,
-        tls_config: Option<TlsConnector>,
-        opening_headers: Option<HeaderMap>,
-    ) -> Result<Self> {
-        let mut url: Url = Url::parse(&address.into())?;
-
-        if url.path() == "/" {
-            url.set_path("/socket.io/");
-        }
-
-        let mut engine_socket_builder = EngineIoSocketBuilder::new(url.clone());
-        if let Some(tls_config) = tls_config {
-            // SAFETY: Checked is_some
-            engine_socket_builder = engine_socket_builder.tls_config(tls_config);
-        }
-        if let Some(opening_headers) = opening_headers {
-            // SAFETY: Checked is_some
-            engine_socket_builder = engine_socket_builder.headers(opening_headers);
-        }
-
-        let engine_socket = engine_socket_builder.build_with_fallback()?;
-
-        Self::new_with_socket(url.to_string(), nsp, engine_socket)
-    }
-
-    pub(super) fn new_with_socket<T: Into<String>>(
-        address: T,
-        nsp: Option<String>,
-        engine_socket: EngineIoSocket,
+        engine_socket: rust_engineio::client::Socket,
     ) -> Result<Self> {
         let mut url: Url = Url::parse(&address.into())?;
 
@@ -115,12 +87,12 @@ impl Socket {
 
     /// Connects to the server. This includes a connection of the underlying
     /// engine.io client and afterwards an opening socket.io request.
-    pub fn connect(&mut self) -> Result<()> {
+    pub fn connect(&self) -> Result<()> {
         self.connect_with_thread(true)
     }
 
     /// Connect with optional thread to forward events to callback
-    pub(super) fn connect_with_thread(&mut self, thread: bool) -> Result<()> {
+    pub(super) fn connect_with_thread(&self, thread: bool) -> Result<()> {
         self.engine_socket.connect()?;
 
         // TODO: refactor me
@@ -289,7 +261,7 @@ impl Socket {
         Ok(())
     }
 
-    pub(crate) fn iter(&self) -> Iter {
+    pub(crate) fn iter(&self) -> Iter<rust_engineio::client::Socket> {
         Iter {
             socket: self,
             engine_iter: self.engine_socket.iter(),
@@ -353,7 +325,7 @@ impl Socket {
     }
 
     /// Handles new incoming engineio packets
-    pub fn handle_new_engineio_packet(
+    fn handle_new_engineio_packet(
         &self,
         engine_iter: &mut rust_engineio::client::Iter,
         packet: EnginePacket,
@@ -547,7 +519,7 @@ impl Debug for Ack {
     }
 }
 
-impl Debug for Socket {
+impl<T: rust_engineio::model::Socket + Send + Sync + Clone + Debug> Debug for Socket<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("Socket(engine_socket: {:?}, host: {:?}, connected: {:?}, on: <defined callbacks>, outstanding_acks: {:?}, nsp: {:?})",
             self.engine_socket,
@@ -559,12 +531,16 @@ impl Debug for Socket {
     }
 }
 
-pub(crate) struct Iter<'a> {
-    socket: &'a Socket,
+pub(crate) struct Iter<
+    'a,
+    EngineSocket: rust_engineio::model::Socket + Send + Sync + Clone + 'static + Debug,
+> {
+    socket: &'a Socket<EngineSocket>,
     engine_iter: rust_engineio::client::Iter<'a>,
 }
 
-impl<'a> Iterator for Iter<'a> {
+// TODO: change the type to generic
+impl<'a> Iterator for Iter<'a, rust_engineio::client::Socket> {
     type Item = Result<SocketPacket>;
     fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
         loop {
@@ -615,190 +591,5 @@ impl<'a> Iterator for Iter<'a> {
                 _ => (),
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::time::Duration;
-
-    use super::*;
-
-    fn test_socketio_socket(socket: Socket) -> Result<()> {
-        let mut socket = socket;
-
-        assert!(socket
-            .on(
-                "test".into(),
-                Box::new(|message, _| {
-                    if let Payload::String(st) = message {
-                        println!("{}", st)
-                    }
-                })
-            )
-            .is_ok());
-
-        assert!(socket.on("Error".into(), Box::new(|_, _| {})).is_ok());
-
-        assert!(socket.on("Connect".into(), Box::new(|_, _| {})).is_ok());
-
-        assert!(socket.on("Close".into(), Box::new(|_, _| {})).is_ok());
-
-        // Tests need to consume packets rather than forward to callbacks.
-        socket.connect_with_thread(false).unwrap();
-
-        let mut iter = socket
-            .iter()
-            .map(|packet| packet.unwrap())
-            .filter(|packet| packet.packet_type != SocketPacketId::Connect);
-
-        let packet: Option<SocketPacket> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-
-        assert_eq!(
-            packet,
-            SocketPacket::new(
-                SocketPacketId::Event,
-                "/".to_owned(),
-                Some("[\"Hello from the message event!\"]".to_owned()),
-                None,
-                0,
-                None,
-            )
-        );
-
-        let packet: Option<SocketPacket> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-
-        assert_eq!(
-            packet,
-            SocketPacket::new(
-                SocketPacketId::Event,
-                "/".to_owned(),
-                Some("[\"test\",\"Hello from the test event!\"]".to_owned()),
-                None,
-                0,
-                None
-            )
-        );
-
-        let packet: Option<SocketPacket> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-        assert_eq!(
-            packet,
-            SocketPacket::new(
-                SocketPacketId::BinaryEvent,
-                "/".to_owned(),
-                None,
-                None,
-                1,
-                Some(vec![Bytes::from_static(&[4, 5, 6])]),
-            )
-        );
-
-        let packet: Option<SocketPacket> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-        assert_eq!(
-            packet,
-            SocketPacket::new(
-                SocketPacketId::BinaryEvent,
-                "/".to_owned(),
-                Some("\"test\"".to_owned()),
-                None,
-                1,
-                Some(vec![Bytes::from_static(&[1, 2, 3])]),
-            )
-        );
-
-        let ack_callback = |message: Payload, _| {
-            println!("Yehaa! My ack got acked?");
-            if let Payload::String(str) = message {
-                println!("Received string ack");
-                println!("Ack data: {}", str);
-            }
-        };
-
-        assert!(socket
-            .emit_with_ack(
-                "test".into(),
-                Payload::String("123".to_owned()),
-                Duration::from_secs(10),
-                ack_callback
-            )
-            .is_ok());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_connection() -> Result<()> {
-        let url = crate::test::socket_io_server()?;
-
-        let socket = Socket::new(url, None, None, None)?;
-
-        test_socketio_socket(socket)
-    }
-
-    #[test]
-    fn test_connection_failable() -> Result<()> {
-        let url = crate::test::socket_io_server()?;
-
-        let engine_socket = EngineIoSocketBuilder::new(url.clone()).build()?;
-
-        let socket = Socket::new_with_socket(url, None, engine_socket)?;
-
-        test_socketio_socket(socket)
-    }
-
-    //TODO: make all engineio code-paths reachable from engineio, (is_binary_attr is only used in socketio)
-    #[test]
-    fn test_connection_polling() -> Result<()> {
-        let url = crate::test::socket_io_server()?;
-
-        let engine_socket = EngineIoSocketBuilder::new(url.clone()).build_polling()?;
-
-        let socket = Socket::new_with_socket(url, None, engine_socket)?;
-
-        test_socketio_socket(socket)
-    }
-
-    #[test]
-    fn test_connection_websocket() -> Result<()> {
-        let url = crate::test::socket_io_server()?;
-
-        let engine_socket = EngineIoSocketBuilder::new(url.clone()).build_websocket()?;
-
-        let socket = Socket::new_with_socket(url, None, engine_socket)?;
-
-        test_socketio_socket(socket)
-    }
-
-    // TODO: add secure socketio server
-    /*
-    #[test]
-    fn test_connection_websocket_secure() -> Result<()> {
-        let url = crate::socketio::test::socket_io_server()?;
-
-        let engine_socket = EngineIoSocketBuilder::new(url.clone()).build()?;
-
-        let socket = Socket::new_with_socket(url, None, engine_socket)?;
-
-        test_socketio_socket(socket)
-    }
-    */
-
-    #[test]
-    fn test_error_cases() -> Result<()> {
-        let result = Socket::new("http://localhost:123", None, None, None);
-        assert!(result.is_err());
-        Ok(())
     }
 }

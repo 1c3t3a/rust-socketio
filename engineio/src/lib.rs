@@ -53,6 +53,7 @@ mod callback;
 pub mod client;
 /// Generic header map
 pub mod header;
+pub mod model;
 pub mod packet;
 pub(self) mod socket;
 pub mod transport;
