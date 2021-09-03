@@ -1,5 +1,5 @@
 pub use super::super::{event::Event, payload::Payload};
-use crate::packet::Packet;
+use crate::{packet::Packet, socket::EventCallback};
 use native_tls::TlsConnector;
 use rust_engineio::{
     header::{HeaderMap, HeaderValue},
@@ -8,7 +8,7 @@ use rust_engineio::{
 use url::Url;
 
 use crate::error::Result;
-use std::{time::Duration, vec};
+use std::{sync::RwLock, time::Duration, vec};
 
 use crate::socket::Socket as InnerSocket;
 
@@ -40,7 +40,7 @@ pub enum TransportType {
 /// acts the `build` method and returns a connected [`Socket`].
 pub struct SocketBuilder {
     address: String,
-    on: Option<Vec<(Event, Box<SocketCallback>)>>,
+    on: Option<Vec<(Event, RwLock<Box<SocketCallback>>)>>,
     namespace: Option<String>,
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
@@ -126,8 +126,8 @@ impl SocketBuilder {
         F: FnMut(Payload, Socket) + 'static + Sync + Send,
     {
         match self.on {
-            Some(ref mut vector) => vector.push((event.into(), Box::new(callback))),
-            None => self.on = Some(vec![(event.into(), Box::new(callback))]),
+            Some(ref mut vector) => vector.push((event.into(), RwLock::new(Box::new(callback)))),
+            None => self.on = Some(vec![(event.into(), RwLock::new(Box::new(callback)))]),
         }
         self
     }
@@ -238,12 +238,7 @@ impl SocketBuilder {
             TransportType::WebsocketUpgrade => builder.build_websocket_with_upgrade()?,
         };
 
-        let mut socket = Socket::new_with_socket(self.address, self.namespace, socket)?;
-        if let Some(callbacks) = self.on {
-            for (event, callback) in callbacks {
-                socket.on(event, Box::new(callback)).unwrap();
-            }
-        }
+        let mut socket = Socket::new(self.address, self.namespace, socket, self.on)?;
         socket.connect()?;
         Ok(socket)
     }
@@ -258,30 +253,11 @@ impl Socket {
         address: T,
         namespace: Option<String>,
         engine_socket: EngineSocket,
+        on: Option<Vec<EventCallback>>,
     ) -> Result<Self> {
         Ok(Socket {
-            socket: InnerSocket::new(address, namespace, engine_socket)?,
+            socket: InnerSocket::new(address, namespace, engine_socket, on)?,
         })
-    }
-
-    pub(crate) fn new_with_socket<T: Into<String>>(
-        address: T,
-        namespace: Option<String>,
-        engine_socket: EngineSocket,
-    ) -> Result<Self> {
-        Ok(Socket {
-            socket: InnerSocket::new(address, namespace, engine_socket)?,
-        })
-    }
-
-    /// Registers a new callback for a certain event. This returns an
-    /// `Error::IllegalActionAfterOpen` error if the callback is registered
-    /// after a call to the `connect` method.
-    pub(crate) fn on<F>(&mut self, event: Event, callback: Box<F>) -> Result<()>
-    where
-        F: FnMut(Payload, Self) + 'static + Sync + Send,
-    {
-        self.socket.on(event, callback)
     }
 
     /// Connects the client to a server. Afterwards the `emit_*` methods can be
@@ -537,25 +513,28 @@ mod test {
         Ok(())
     }
 
+    fn callbacks() -> Vec<EventCallback> {
+        let mut callbacks: Vec<EventCallback> = Vec::new();
+        callbacks.push((
+            "test".into(),
+            RwLock::new(Box::new(|message, _| {
+                if let Payload::String(st) = message {
+                    println!("{}", st)
+                }
+            })),
+        ));
+
+        callbacks.push(("Error".into(), RwLock::new(Box::new(|_, _| {}))));
+
+        callbacks.push(("Connect".into(), RwLock::new(Box::new(|_, _| {}))));
+
+        callbacks.push(("Close".into(), RwLock::new(Box::new(|_, _| {}))));
+
+        return callbacks;
+    }
+
     fn test_socketio_socket(socket: Socket) -> Result<()> {
-        let mut socket = socket;
-
-        assert!(socket
-            .on(
-                "test".into(),
-                Box::new(|message, _| {
-                    if let Payload::String(st) = message {
-                        println!("{}", st)
-                    }
-                })
-            )
-            .is_ok());
-
-        assert!(socket.on("Error".into(), Box::new(|_, _| {})).is_ok());
-
-        assert!(socket.on("Connect".into(), Box::new(|_, _| {})).is_ok());
-
-        assert!(socket.on("Close".into(), Box::new(|_, _| {})).is_ok());
+        let socket = socket;
 
         // Tests need to consume packets rather than forward to callbacks.
         socket.socket.connect_with_thread(false).unwrap();
@@ -659,7 +638,7 @@ mod test {
 
         let engine_socket = EngineSocketBuilder::new(url.clone()).build_with_fallback()?;
 
-        let socket = Socket::new(url, None, engine_socket)?;
+        let socket = Socket::new(url, None, engine_socket, Some(callbacks()))?;
 
         test_socketio_socket(socket)
     }
@@ -670,7 +649,7 @@ mod test {
 
         let engine_socket = EngineSocketBuilder::new(url.clone()).build()?;
 
-        let socket = Socket::new(url, None, engine_socket)?;
+        let socket = Socket::new(url, None, engine_socket, Some(callbacks()))?;
 
         test_socketio_socket(socket)
     }
@@ -682,7 +661,7 @@ mod test {
 
         let engine_socket = EngineSocketBuilder::new(url.clone()).build_polling()?;
 
-        let socket = Socket::new(url, None, engine_socket)?;
+        let socket = Socket::new(url, None, engine_socket, Some(callbacks()))?;
 
         test_socketio_socket(socket)
     }
@@ -693,7 +672,7 @@ mod test {
 
         let engine_socket = EngineSocketBuilder::new(url.clone()).build_websocket()?;
 
-        let socket = Socket::new(url, None, engine_socket)?;
+        let socket = Socket::new(url, None, engine_socket, Some(callbacks()))?;
 
         test_socketio_socket(socket)
     }
@@ -706,7 +685,7 @@ mod test {
 
         let engine_socket = EngineIoSocketBuilder::new(url.clone()).build()?;
 
-        let socket = Socket::new(url, None, engine_socket)?;
+        let socket = Socket::new(url, None, engine_socket, Some(callbacks()))?;
 
         test_socketio_socket(socket)
     }

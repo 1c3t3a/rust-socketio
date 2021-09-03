@@ -55,6 +55,7 @@ impl Socket<rust_engineio::client::Socket> {
         address: T,
         nsp: Option<String>,
         engine_socket: rust_engineio::client::Socket,
+        on_event: Option<Vec<EventCallback>>,
     ) -> Result<Self> {
         let mut url: Url = Url::parse(&address.into())?;
 
@@ -62,30 +63,25 @@ impl Socket<rust_engineio::client::Socket> {
             url.set_path("/socket.io/");
         }
 
+        let mut on = Vec::new();
+
+        if let Some(on_event) = on_event {
+            on = on_event;
+        }
+
         Ok(Socket {
             engine_socket: Arc::new(engine_socket),
             host: Arc::new(url),
             connected: Arc::new(AtomicBool::default()),
-            on: Arc::new(Vec::new()),
+            on: Arc::new(on),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
             nsp: Arc::new(nsp),
         })
     }
 
-    /// Registers a new event with some callback function `F`.
-    pub fn on<F>(&mut self, event: Event, callback: Box<F>) -> Result<()>
-    where
-        F: FnMut(Payload, SocketIoSocket) + 'static + Sync + Send,
-    {
-        Arc::get_mut(&mut self.on)
-            .unwrap()
-            .push((event, RwLock::new(callback)));
-        Ok(())
-    }
-
     /// Connects to the server. This includes a connection of the underlying
     /// engine.io client and afterwards an opening socket.io request.
-    pub fn connect(&self) -> Result<()> {
+    pub(super) fn connect(&self) -> Result<()> {
         self.connect_with_thread(true)
     }
 
@@ -133,9 +129,10 @@ impl Socket<rust_engineio::client::Socket> {
 
     /// Disconnects from the server by sending a socket.io `Disconnect` packet. This results
     /// in the underlying engine.io transport to get closed as well.
-    pub fn disconnect(&mut self) -> Result<()> {
+    pub(super) fn disconnect(&mut self) -> Result<()> {
         if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
-            return Err(Error::IllegalActionAfterOpen());
+            // If we are already disconnected no need to do anything
+            return Ok(());
         }
 
         let disconnect_packet = SocketPacket::new(
@@ -157,7 +154,7 @@ impl Socket<rust_engineio::client::Socket> {
     }
 
     /// Sends a `socket.io` packet to the server using the `engine.io` client.
-    pub fn send(&self, packet: SocketPacket) -> Result<()> {
+    pub(super) fn send(&self, packet: SocketPacket) -> Result<()> {
         if !self.is_engineio_connected()? || !self.connected.load(Ordering::Acquire) {
             return Err(Error::IllegalActionBeforeOpen());
         }
@@ -178,7 +175,7 @@ impl Socket<rust_engineio::client::Socket> {
 
     /// Emits to certain event with given data. The data needs to be JSON,
     /// otherwise this returns an `InvalidJson` error.
-    pub fn emit(&self, event: Event, data: Payload) -> Result<()> {
+    pub(super) fn emit(&self, event: Event, data: Payload) -> Result<()> {
         let default = String::from("/");
         let nsp = self.nsp.as_ref().as_ref().unwrap_or(&default);
 
@@ -230,7 +227,7 @@ impl Socket<rust_engineio::client::Socket> {
     /// Emits and requests an `ack`. The `ack` returns a `Arc<RwLock<Ack>>` to
     /// acquire shared mutability. This `ack` will be changed as soon as the
     /// server answered with an `ack`.
-    pub fn emit_with_ack<F>(
+    pub(super) fn emit_with_ack<F>(
         &self,
         event: Event,
         data: Payload,
@@ -259,7 +256,7 @@ impl Socket<rust_engineio::client::Socket> {
         Ok(())
     }
 
-    pub(crate) fn iter(&self) -> Iter<rust_engineio::client::Socket> {
+    pub(super) fn iter(&self) -> Iter<rust_engineio::client::Socket> {
         Iter {
             socket: self,
             engine_iter: self.engine_socket.iter(),
