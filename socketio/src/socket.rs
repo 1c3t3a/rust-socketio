@@ -36,9 +36,7 @@ pub struct Ack {
 
 /// Handles communication in the `socket.io` protocol.
 #[derive(Clone)]
-pub struct Socket<
-    EngineSocket: rust_engineio::model::Socket + Send + Sync + Clone + 'static + Debug,
-> {
+pub struct Socket<EngineSocket: rust_engineio::model::Socket + 'static> {
     engine_socket: Arc<EngineSocket>,
     host: Arc<Url>,
     connected: Arc<AtomicBool>,
@@ -50,7 +48,7 @@ pub struct Socket<
 }
 
 // TODO: change this to after .clone is refactored
-// impl<EngineSocket: rust_engineio::model::Socket + Send + Sync + Clone + 'static> Socket<EngineSocket> {
+// impl<EngineSocket: rust_engineio::model::Socket + 'static> Socket<EngineSocket> {
 impl Socket<rust_engineio::client::Socket> {
     /// Creates an instance of `Socket`.
     pub(super) fn new<T: Into<String>>(
@@ -519,7 +517,7 @@ impl Debug for Ack {
     }
 }
 
-impl<T: rust_engineio::model::Socket + Send + Sync + Clone + Debug> Debug for Socket<T> {
+impl<T: rust_engineio::model::Socket + Debug> Debug for Socket<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("Socket(engine_socket: {:?}, host: {:?}, connected: {:?}, on: <defined callbacks>, outstanding_acks: {:?}, nsp: {:?})",
             self.engine_socket,
@@ -531,10 +529,7 @@ impl<T: rust_engineio::model::Socket + Send + Sync + Clone + Debug> Debug for So
     }
 }
 
-pub(crate) struct Iter<
-    'a,
-    EngineSocket: rust_engineio::model::Socket + Send + Sync + Clone + 'static + Debug,
-> {
+pub(crate) struct Iter<'a, EngineSocket: rust_engineio::model::Socket + 'static> {
     socket: &'a Socket<EngineSocket>,
     engine_iter: rust_engineio::client::Iter<'a>,
 }
