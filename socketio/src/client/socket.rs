@@ -82,7 +82,7 @@ impl Socket {
     /// use serde_json::json;
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, socket: Socket| {
+    ///     .on("test", |payload: Payload, socket: &Socket| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     ///      })
@@ -111,11 +111,13 @@ impl Socket {
     /// use rust_socketio::{SocketBuilder, Payload, Socket};
     /// use serde_json::json;
     ///
+    /// fn handle_test(payload: Payload, socket: &Socket) {
+    ///     println!("Received: {:#?}", payload);
+    ///     socket.emit("test", json!({"hello": true})).expect("Server unreachable");
+    /// }
+    ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, socket: Socket| {
-    ///         println!("Received: {:#?}", payload);
-    ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
-    ///      })
+    ///     .on("test", handle_test)
     ///     .connect()
     ///     .expect("connection failed");
     ///
@@ -150,7 +152,7 @@ impl Socket {
     ///
     /// # Example
     /// ```
-    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use rust_socketio::{SocketBuilder, Payload, Socket};
     /// use serde_json::json;
     /// use std::time::Duration;
     /// use std::thread::sleep;
@@ -161,8 +163,10 @@ impl Socket {
     ///     .expect("connection failed");
     ///
     ///
-    ///
-    /// let ack_callback = |message: Payload, _| {
+    /// // &Socket MUST be annotated when storing a closure in a variable before
+    /// // passing to emit_with_awk. Inline closures and calling functions work as
+    /// // intended.
+    /// let ack_callback = |message: Payload, socket: &Socket| {
     ///     match message {
     ///         Payload::String(str) => println!("{}", str),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),

@@ -9,7 +9,7 @@
 //! // define a callback which is called when a payload is received
 //! // this callback gets the payload as well as an instance of the
 //! // socket to communicate with the server
-//! let callback = |payload: Payload, socket: Socket| {
+//! let callback = |payload: Payload, socket: &Socket| {
 //!        match payload {
 //!            Payload::String(str) => println!("Received: {}", str),
 //!            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -31,7 +31,7 @@
 //! socket.emit("foo", json_payload).expect("Server unreachable");
 //!
 //! // define a callback, that's executed when the ack got acked
-//! let ack_callback = |message: Payload, _| {
+//! let ack_callback = |message: Payload, _: &Socket| {
 //!     println!("Yehaa! My ack got acked?");
 //!     println!("Ack data: {:#?}", message);
 //! };
