@@ -41,11 +41,11 @@ impl SocketBuilder {
     /// will be used.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use rust_socketio::{SocketBuilder, Payload, Socket};
     /// use serde_json::json;
     ///
     ///
-    /// let callback = |payload: Payload, _| {
+    /// let callback = |payload: Payload, socket: &Socket| {
     ///            match payload {
     ///                Payload::String(str) => println!("Received: {}", str),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -94,16 +94,14 @@ impl SocketBuilder {
     /// ```rust
     /// use rust_socketio::{SocketBuilder, Payload};
     ///
-    /// let callback = |payload: Payload, _| {
+    /// let socket = SocketBuilder::new("http://localhost:4200/")
+    ///     .namespace("/admin")
+    ///     .on("test", |payload: Payload, _| {
     ///            match payload {
     ///                Payload::String(str) => println!("Received: {}", str),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
     ///            }
-    /// };
-    ///
-    /// let socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .namespace("/admin")
-    ///     .on("test", callback)
+    ///     })
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
     ///     .connect();
     ///
