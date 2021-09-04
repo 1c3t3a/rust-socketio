@@ -5,6 +5,7 @@ use crate::error::{Error, Result};
 use crate::packet::{HandshakePacket, Packet, PacketId, Payload};
 use bytes::Bytes;
 use std::convert::TryFrom;
+use std::sync::RwLock;
 use std::{fmt::Debug, sync::atomic::Ordering};
 use std::{
     sync::{atomic::AtomicBool, Arc, Mutex},
@@ -25,6 +26,8 @@ pub struct Socket {
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     connection_data: Arc<HandshakePacket>,
+    /// Since we get packets in payloads it's possible to have a state where only some of the packets have been consumed.
+    remaining_packets: Arc<RwLock<Option<crate::packet::IntoIter>>>,
 }
 
 impl Socket {
@@ -48,13 +51,8 @@ impl Socket {
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
             connection_data: Arc::new(handshake),
+            remaining_packets: Arc::new(RwLock::new(None)),
         }
-    }
-
-    pub fn close(&self) -> Result<()> {
-        self.emit(Packet::new(PacketId::Close, Bytes::new()))?;
-        self.connected.store(false, Ordering::Release);
-        Ok(())
     }
 
     /// Opens the connection to a specified server. The first Pong packet is sent
@@ -72,6 +70,18 @@ impl Socket {
 
         // emit a pong packet to keep trigger the ping cycle on the server
         self.emit(Packet::new(PacketId::Pong, Bytes::new()))?;
+
+        Ok(())
+    }
+
+    pub fn disconnect(&self) -> Result<()> {
+        if let Some(on_close) = self.on_close.as_ref() {
+            spawn_scoped!(on_close(()));
+        }
+
+        self.emit(Packet::new(PacketId::Close, Bytes::new()))?;
+
+        self.connected.store(false, Ordering::Release);
 
         Ok(())
     }
@@ -103,17 +113,37 @@ impl Socket {
     }
 
     /// Polls for next payload
-    pub(crate) fn poll(&self) -> Result<Option<Payload>> {
-        if self.connected.load(Ordering::Acquire) {
-            let data = self.transport.as_transport().poll()?;
+    pub(crate) fn poll(&self) -> Result<Option<Packet>> {
+        loop {
+            if self.connected.load(Ordering::Acquire) {
+                if self.remaining_packets.read()?.is_some() {
+                    // SAFETY: checked is some above
+                    let mut iter = self.remaining_packets.write()?;
+                    let iter = iter.as_mut().unwrap();
+                    if let Some(packet) = iter.next() {
+                        return Ok(Some(packet));
+                    } else {
+                        // Iterator has run out of packets, get a new payload
+                    }
+                }
 
-            if data.is_empty() {
+                // TODO: timeout?
+                let data = self.transport.as_transport().poll()?;
+
+                if data.is_empty() {
+                    continue;
+                }
+
+                let payload = Payload::try_from(data)?;
+                let mut iter = payload.into_iter();
+
+                if let Some(packet) = iter.next() {
+                    *self.remaining_packets.write()? = Some(iter);
+                    return Ok(Some(packet));
+                }
+            } else {
                 return Ok(None);
             }
-
-            Ok(Some(Payload::try_from(data)?))
-        } else {
-            Err(Error::IllegalActionBeforeOpen())
         }
     }
 
