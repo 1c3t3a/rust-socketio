@@ -4,7 +4,7 @@ use crate::transport::Transport;
 
 use crate::error::{Error, Result};
 use crate::header::HeaderMap;
-use crate::packet::{HandshakePacket, Packet, PacketId, Payload};
+use crate::packet::{HandshakePacket, Packet, PacketId};
 use crate::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
 use bytes::Bytes;
 use native_tls::TlsConnector;
@@ -280,8 +280,8 @@ impl SocketBuilder {
 }
 
 impl Socket {
-    pub fn close(&mut self) -> Result<()> {
-        self.socket.close()
+    pub fn close(&self) -> Result<()> {
+        self.socket.disconnect()
     }
 
     /// Opens the connection to a specified server. The first Pong packet is sent
@@ -290,24 +290,21 @@ impl Socket {
         self.socket.connect()
     }
 
+    /// Disconnects the connection.
+    pub fn disconnect(&self) -> Result<()> {
+        self.socket.disconnect()
+    }
+
     /// Sends a packet to the server.
     pub fn emit(&self, packet: Packet) -> Result<()> {
         self.socket.emit(packet)
     }
 
     /// Polls for next payload
-    pub(crate) fn poll(&self) -> Result<Option<Payload>> {
-        let payload = self.socket.poll()?;
-
-        if payload.is_none() {
-            return Ok(None);
-        }
-
-        let payload = payload.unwrap();
-
-        let iter = payload.iter();
-
-        for packet in iter {
+    //TODO: private?
+    pub fn poll(&self) -> Result<Option<Packet>> {
+        let packet = self.socket.poll()?;
+        if let Some(packet) = packet {
             // check for the appropriate action or callback
             self.socket.handle_packet(packet.clone())?;
             match packet.packet_id {
@@ -321,7 +318,7 @@ impl Socket {
                 PacketId::Close => {
                     self.socket.handle_close()?;
                     // set current state to not connected and stop polling
-                    self.socket.close()?;
+                    self.socket.disconnect()?;
                 }
                 PacketId::Open => {
                     unreachable!("Won't happen as we open the connection beforehand");
@@ -340,8 +337,10 @@ impl Socket {
                 }
                 PacketId::Noop => (),
             }
+            return Ok(Some(packet));
+        } else {
+            return Ok(None);
         }
-        Ok(Some(payload))
     }
 
     /// Check if the underlying transport client is connected.
@@ -366,23 +365,11 @@ pub struct Iter<'a> {
 impl<'a> Iterator for Iter<'a> {
     type Item = Result<Packet>;
     fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
-        let mut next = None;
-        if let Some(iter) = self.iter.as_mut() {
-            next = iter.next();
+        match self.socket.poll() {
+            Ok(Some(packet)) => Some(Ok(packet)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err.into())),
         }
-        if next.is_none() {
-            let result = self.socket.poll();
-            if let Err(error) = result {
-                return Some(Err(error));
-            } else if let Ok(Some(payload)) = result {
-                let mut iter = payload.into_iter();
-                next = iter.next();
-                self.iter = Some(iter);
-            } else {
-                return None;
-            }
-        }
-        next.map(Ok)
     }
 }
 
@@ -405,9 +392,6 @@ mod test {
         sut.connect()?;
 
         assert!(sut.poll().is_ok());
-
-        let sut = builder(url).build()?;
-        assert!(sut.poll().is_err());
 
         Ok(())
     }
@@ -436,7 +420,7 @@ mod test {
     }
 
     fn test_connection(socket: Socket) -> Result<()> {
-        let mut socket = socket;
+        let socket = socket;
 
         socket.connect().unwrap();
 
