@@ -126,7 +126,7 @@ impl Socket {
                 }
 
                 // Iterator has run out of packets, get a new payload
-                // TODO: timeout?
+                // TODO: 0.3.X timeout?
                 let data = self.transport.as_transport().poll()?;
 
                 if data.is_empty() {
