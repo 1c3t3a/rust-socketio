@@ -1,8 +1,8 @@
 on:
   push:
-    branches: [main]
+    branches: [main, refactoring]
   pull_request:
-    branches: [main]
+    branches: [main, refactoring]
 
 name: generate coverage
 
@@ -24,6 +24,9 @@ jobs:
       - name: Setup docker
         id: buildx
         uses: docker/setup-buildx-action@v1
+
+      - name: Generate keys
+        run: make keys
 
       - name: Build docker container
         run: |

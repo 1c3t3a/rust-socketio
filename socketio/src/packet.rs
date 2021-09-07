@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 use byte::{ctx::Str, BytesExt};
 use bytes::{BufMut, Bytes, BytesMut};
 use regex::Regex;
+use std::convert::TryFrom;
 
 /// An enumeration of the different `Packet` types in the `socket.io` protocol.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -21,97 +22,116 @@ pub struct Packet {
     pub packet_type: PacketId,
     pub nsp: String,
     pub data: Option<String>,
-    pub binary_data: Option<Bytes>,
     pub id: Option<i32>,
-    pub attachments: Option<u8>,
+    pub attachment_count: u8,
+    pub attachments: Option<Vec<Bytes>>,
 }
 
-/// Converts a `u8` into a `PacketId`.
-#[inline]
-pub const fn u8_to_packet_id(b: u8) -> Result<PacketId> {
-    match b as char {
-        '0' => Ok(PacketId::Connect),
-        '1' => Ok(PacketId::Disconnect),
-        '2' => Ok(PacketId::Event),
-        '3' => Ok(PacketId::Ack),
-        '4' => Ok(PacketId::ConnectError),
-        '5' => Ok(PacketId::BinaryEvent),
-        '6' => Ok(PacketId::BinaryAck),
-        _ => Err(Error::InvalidPacketId(b)),
+impl TryFrom<u8> for PacketId {
+    type Error = Error;
+    fn try_from(b: u8) -> Result<Self> {
+        match b as char {
+            '0' => Ok(PacketId::Connect),
+            '1' => Ok(PacketId::Disconnect),
+            '2' => Ok(PacketId::Event),
+            '3' => Ok(PacketId::Ack),
+            '4' => Ok(PacketId::ConnectError),
+            '5' => Ok(PacketId::BinaryEvent),
+            '6' => Ok(PacketId::BinaryAck),
+            _ => Err(Error::InvalidPacketId(b)),
+        }
     }
 }
 
 impl Packet {
     /// Creates an instance.
-    pub const fn new(
+    pub(crate) const fn new(
         packet_type: PacketId,
         nsp: String,
         data: Option<String>,
-        binary_data: Option<Bytes>,
         id: Option<i32>,
-        attachments: Option<u8>,
+        attachment_count: u8,
+        attachments: Option<Vec<Bytes>>,
     ) -> Self {
         Packet {
             packet_type,
             nsp,
             data,
-            binary_data,
             id,
+            attachment_count,
             attachments,
         }
     }
+}
 
+impl From<Packet> for Bytes {
+    fn from(packet: Packet) -> Self {
+        Bytes::from(&packet)
+    }
+}
+
+impl From<&Packet> for Bytes {
     /// Method for encoding from a `Packet` to a `u8` byte stream.
     /// The binary payload of a packet is not put at the end of the
     /// stream as it gets handled and send by it's own logic via the socket.
-    pub fn encode(&self) -> Bytes {
+    fn from(packet: &Packet) -> Bytes {
         // first the packet type
-        let mut string = (self.packet_type as u8).to_string();
+        let mut string = (packet.packet_type as u8).to_string();
 
         // eventually a number of attachments, followed by '-'
-        if let PacketId::BinaryAck | PacketId::BinaryEvent = self.packet_type {
-            string.push_str(&self.attachments.as_ref().unwrap().to_string());
+        if let PacketId::BinaryAck | PacketId::BinaryEvent = packet.packet_type {
+            string.push_str(&packet.attachment_count.to_string());
             string.push('-');
         }
 
         // if the namespace is different from the default one append it as well,
         // followed by ','
-        if self.nsp != "/" {
-            string.push_str(self.nsp.as_ref());
+        if packet.nsp != "/" {
+            string.push_str(packet.nsp.as_ref());
             string.push(',');
         }
 
         // if an id is present append it...
-        if let Some(id) = self.id.as_ref() {
+        if let Some(id) = packet.id.as_ref() {
             string.push_str(&id.to_string());
         }
 
         let mut buffer = BytesMut::new();
         buffer.put(string.as_ref());
-        if self.binary_data.as_ref().is_some() {
+        if packet.attachments.as_ref().is_some() {
             // check if an event type is present
-            let placeholder = if let Some(event_type) = self.data.as_ref() {
+            let placeholder = if let Some(event_type) = packet.data.as_ref() {
                 format!(
                     "[{},{{\"_placeholder\":true,\"num\":{}}}]",
                     event_type,
-                    self.attachments.unwrap() - 1,
+                    packet.attachment_count - 1,
                 )
             } else {
                 format!(
                     "[{{\"_placeholder\":true,\"num\":{}}}]",
-                    self.attachments.unwrap() - 1,
+                    packet.attachment_count - 1,
                 )
             };
 
             // build the buffers
             buffer.put(placeholder.as_ref());
-        } else if let Some(data) = self.data.as_ref() {
+        } else if let Some(data) = packet.data.as_ref() {
             buffer.put(data.as_ref());
         }
 
         buffer.freeze()
     }
+}
 
+impl TryFrom<Bytes> for Packet {
+    type Error = Error;
+    fn try_from(value: Bytes) -> Result<Self> {
+        Packet::try_from(&value)
+    }
+}
+
+impl TryFrom<&Bytes> for Packet {
+    type Error = Error;
     /// Decodes a packet given a `Bytes` type.
     /// The binary payload of a packet is not put at the end of the
     /// stream as it gets handled and send by it's own logic via the socket.
@@ -119,38 +139,36 @@ impl Packet {
     /// binary data, instead the socket is responsible for handling
     /// this member. This is done because the attachment is usually
     /// send in another packet.
-    pub fn decode_bytes<'a>(payload: &'a Bytes) -> Result<Self> {
+    fn try_from(payload: &Bytes) -> Result<Packet> {
         let mut i = 0;
-        let packet_id = u8_to_packet_id(*payload.first().ok_or(Error::EmptyPacket)?)?;
+        let packet_id = PacketId::try_from(*payload.first().ok_or(Error::IncompletePacket())?)?;
 
-        let attachments = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
+        let attachment_count = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
             let start = i + 1;
 
-            while payload.get(i).ok_or(Error::IncompletePacket)? != &b'-' && i < payload.len() {
+            while payload.get(i).ok_or(Error::IncompletePacket())? != &b'-' && i < payload.len() {
                 i += 1;
             }
-            Some(
-                payload
-                    .iter()
-                    .skip(start)
-                    .take(i - start)
-                    .map(|byte| *byte as char)
-                    .collect::<String>()
-                    .parse::<u8>()?,
-            )
+            payload
+                .iter()
+                .skip(start)
+                .take(i - start)
+                .map(|byte| *byte as char)
+                .collect::<String>()
+                .parse::<u8>()?
         } else {
-            None
+            0
         };
 
-        let nsp: &'a str = if payload.get(i + 1).ok_or(Error::IncompletePacket)? == &b'/' {
+        let nsp: &str = if payload.get(i + 1).ok_or(Error::IncompletePacket())? == &b'/' {
             let mut start = i + 1;
-            while payload.get(i).ok_or(Error::IncompletePacket)? != &b',' && i < payload.len() {
+            while payload.get(i).ok_or(Error::IncompletePacket())? != &b',' && i < payload.len() {
                 i += 1;
             }
             let len = i - start;
             payload
                 .read_with(&mut start, Str::Len(len))
-                .map_err(|_| Error::IncompletePacket)?
+                .map_err(|_| Error::IncompletePacket())?
         } else {
             "/"
         };
@@ -159,7 +177,7 @@ impl Packet {
         let id = if (*next as char).is_digit(10) && i < payload.len() {
             let start = i + 1;
             i += 1;
-            while (*payload.get(i).ok_or(Error::IncompletePacket)? as char).is_digit(10)
+            while (*payload.get(i).ok_or(Error::IncompletePacket())? as char).is_digit(10)
                 && i < payload.len()
             {
                 i += 1;
@@ -239,9 +257,9 @@ impl Packet {
             packet_id,
             nsp.to_owned(),
             data,
-            None,
             id,
-            attachments,
+            attachment_count,
+            None,
         ))
     }
 }
@@ -255,7 +273,7 @@ mod test {
     /// https://github.com/socketio/socket.io-protocol
     fn test_decode() {
         let payload = Bytes::from_static(b"0{\"token\":\"123\"}");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -264,14 +282,14 @@ mod test {
                 "/".to_owned(),
                 Some(String::from("{\"token\":\"123\"}")),
                 None,
-                None,
+                0,
                 None,
             ),
             packet.unwrap()
         );
 
         let payload = Bytes::from_static(b"0/admin,{\"token\":\"123\"}");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -280,14 +298,14 @@ mod test {
                 "/admin".to_owned(),
                 Some(String::from("{\"token\":\"123\"}")),
                 None,
-                None,
+                0,
                 None,
             ),
             packet.unwrap()
         );
 
         let payload = Bytes::from_static(b"1/admin,");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -296,14 +314,14 @@ mod test {
                 "/admin".to_owned(),
                 None,
                 None,
-                None,
+                0,
                 None,
             ),
             packet.unwrap()
         );
 
         let payload = Bytes::from_static(b"2[\"hello\",1]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -312,14 +330,14 @@ mod test {
                 "/".to_owned(),
                 Some(String::from("[\"hello\",1]")),
                 None,
-                None,
+                0,
                 None,
             ),
             packet.unwrap()
         );
 
         let payload = Bytes::from_static(b"2/admin,456[\"project:delete\",123]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -327,15 +345,15 @@ mod test {
                 PacketId::Event,
                 "/admin".to_owned(),
                 Some(String::from("[\"project:delete\",123]")),
-                None,
                 Some(456),
+                0,
                 None,
             ),
             packet.unwrap()
         );
 
         let payload = Bytes::from_static(b"3/admin,456[]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -343,15 +361,15 @@ mod test {
                 PacketId::Ack,
                 "/admin".to_owned(),
                 Some(String::from("[]")),
-                None,
                 Some(456),
+                0,
                 None,
             ),
             packet.unwrap()
         );
 
         let payload = Bytes::from_static(b"4/admin,{\"message\":\"Not authorized\"}");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -360,14 +378,14 @@ mod test {
                 "/admin".to_owned(),
                 Some(String::from("{\"message\":\"Not authorized\"}")),
                 None,
-                None,
+                0,
                 None,
             ),
             packet.unwrap()
         );
 
         let payload = Bytes::from_static(b"51-[\"hello\",{\"_placeholder\":true,\"num\":0}]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -376,8 +394,8 @@ mod test {
                 "/".to_owned(),
                 Some(String::from("\"hello\"")),
                 None,
+                1,
                 None,
-                Some(1),
             ),
             packet.unwrap()
         );
@@ -385,7 +403,7 @@ mod test {
         let payload = Bytes::from_static(
             b"51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]",
         );
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -393,15 +411,15 @@ mod test {
                 PacketId::BinaryEvent,
                 "/admin".to_owned(),
                 Some(String::from("\"project:delete\"")),
-                None,
                 Some(456),
-                Some(1),
+                1,
+                None,
             ),
             packet.unwrap()
         );
 
         let payload = Bytes::from_static(b"61-/admin,456[{\"_placeholder\":true,\"num\":0}]");
-        let packet = Packet::decode_bytes(&payload);
+        let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
@@ -409,9 +427,9 @@ mod test {
                 PacketId::BinaryAck,
                 "/admin".to_owned(),
                 None,
-                None,
                 Some(456),
-                Some(1),
+                1,
+                None,
             ),
             packet.unwrap()
         );
@@ -426,12 +444,12 @@ mod test {
             "/".to_owned(),
             Some(String::from("{\"token\":\"123\"}")),
             None,
-            None,
+            0,
             None,
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "0{\"token\":\"123\"}".to_string().into_bytes()
         );
 
@@ -440,12 +458,12 @@ mod test {
             "/admin".to_owned(),
             Some(String::from("{\"token\":\"123\"}")),
             None,
-            None,
+            0,
             None,
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "0/admin,{\"token\":\"123\"}".to_string().into_bytes()
         );
 
@@ -454,34 +472,37 @@ mod test {
             "/admin".to_owned(),
             None,
             None,
-            None,
+            0,
             None,
         );
 
-        assert_eq!(packet.encode(), "1/admin,".to_string().into_bytes());
+        assert_eq!(Bytes::from(&packet), "1/admin,".to_string().into_bytes());
 
         let packet = Packet::new(
             PacketId::Event,
             "/".to_owned(),
             Some(String::from("[\"hello\",1]")),
             None,
-            None,
+            0,
             None,
         );
 
-        assert_eq!(packet.encode(), "2[\"hello\",1]".to_string().into_bytes());
+        assert_eq!(
+            Bytes::from(&packet),
+            "2[\"hello\",1]".to_string().into_bytes()
+        );
 
         let packet = Packet::new(
             PacketId::Event,
             "/admin".to_owned(),
             Some(String::from("[\"project:delete\",123]")),
-            None,
             Some(456),
+            0,
             None,
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "2/admin,456[\"project:delete\",123]"
                 .to_string()
                 .into_bytes()
@@ -491,24 +512,27 @@ mod test {
             PacketId::Ack,
             "/admin".to_owned(),
             Some(String::from("[]")),
-            None,
             Some(456),
+            0,
             None,
         );
 
-        assert_eq!(packet.encode(), "3/admin,456[]".to_string().into_bytes());
+        assert_eq!(
+            Bytes::from(&packet),
+            "3/admin,456[]".to_string().into_bytes()
+        );
 
         let packet = Packet::new(
             PacketId::ConnectError,
             "/admin".to_owned(),
             Some(String::from("{\"message\":\"Not authorized\"}")),
             None,
-            None,
+            0,
             None,
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "4/admin,{\"message\":\"Not authorized\"}"
                 .to_string()
                 .into_bytes()
@@ -518,13 +542,13 @@ mod test {
             PacketId::BinaryEvent,
             "/".to_owned(),
             Some(String::from("\"hello\"")),
-            Some(Bytes::from_static(&[1, 2, 3])),
             None,
-            Some(1),
+            1,
+            Some(vec![Bytes::from_static(&[1, 2, 3])]),
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "51-[\"hello\",{\"_placeholder\":true,\"num\":0}]"
                 .to_string()
                 .into_bytes()
@@ -534,13 +558,13 @@ mod test {
             PacketId::BinaryEvent,
             "/admin".to_owned(),
             Some(String::from("\"project:delete\"")),
-            Some(Bytes::from_static(&[1, 2, 3])),
             Some(456),
-            Some(1),
+            1,
+            Some(vec![Bytes::from_static(&[1, 2, 3])]),
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]"
                 .to_string()
                 .into_bytes()
@@ -550,13 +574,13 @@ mod test {
             PacketId::BinaryAck,
             "/admin".to_owned(),
             None,
-            Some(Bytes::from_static(&[3, 2, 1])),
             Some(456),
-            Some(1),
+            1,
+            Some(vec![Bytes::from_static(&[3, 2, 1])]),
         );
 
         assert_eq!(
-            packet.encode(),
+            Bytes::from(&packet),
             "61-/admin,456[{\"_placeholder\":true,\"num\":0}]"
                 .to_string()
                 .into_bytes()
@@ -565,7 +589,7 @@ mod test {
 
     #[test]
     fn test_illegal_packet_id() {
-        let _sut = u8_to_packet_id(42).expect_err("error!");
+        let _sut = PacketId::try_from(42).expect_err("error!");
         assert!(matches!(Error::InvalidPacketId(42), _sut))
     }
 }

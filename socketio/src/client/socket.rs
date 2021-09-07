@@ -1,125 +1,36 @@
-//! Rust-socket.io is a socket.io client written in the Rust Programming Language.
-//! ## Example usage
-//!
-//! ``` rust
-//! use rust_socketio::{SocketBuilder, Payload, Socket};
-//! use serde_json::json;
-//! use std::time::Duration;
-//!
-//! // define a callback which is called when a payload is received
-//! // this callback gets the payload as well as an instance of the
-//! // socket to communicate with the server
-//! let callback = |payload: Payload, mut socket: Socket| {
-//!        match payload {
-//!            Payload::String(str) => println!("Received: {}", str),
-//!            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
-//!        }
-//!        socket.emit("test", json!({"got ack": true})).expect("Server unreachable")
-//! };
-//!
-//! // get a socket that is connected to the admin namespace
-//! let mut socket = SocketBuilder::new("http://localhost:4200")
-//!      .set_namespace("/admin")
-//!      .expect("illegal namespace")
-//!      .on("test", callback)
-//!      .on("error", |err, _| eprintln!("Error: {:#?}", err))
-//!      .connect()
-//!      .expect("Connection failed");
-//!
-//! // emit to the "foo" event
-//! let json_payload = json!({"token": 123});
-//!
-//! socket.emit("foo", json_payload).expect("Server unreachable");
-//!
-//! // define a callback, that's executed when the ack got acked
-//! let ack_callback = |message: Payload, _| {
-//!     println!("Yehaa! My ack got acked?");
-//!     println!("Ack data: {:#?}", message);
-//! };
-//!
-//! let json_payload = json!({"myAckData": 123});
-//!
-//! // emit with an ack
-//! let ack = socket
-//!     .emit_with_ack("test", json_payload, Duration::from_secs(2), ack_callback)
-//!     .expect("Server unreachable");
-//! ```
-//!
-//! The main entry point for using this crate is the [`SocketBuilder`] which provides
-//! a way to easily configure a socket in the needed way. When the `connect` method
-//! is called on the builder, it returns a connected client which then could be used
-//! to emit messages to certain events. One client can only be connected to one namespace.
-//! If you need to listen to the messages in different namespaces you need to
-//! allocate multiple sockets.
-//!
-//! ## Current features
-//!
-//! This implementation now supports all of the features of the socket.io protocol mentioned
-//! [here](https://github.com/socketio/socket.io-protocol).
-//! It generally tries to make use of websockets as often as possible. This means most times
-//! only the opening request uses http and as soon as the server mentions that he is able to use
-//! websockets, an upgrade  is performed. But if this upgrade is not successful or the server
-//! does not mention an upgrade possibility, http-long polling is used (as specified in the protocol specs).
-//!
-//! Here's an overview of possible use-cases:
-//!
-//! - connecting to a server.
-//! - register callbacks for the following event types:
-//!     - open
-//!     - close
-//!     - error
-//!     - message
-//!     - custom events like "foo", "on_payment", etc.
-//! - send JSON data to the server (via `serde_json` which provides safe
-//! handling).
-//! - send JSON data to the server and receive an `ack`.
-//! - send and handle Binary data.
-//!
-#![allow(clippy::rc_buffer)]
-#![warn(clippy::complexity)]
-#![warn(clippy::style)]
-#![warn(clippy::perf)]
-#![warn(clippy::correctness)]
-/// A small macro that spawns a scoped thread. Used for calling the callback
-/// functions.
-macro_rules! spawn_scoped {
-    ($e:expr) => {
-        crossbeam_utils::thread::scope(|s| {
-            s.spawn(|_| $e);
-        })
-        .unwrap();
-    };
-}
-
-/// Contains the types and the code concerning the `engine.io` protocol.
-mod engineio;
-/// Contains the types and the code concerning the `socket.io` protocol.
-pub mod socketio;
-
-/// Contains the error type which will be returned with every result in this
-/// crate. Handles all kinds of errors.
-pub mod error;
-
-use error::Error;
+pub use super::super::{event::Event, payload::Payload};
+use crate::packet::Packet as SocketPacket;
 use native_tls::TlsConnector;
-pub use reqwest::header::{HeaderMap, HeaderValue, IntoHeaderName};
-pub use socketio::{event::Event, payload::Payload};
+use rust_engineio::client::{Socket as EngineIoSocket, SocketBuilder as EngineIoSocketBuilder};
+use rust_engineio::header::{HeaderMap, HeaderValue};
+use url::Url;
 
 use crate::error::Result;
 use std::{time::Duration, vec};
 
-use crate::socketio::transport::TransportClient;
+use crate::socket::Socket as InnerSocket;
 
 /// A socket which handles communication with the server. It's initialized with
 /// a specific address as well as an optional namespace to connect to. If `None`
 /// is given the server will connect to the default namespace `"/"`.
 #[derive(Debug, Clone)]
 pub struct Socket {
-    /// The inner transport client to delegate the methods to.
-    transport: TransportClient,
+    /// The inner socket client to delegate the methods to.
+    // TODO: Make this private
+    pub socket: InnerSocket,
 }
 
 type SocketCallback = dyn FnMut(Payload, Socket) + 'static + Sync + Send;
+
+/// Flavor of engineio transport
+//TODO: Consider longevity
+#[derive(Clone, Eq, PartialEq)]
+pub enum TransportType {
+    Any,
+    Websocket,
+    WebsocketUpgrade,
+    Polling,
+}
 
 /// A builder class for a `socket.io` socket. This handles setting up the client and
 /// configuring the callback, the namespace and metadata of the socket. If no
@@ -131,6 +42,7 @@ pub struct SocketBuilder {
     namespace: Option<String>,
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
+    transport_type: TransportType,
 }
 
 impl SocketBuilder {
@@ -152,8 +64,7 @@ impl SocketBuilder {
     /// };
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200")
-    ///     .set_namespace("/admin")
-    ///     .expect("illegal namespace")
+    ///     .namespace("/admin")
     ///     .on("test", callback)
     ///     .connect()
     ///     .expect("error while connecting");
@@ -172,18 +83,19 @@ impl SocketBuilder {
             namespace: None,
             tls_config: None,
             opening_headers: None,
+            transport_type: TransportType::Any,
         }
     }
 
-    /// Sets the target namespace of the client. The namespace must start
+    /// Sets the target namespace of the client. The namespace should start
     /// with a leading `/`. Valid examples are e.g. `/admin`, `/foo`.
-    pub fn set_namespace<T: Into<String>>(mut self, namespace: T) -> Result<Self> {
-        let nsp = namespace.into();
+    pub fn namespace<T: Into<String>>(mut self, namespace: T) -> Self {
+        let mut nsp = namespace.into();
         if !nsp.starts_with('/') {
-            return Err(Error::IllegalNamespace(nsp));
+            nsp = "/".to_owned() + &nsp;
         }
         self.namespace = Some(nsp);
-        Ok(self)
+        self
     }
 
     /// Registers a new callback for a certain [`socketio::event::Event`]. The event could either be
@@ -200,9 +112,8 @@ impl SocketBuilder {
     ///            }
     /// };
     ///
-    /// let socket = SocketBuilder::new("http://localhost:4200")
-    ///     .set_namespace("/admin")
-    ///     .expect("illegal namespace")
+    /// let socket = SocketBuilder::new("http://localhost:4200/")
+    ///     .namespace("/admin")
     ///     .on("test", callback)
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
     ///     .connect();
@@ -231,15 +142,14 @@ impl SocketBuilder {
     ///            .build()
     ///            .expect("Found illegal configuration");
     ///
-    /// let socket = SocketBuilder::new("http://localhost:4200")
-    ///     .set_namespace("/admin")
-    ///     .expect("illegal namespace")
+    /// let socket = SocketBuilder::new("http://localhost:4200/")
+    ///     .namespace("/admin")
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
-    ///     .set_tls_config(tls_connector)
+    ///     .tls_config(tls_connector)
     ///     .connect();
     ///
     /// ```
-    pub fn set_tls_config(mut self, tls_config: TlsConnector) -> Self {
+    pub fn tls_config(mut self, tls_config: TlsConnector) -> Self {
         self.tls_config = Some(tls_config);
         self
     }
@@ -250,28 +160,34 @@ impl SocketBuilder {
     /// # Example
     /// ```rust
     /// use rust_socketio::{SocketBuilder, Payload};
-    /// use reqwest::header::{ACCEPT_ENCODING};
     ///
     ///
-    /// let socket = SocketBuilder::new("http://localhost:4200")
-    ///     .set_namespace("/admin")
-    ///     .expect("illegal namespace")
+    /// let socket = SocketBuilder::new("http://localhost:4200/")
+    ///     .namespace("/admin")
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
-    ///     .set_opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
+    ///     .opening_header("accept-encoding", "application/json")
     ///     .connect();
     ///
     /// ```
-    pub fn set_opening_header<K: IntoHeaderName>(mut self, key: K, val: HeaderValue) -> Self {
+    pub fn opening_header<T: Into<HeaderValue>, K: Into<String>>(mut self, key: K, val: T) -> Self {
         match self.opening_headers {
             Some(ref mut map) => {
-                map.insert(key, val);
+                map.insert(key.into(), val.into());
             }
             None => {
                 let mut map = HeaderMap::new();
-                map.insert(key, val);
+                map.insert(key.into(), val.into());
                 self.opening_headers = Some(map);
             }
         }
+        self
+    }
+
+    /// Specifies which underlying transport type to use
+    // TODO: better docs
+    pub fn transport_type(mut self, transport_type: TransportType) -> Self {
+        self.transport_type = transport_type;
+
         self
     }
 
@@ -284,9 +200,8 @@ impl SocketBuilder {
     /// use serde_json::json;
     ///
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
-    ///     .set_namespace("/admin")
-    ///     .expect("illegal namespace")
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
+    ///     .namespace("/admin")
     ///     .on("error", |err, _| eprintln!("Socket error!: {:#?}", err))
     ///     .connect()
     ///     .expect("connection failed");
@@ -299,12 +214,29 @@ impl SocketBuilder {
     /// assert!(result.is_ok());
     /// ```
     pub fn connect(self) -> Result<Socket> {
-        let mut socket = Socket::new(
-            self.address,
-            self.namespace,
-            self.tls_config,
-            self.opening_headers,
-        );
+        let mut url = Url::parse(&self.address)?;
+
+        if url.path() == "/" {
+            url.set_path("/socket.io/");
+        }
+
+        let mut builder = EngineIoSocketBuilder::new(url);
+
+        if let Some(tls_config) = self.tls_config {
+            builder = builder.tls_config(tls_config);
+        }
+        if let Some(headers) = self.opening_headers {
+            builder = builder.headers(headers);
+        }
+
+        let socket = match self.transport_type {
+            TransportType::Any => builder.build_with_fallback()?,
+            TransportType::Polling => builder.build_polling()?,
+            TransportType::Websocket => builder.build_websocket()?,
+            TransportType::WebsocketUpgrade => builder.build_websocket_with_upgrade()?,
+        };
+
+        let mut socket = Socket::new_with_socket(self.address, self.namespace, socket)?;
         if let Some(callbacks) = self.on {
             for (event, callback) in callbacks {
                 socket.on(event, Box::new(callback)).unwrap();
@@ -316,7 +248,7 @@ impl SocketBuilder {
 }
 
 impl Socket {
-    /// Creates a socket with a certain adress to connect to as well as a
+    /// Creates a socket with a certain address to connect to as well as a
     /// namespace. If `None` is passed in as namespace, the default namespace
     /// `"/"` is taken.
     /// ```
@@ -325,10 +257,20 @@ impl Socket {
         namespace: Option<String>,
         tls_config: Option<TlsConnector>,
         opening_headers: Option<HeaderMap>,
-    ) -> Self {
-        Socket {
-            transport: TransportClient::new(address, namespace, tls_config, opening_headers),
-        }
+    ) -> Result<Self> {
+        Ok(Socket {
+            socket: InnerSocket::new(address, namespace, tls_config, opening_headers)?,
+        })
+    }
+
+    pub(crate) fn new_with_socket<T: Into<String>>(
+        address: T,
+        namespace: Option<String>,
+        engine_socket: EngineIoSocket,
+    ) -> Result<Self> {
+        Ok(Socket {
+            socket: InnerSocket::new_with_socket(address, namespace, engine_socket)?,
+        })
     }
 
     /// Registers a new callback for a certain event. This returns an
@@ -336,16 +278,16 @@ impl Socket {
     /// after a call to the `connect` method.
     pub(crate) fn on<F>(&mut self, event: Event, callback: Box<F>) -> Result<()>
     where
-        F: FnMut(Payload, Socket) + 'static + Sync + Send,
+        F: FnMut(Payload, Self) + 'static + Sync + Send,
     {
-        self.transport.on(event, callback)
+        self.socket.on(event, callback)
     }
 
     /// Connects the client to a server. Afterwards the `emit_*` methods can be
     /// called to interact with the server. Attention: it's not allowed to add a
     /// callback after a call to this method.
     pub(crate) fn connect(&mut self) -> Result<()> {
-        self.transport.connect()
+        self.socket.connect()
     }
 
     /// Sends a message to the server using the underlying `engine.io` protocol.
@@ -356,11 +298,11 @@ impl Socket {
     ///
     /// # Example
     /// ```
-    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use rust_socketio::{SocketBuilder, Socket, Payload};
     /// use serde_json::json;
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
-    ///     .on("test", |payload: Payload, mut socket| {
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
+    ///     .on("test", |payload: Payload, socket: Socket| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     ///      })
@@ -374,23 +316,23 @@ impl Socket {
     /// assert!(result.is_ok());
     /// ```
     #[inline]
-    pub fn emit<E, D>(&mut self, event: E, data: D) -> Result<()>
+    pub fn emit<E, D>(&self, event: E, data: D) -> Result<()>
     where
         E: Into<Event>,
         D: Into<Payload>,
     {
-        self.transport.emit(event.into(), data.into())
+        self.socket.emit(event.into(), data.into())
     }
 
     /// Disconnects this client from the server by sending a `socket.io` closing
     /// packet.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use rust_socketio::{SocketBuilder, Payload, Socket};
     /// use serde_json::json;
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
-    ///     .on("test", |payload: Payload, mut socket| {
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
+    ///     .on("test", |payload: Payload, socket: Socket| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     ///      })
@@ -406,7 +348,7 @@ impl Socket {
     ///
     /// ```
     pub fn disconnect(&mut self) -> Result<()> {
-        self.transport.disconnect()
+        self.socket.disconnect()
     }
 
     /// Sends a message to the server but `alloc`s an `ack` to check whether the
@@ -427,7 +369,7 @@ impl Socket {
     /// use std::time::Duration;
     /// use std::thread::sleep;
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
     ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
     ///     .connect()
     ///     .expect("connection failed");
@@ -448,7 +390,7 @@ impl Socket {
     /// ```
     #[inline]
     pub fn emit_with_ack<F, E, D>(
-        &mut self,
+        &self,
         event: E,
         data: D,
         timeout: Duration,
@@ -459,8 +401,25 @@ impl Socket {
         E: Into<Event>,
         D: Into<Payload>,
     {
-        self.transport
+        self.socket
             .emit_with_ack(event.into(), data.into(), timeout, callback)
+    }
+
+    pub(crate) fn iter(&self) -> Iter {
+        Iter {
+            socket_iter: self.socket.iter(),
+        }
+    }
+}
+
+pub(crate) struct Iter<'a> {
+    socket_iter: crate::socket::Iter<'a>,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = Result<SocketPacket>;
+    fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
+        self.socket_iter.next()
     }
 }
 
@@ -470,17 +429,18 @@ mod test {
     use std::thread::sleep;
 
     use super::*;
+    use crate::payload::Payload;
     use bytes::Bytes;
     use native_tls::TlsConnector;
-    use reqwest::header::{ACCEPT_ENCODING, HOST};
     use serde_json::json;
-    const SERVER_URL: &str = "http://localhost:4200";
+    use std::time::Duration;
 
     #[test]
-    fn it_works() {
-        let url = std::env::var("SOCKET_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+    fn socket_io_integration() -> Result<()> {
+        //TODO: check to make sure we are receiving packets rather than logging.
+        let url = crate::test::socket_io_server()?;
 
-        let mut socket = Socket::new(url, None, None, None);
+        let mut socket = Socket::new(url, None, None, None)?;
 
         let result = socket.on(
             "test".into(),
@@ -499,8 +459,8 @@ mod test {
 
         assert!(result.is_ok());
 
-        let ack_callback = move |message: Payload, mut socket_: Socket| {
-            let result = socket_.emit(
+        let ack_callback = move |message: Payload, socket: Socket| {
+            let result = socket.emit(
                 "test",
                 Payload::String(json!({"got ack": true}).to_string()),
             );
@@ -521,23 +481,19 @@ mod test {
         );
         assert!(ack.is_ok());
 
-        socket.disconnect().unwrap();
-        // assert!(socket.disconnect().is_ok());
+        sleep(Duration::from_secs(10));
 
-        sleep(Duration::from_secs(4));
+        assert!(socket.disconnect().is_ok());
+
+        Ok(())
     }
 
     #[test]
-    fn test_builder() {
-        let url = std::env::var("SOCKET_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
-
-        // expect an illegal namespace
-        assert!(SocketBuilder::new(url.clone())
-            .set_namespace("illegal")
-            .is_err());
+    fn socket_io_builder_integration() -> Result<()> {
+        let url = crate::test::socket_io_server()?;
 
         // test socket build logic
-        let socket_builder = SocketBuilder::new(url);
+        let socket_builder = SocketBuilder::new(url.clone());
 
         let tls_connector = TlsConnector::builder()
             .use_sni(true)
@@ -545,18 +501,14 @@ mod test {
             .expect("Found illegal configuration");
 
         let socket = socket_builder
-            .set_namespace("/")
-            .expect("Error!")
-            .set_tls_config(tls_connector)
-            .set_opening_header(HOST, "localhost".parse().unwrap())
-            .set_opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
+            .namespace("/")
+            .tls_config(tls_connector)
+            .opening_header("host", "localhost")
+            .opening_header("accept-encoding", "application/json")
             .on("test", |str, _| println!("Received: {:#?}", str))
             .on("message", |payload, _| println!("{:#?}", payload))
-            .connect();
+            .connect()?;
 
-        assert!(socket.is_ok());
-
-        let mut socket = socket.unwrap();
         assert!(socket.emit("message", json!("Hello World")).is_ok());
 
         assert!(socket.emit("binary", Bytes::from_static(&[46, 88])).is_ok());
@@ -570,6 +522,21 @@ mod test {
             .emit_with_ack("binary", json!("pls ack"), Duration::from_secs(1), ack_cb,)
             .is_ok());
 
-        sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(5));
+
+        SocketBuilder::new(url.clone())
+            .transport_type(TransportType::Polling)
+            .connect()?;
+        SocketBuilder::new(url.clone())
+            .transport_type(TransportType::Websocket)
+            .connect()?;
+        SocketBuilder::new(url.clone())
+            .transport_type(TransportType::WebsocketUpgrade)
+            .connect()?;
+        SocketBuilder::new(url.clone())
+            .transport_type(TransportType::Any)
+            .connect()?;
+
+        Ok(())
     }
 }

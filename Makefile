@@ -3,10 +3,13 @@
 build: 
 	@cargo build --verbose
 
-test-fast:
+keys:
+	@./ci/keygen.sh node-engine-io-secure 127.0.0.1
+
+test-fast: keys
 	@cargo test --verbose --package rust_socketio --lib -- engineio::packet && cargo test --verbose --package rust_socketio --lib -- socketio::packet
 
-test-all:
+test-all: keys
 	@cargo test --verbose 
 
 clippy:

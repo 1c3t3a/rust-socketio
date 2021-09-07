@@ -6,21 +6,31 @@ services:
         command: [ "node", "/test/engine-io-secure.js" ]
         ports:
             - "4202:4202"
+        environment:
+            - "DEBUG=*"
     node-engine-io:
         build:
             context: ../ci
         command: [ "node", "/test/engine-io.js" ]
         ports:
             - "4201:4201"
+        environment:
+            - "DEBUG=*"
     node-socket-io:
         build:
             context: ../ci
         command: [ "node", "/test/socket-io.js" ]
         ports:
             - "4200:4200"
+        environment:
+            - "DEBUG=*"
     rust-client:
-        image: mcr.microsoft.com/vscode/devcontainers/rust:0-1
+        build: 
+            context: .. 
+            dockerfile: ./.devcontainer/Dockerfile
         command: /bin/sh -c "while sleep 10000d; do :; done"
+        security_opt:
+            - seccomp:unconfined
         volumes: 
             - "..:/workspace/rust-socketio"
         environment:

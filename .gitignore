@@ -1,6 +1,8 @@
-/target
+target
 Cargo.lock
 .vscode
 .idea
 ci/node_modules
 ci/package-lock.json
+ci/cert
+
