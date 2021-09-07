@@ -301,7 +301,7 @@ impl Socket {
     }
 
     /// Polls for next payload
-    //TODO: private?
+    #[doc(hidden)]
     pub fn poll(&self) -> Result<Option<Packet>> {
         let packet = self.socket.poll()?;
         if let Some(packet) = packet {
