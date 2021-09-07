@@ -1,7 +1,7 @@
 //! rust_engineio is a engine.io client written in the Rust Programming Language.
 //! ## Example usage
 //!
-//TODO: include me
+//TODO: 0.3.X missing docs
 //! ``` rust
 //!
 //! ```

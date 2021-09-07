@@ -33,9 +33,6 @@ pub enum Error {
     IllegalActionBeforeOpen(),
     #[error("string is not json serializable: {0}")]
     InvalidJson(#[from] JsonError),
-    #[error("An illegal action (such as setting a callback after being connected) was triggered")]
-    //TODO: make these impossible by using builders and immutable data.
-    IllegalActionAfterOpen(),
     #[error("A lock was poisoned")]
     InvalidPoisonedLock(),
     #[error("Got an IO-Error: {0}")]

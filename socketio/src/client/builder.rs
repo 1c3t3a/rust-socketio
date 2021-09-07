@@ -171,7 +171,7 @@ impl SocketBuilder {
     }
 
     /// Specifies which underlying transport type to use
-    // TODO: better docs
+    // TODO: 0.3.0 better docs
     pub fn transport_type(mut self, transport_type: TransportType) -> Self {
         self.transport_type = transport_type;
 
@@ -202,7 +202,6 @@ impl SocketBuilder {
     /// ```
     pub fn connect(self) -> Result<Socket> {
         let socket = self.connect_manual()?;
-        // TODO: fix me
         let socket_clone = socket.clone();
 
         // Use thread to consume items in iterator in order to call callbacks
@@ -213,7 +212,7 @@ impl SocketBuilder {
             // terminate
             for packet in socket_clone.iter() {
                 if let e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
-                    //TODO: handle errors
+                    //TODO: 0.3.X handle errors
                     panic!("{}", e.unwrap_err())
                 }
             }
@@ -222,7 +221,7 @@ impl SocketBuilder {
         Ok(socket)
     }
 
-    //TODO: stabilize
+    //TODO: 0.3.X stabilize
     pub(crate) fn connect_manual(self) -> Result<Socket> {
         // Parse url here rather than in new to keep new returning Self.
         let mut url = Url::parse(&self.address)?;
