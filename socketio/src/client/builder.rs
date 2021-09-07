@@ -12,12 +12,16 @@ use std::thread;
 
 use crate::socket::Socket as InnerSocket;
 
-/// Flavor of engineio transport
+/// Flavor of Engine.IO transport.
 #[derive(Clone, Eq, PartialEq)]
 pub enum TransportType {
+    /// Handshakes with polling, upgrades if possible
     Any,
+    /// Handshakes with websocket. Does not use polling.
     Websocket,
+    /// Handshakes with polling, errors if upgrade fails
     WebsocketUpgrade,
+    /// Handshakes with polling
     Polling,
 }
 
@@ -170,8 +174,23 @@ impl SocketBuilder {
         self
     }
 
-    /// Specifies which underlying transport type to use
-    // TODO: 0.3.0 better docs
+    /// Specifies which EngineIO [`TransportType`] to use.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{SocketBuilder, TransportType};
+    ///
+    /// let socket = SocketBuilder::new("http://localhost:4200/")
+    ///     // Use websockets to handshake and connect.
+    ///     .transport_type(TransportType::Websocket)
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    /// // use the socket
+    /// let json_payload = json!({"token": 123});
+    ///
+    /// let result = socket.emit("foo", json_payload);
+    ///
+    /// assert!(result.is_ok());
     pub fn transport_type(mut self, transport_type: TransportType) -> Self {
         self.transport_type = transport_type;
 
