@@ -82,7 +82,7 @@ impl Socket {
     /// use serde_json::json;
     ///
     /// let mut socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, socket: &Socket| {
+    ///     .on("test", |payload: Payload, socket: Socket| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     ///      })
@@ -111,7 +111,7 @@ impl Socket {
     /// use rust_socketio::{SocketBuilder, Payload, Socket};
     /// use serde_json::json;
     ///
-    /// fn handle_test(payload: Payload, socket: &Socket) {
+    /// fn handle_test(payload: Payload, socket: Socket) {
     ///     println!("Received: {:#?}", payload);
     ///     socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     /// }
@@ -168,7 +168,7 @@ impl Socket {
     /// // &Socket MUST be annotated when storing a closure in a variable before
     /// // passing to emit_with_awk. Inline closures and calling functions work as
     /// // intended.
-    /// let ack_callback = |message: Payload, socket: &Socket| {
+    /// let ack_callback = |message: Payload, socket: Socket| {
     ///     match message {
     ///         Payload::String(str) => println!("{}", str),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
@@ -189,7 +189,7 @@ impl Socket {
         callback: F,
     ) -> Result<()>
     where
-        F: for<'a> FnMut(Payload, &'a Socket) + 'static + Sync + Send,
+        F: for<'a> FnMut(Payload, Socket) + 'static + Sync + Send,
         E: Into<Event>,
         D: Into<Payload>,
     {
@@ -240,7 +240,7 @@ impl Socket {
         let mut on = self.on.write()?;
         let lock = on.deref_mut();
         if let Some(callback) = lock.get_mut(event) {
-            callback(payload.into(), self);
+            callback(payload.into(), self.clone());
         }
         drop(lock);
         drop(on);
@@ -258,11 +258,17 @@ impl Socket {
 
                     if ack.time_started.elapsed() < ack.timeout {
                         if let Some(ref payload) = socket_packet.data {
-                            ack.callback.deref_mut()(Payload::String(payload.to_owned()), self);
+                            ack.callback.deref_mut()(
+                                Payload::String(payload.to_owned()),
+                                self.clone(),
+                            );
                         }
                         if let Some(ref attachments) = socket_packet.attachments {
                             if let Some(payload) = attachments.get(0) {
-                                ack.callback.deref_mut()(Payload::Binary(payload.to_owned()), self);
+                                ack.callback.deref_mut()(
+                                    Payload::Binary(payload.to_owned()),
+                                    self.clone(),
+                                );
                             }
                         }
                     } else {
@@ -418,7 +424,7 @@ mod test {
 
         assert!(result.is_ok());
 
-        let ack_callback = move |message: Payload, socket: &Socket| {
+        let ack_callback = move |message: Payload, socket: Socket| {
             let result = socket.emit(
                 "test",
                 Payload::String(json!({"got ack": true}).to_string()),
