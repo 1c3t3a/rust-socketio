@@ -232,7 +232,7 @@ impl Socket {
         }
     }
 
-    pub(crate) fn iter(&self) -> Iter {
+    pub fn iter(&self) -> Iter {
         Iter { socket: self }
     }
 
@@ -380,7 +380,7 @@ impl Socket {
     }
 }
 
-pub(crate) struct Iter<'a> {
+pub struct Iter<'a> {
     socket: &'a Socket,
 }
 
