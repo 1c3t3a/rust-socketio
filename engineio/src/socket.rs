@@ -122,11 +122,10 @@ impl Socket {
                     let iter = iter.as_mut().unwrap();
                     if let Some(packet) = iter.next() {
                         return Ok(Some(packet));
-                    } else {
-                        // Iterator has run out of packets, get a new payload
                     }
                 }
 
+                // Iterator has run out of packets, get a new payload
                 // TODO: timeout?
                 let data = self.transport.as_transport().poll()?;
 
