@@ -5,7 +5,7 @@ use std::{
 
 use crate::{Payload, Socket};
 
-type InnerCallback = Box<dyn for<'a> FnMut(Payload, &'a Socket) + 'static + Sync + Send>;
+type InnerCallback = Box<dyn for<'a> FnMut(Payload, Socket) + 'static + Sync + Send>;
 
 pub(crate) struct Callback {
     inner: InnerCallback,
@@ -18,7 +18,7 @@ impl Debug for Callback {
 }
 
 impl Deref for Callback {
-    type Target = dyn for<'a> FnMut(Payload, &'a Socket) + 'static + Sync + Send;
+    type Target = dyn for<'a> FnMut(Payload, Socket) + 'static + Sync + Send;
 
     fn deref(&self) -> &Self::Target {
         self.inner.as_ref()
@@ -34,7 +34,7 @@ impl DerefMut for Callback {
 impl Callback {
     pub(crate) fn new<T>(callback: T) -> Self
     where
-        T: for<'a> FnMut(Payload, &'a Socket) + 'static + Sync + Send,
+        T: for<'a> FnMut(Payload, Socket) + 'static + Sync + Send,
     {
         Callback {
             inner: Box::new(callback),
