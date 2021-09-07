@@ -400,7 +400,6 @@ mod test {
     use crate::packet::Packet;
 
     fn builder(url: Url) -> SocketBuilder {
-        // TODO: confirm callbacks are getting data
         SocketBuilder::new(url)
             .on_open(|_| {
                 println!("Open event!");
@@ -423,6 +422,8 @@ mod test {
         let socket = socket;
 
         socket.connect().unwrap();
+
+        // TODO: 0.3.X better tests
 
         let mut iter = socket
             .iter()
