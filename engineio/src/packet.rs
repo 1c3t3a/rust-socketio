@@ -159,12 +159,6 @@ impl Payload {
     pub fn len(&self) -> usize {
         self.0.len()
     }
-
-    pub fn iter(&self) -> Iter {
-        Iter {
-            iter: self.0.iter(),
-        }
-    }
 }
 
 impl TryFrom<Bytes> for Payload {
@@ -207,18 +201,7 @@ impl TryFrom<Payload> for Bytes {
     }
 }
 
-pub struct Iter<'a> {
-    iter: std::slice::Iter<'a, Packet>,
-}
-
-impl<'a> Iterator for Iter<'a> {
-    type Item = &'a Packet;
-    fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
-        self.iter.next()
-    }
-}
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IntoIter {
     iter: std::vec::IntoIter<Packet>,
 }

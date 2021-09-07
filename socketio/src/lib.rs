@@ -31,7 +31,7 @@
 //! socket.emit("foo", json_payload).expect("Server unreachable");
 //!
 //! // define a callback, that's executed when the ack got acked
-//! let ack_callback = |message: Payload, _| {
+//! let ack_callback = |message: Payload, _: Socket| {
 //!     println!("Yehaa! My ack got acked?");
 //!     println!("Ack data: {:#?}", message);
 //! };
@@ -79,16 +79,6 @@
 #![warn(clippy::style)]
 #![warn(clippy::perf)]
 #![warn(clippy::correctness)]
-/// A small macro that spawns a scoped thread. Used for calling the callback
-/// functions.
-macro_rules! spawn_scoped {
-    ($e:expr) => {
-        crossbeam_utils::thread::scope(|s| {
-            s.spawn(|_| $e);
-        })
-        .unwrap();
-    };
-}
 
 /// Defines client only structs
 pub mod client;
@@ -137,14 +127,14 @@ pub(crate) mod test {
             .unwrap())
     }
 
-    pub(crate) fn socket_io_server() -> crate::error::Result<Url> {
+    pub(crate) fn socket_io_server() -> Url {
         let url = std::env::var("SOCKET_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
-        let mut url = Url::parse(&url)?;
+        let mut url = Url::parse(&url).unwrap();
 
         if url.path() == "/" {
             url.set_path("/socket.io/");
         }
 
-        Ok(url)
+        url
     }
 }
