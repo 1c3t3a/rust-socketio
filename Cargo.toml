@@ -21,6 +21,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 regex = "1.4.2"
 byte = "0.2.4"
-websocket = "0.26.2"
+websocket = { version = "0.26.2", features = ["sync-ssl"], default-features = false }
 thiserror = "1.0"
 native-tls = "0.2.7"
