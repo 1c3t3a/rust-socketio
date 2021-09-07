@@ -45,7 +45,7 @@ impl SocketBuilder {
     /// use serde_json::json;
     ///
     ///
-    /// let callback = |payload: Payload, socket: &Socket| {
+    /// let callback = |payload: Payload, socket: Socket| {
     ///            match payload {
     ///                Payload::String(str) => println!("Received: {}", str),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -111,7 +111,7 @@ impl SocketBuilder {
     /// ```
     pub fn on<F>(mut self, event: &str, callback: F) -> Self
     where
-        F: for<'a> FnMut(Payload, &'a Socket) + 'static + Sync + Send,
+        F: for<'a> FnMut(Payload, Socket) + 'static + Sync + Send,
     {
         self.on.insert(event.into(), Callback::new(callback));
         self
