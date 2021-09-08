@@ -205,7 +205,7 @@ impl SocketBuilder {
                     self.headers
                         .clone()
                         .map(|headers| headers.try_into().unwrap()),
-                );
+                )?;
                 if self.handshake.is_some() {
                     transport.upgrade()?;
                 } else {
@@ -230,7 +230,7 @@ impl SocketBuilder {
                     url,
                     self.tls_config.clone(),
                     self.headers.clone().map(|v| v.try_into().unwrap()),
-                );
+                )?;
                 if self.handshake.is_some() {
                     transport.upgrade()?;
                 } else {
@@ -542,7 +542,8 @@ mod test {
     #[test]
     fn test_connection_ws() -> Result<()> {
         let url = crate::test::engine_io_polling_server()?;
-        assert!(builder(url).build_websocket().is_err());
+        assert!(builder(url.clone()).build_websocket().is_err());
+        assert!(builder(url).build_websocket_with_upgrade().is_err());
 
         let mut url = crate::test::engine_io_server()?;
 
