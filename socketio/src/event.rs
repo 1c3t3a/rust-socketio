@@ -15,7 +15,7 @@ impl From<String> for Event {
             "error" => Event::Error,
             "open" => Event::Connect,
             "close" => Event::Close,
-            custom => Event::Custom(custom.to_owned()),
+            _ => Event::Custom(string),
         }
     }
 }
