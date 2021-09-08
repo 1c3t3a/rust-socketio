@@ -5,7 +5,8 @@ const engine = require('engine.io');
 const http = require('http').createServer().listen(4203);
 // the engine.io client runs on port 4203
 const server = engine.attach(http, {
-    allowUpgrades: false
+    allowUpgrades: false,
+    transports: ["polling"]
 });
 
 console.log("Started")
