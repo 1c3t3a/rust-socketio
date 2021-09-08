@@ -440,12 +440,12 @@ mod test {
         let ack = socket.emit_with_ack(
             "test",
             Payload::String(payload.to_string()),
-            Duration::from_secs(2),
+            Duration::from_secs(1),
             ack_callback,
         );
         assert!(ack.is_ok());
 
-        sleep(Duration::from_secs(3));
+        sleep(Duration::from_secs(2));
 
         assert!(socket.disconnect().is_ok());
 
@@ -457,7 +457,7 @@ mod test {
         let url = crate::test::socket_io_server();
 
         // test socket build logic
-        let socket_builder = SocketBuilder::new(url.clone());
+        let socket_builder = SocketBuilder::new(url);
 
         let tls_connector = TlsConnector::builder()
             .use_sni(true)
@@ -489,26 +489,45 @@ mod test {
             )
             .is_ok());
 
-        sleep(Duration::from_secs(5));
-
-        let socket = SocketBuilder::new(url.clone())
-            .transport_type(TransportType::Polling)
-            .connect()?;
-        test_socketio_socket(socket)?;
-        let socket = SocketBuilder::new(url.clone())
-            .transport_type(TransportType::Websocket)
-            .connect()?;
-        test_socketio_socket(socket)?;
-        let socket = SocketBuilder::new(url.clone())
-            .transport_type(TransportType::WebsocketUpgrade)
-            .connect()?;
-        test_socketio_socket(socket)?;
-        let socket = SocketBuilder::new(url.clone())
-            .transport_type(TransportType::Any)
-            .connect()?;
-        test_socketio_socket(socket)?;
+        sleep(Duration::from_secs(2));
 
         Ok(())
+    }
+
+    #[test]
+    fn socketio_polling_integration() -> Result<()> {
+        let url = crate::test::socket_io_server();
+        let socket = SocketBuilder::new(url.clone())
+            .transport_type(TransportType::Polling)
+            .connect_manual()?;
+        test_socketio_socket(socket)
+    }
+
+    #[test]
+    fn socket_io_websocket_integration() -> Result<()> {
+        let url = crate::test::socket_io_server();
+        let socket = SocketBuilder::new(url.clone())
+            .transport_type(TransportType::Websocket)
+            .connect_manual()?;
+        test_socketio_socket(socket)
+    }
+
+    #[test]
+    fn socket_io_websocket_upgrade_integration() -> Result<()> {
+        let url = crate::test::socket_io_server();
+        let socket = SocketBuilder::new(url)
+            .transport_type(TransportType::WebsocketUpgrade)
+            .connect_manual()?;
+        test_socketio_socket(socket)
+    }
+
+    #[test]
+    fn socket_io_any_integration() -> Result<()> {
+        let url = crate::test::socket_io_server();
+        let socket = SocketBuilder::new(url)
+            .transport_type(TransportType::Any)
+            .connect_manual()?;
+        test_socketio_socket(socket)
     }
 
     fn test_socketio_socket(socket: Socket) -> Result<()> {

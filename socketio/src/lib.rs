@@ -101,7 +101,6 @@ pub use client::{Socket, SocketBuilder, TransportType};
 
 #[cfg(test)]
 pub(crate) mod test {
-    use super::*;
     use url::Url;
 
     /// The socket.io server for testing runs on port 4200
