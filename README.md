@@ -18,7 +18,7 @@ use std::time::Duration;
 // define a callback which is called when a payload is received
 // this callback gets the payload as well as an instance of the
 // socket to communicate with the server
-let callback = |payload: Payload, mut socket: Socket| {
+let callback = |payload: Payload, socket: Socket| {
        match payload {
            Payload::String(str) => println!("Received: {}", str),
            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -27,9 +27,8 @@ let callback = |payload: Payload, mut socket: Socket| {
 };
 
 // get a socket that is connected to the admin namespace
-let mut socket = SocketBuilder::new("http://localhost:4200")
+let socket = SocketBuilder::new("http://localhost:4200")
      .namespace("/admin")
-     .expect("illegal namespace")
      .on("test", callback)
      .on("error", |err, _| eprintln!("Error: {:#?}", err))
      .connect()
@@ -47,9 +46,11 @@ let ack_callback = |message: Payload, _| {
 
 let json_payload = json!({"myAckData": 123});
 // emit with an ack
-let ack = socket
+socket
     .emit_with_ack("test", json_payload, Duration::from_secs(2), ack_callback)
     .expect("Server unreachable");
+
+socket.disconnect().expect("Disconnect failed")
 
 ```
 
