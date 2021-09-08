@@ -186,11 +186,6 @@ impl SocketBuilder {
     ///     .expect("connection failed");
     ///
     /// // use the socket
-    /// let json_payload = json!({"token": 123});
-    ///
-    /// let result = socket.emit("foo", json_payload);
-    ///
-    /// assert!(result.is_ok());
     pub fn transport_type(mut self, transport_type: TransportType) -> Self {
         self.transport_type = transport_type;
 
