@@ -20,26 +20,26 @@ pub struct WebsocketTransport {
 
 impl WebsocketTransport {
     /// Creates an instance of `WebsocketTransport`.
-    pub fn new(base_url: Url, headers: Option<Headers>) -> Self {
+    pub fn new(base_url: Url, headers: Option<Headers>) -> Result<Self> {
         let mut url = base_url;
         url.query_pairs_mut().append_pair("transport", "websocket");
         url.set_scheme("ws").unwrap();
-        let mut client_builder = WsClientBuilder::new(url[..].as_ref()).unwrap();
+        let mut client_builder = WsClientBuilder::new(url[..].as_ref())?;
         if let Some(headers) = headers {
             client_builder = client_builder.custom_headers(&headers);
         }
-        let client = client_builder.connect_insecure().unwrap();
+        let client = client_builder.connect_insecure()?;
 
-        client.set_nonblocking(false).unwrap();
+        client.set_nonblocking(false)?;
 
-        let (receiver, sender) = client.split().unwrap();
+        let (receiver, sender) = client.split()?;
 
-        WebsocketTransport {
+        Ok(WebsocketTransport {
             sender: Arc::new(Mutex::new(sender)),
             receiver: Arc::new(Mutex::new(receiver)),
             // SAFTEY: already a URL parsing can't fail
-            base_url: Arc::new(RwLock::new(url::Url::parse(&url.to_string()).unwrap())),
-        }
+            base_url: Arc::new(RwLock::new(url::Url::parse(&url.to_string())?)),
+        })
     }
 
     /// Sends probe packet to ensure connection is valid, then sends upgrade
@@ -136,10 +136,7 @@ mod test {
 
     fn new() -> Result<WebsocketTransport> {
         let url = crate::test::engine_io_server()?.to_string() + "engine.io/?EIO=4";
-        Ok(WebsocketTransport::new(
-            Url::from_str(&url[..]).unwrap(),
-            None,
-        ))
+        WebsocketTransport::new(Url::from_str(&url[..]).unwrap(), None)
     }
 
     #[test]
