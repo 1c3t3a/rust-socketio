@@ -518,7 +518,7 @@ mod test {
         let mut builder = builder(url.clone());
 
         builder = builder.tls_config(crate::test::tls_connector()?);
-        builder = builder.headers(headers);
+        builder = builder.headers(headers.clone());
         let socket = builder.clone().build_websocket_with_upgrade()?;
 
         test_connection(socket)?;
@@ -529,7 +529,9 @@ mod test {
 
         url.set_scheme("wss").unwrap();
 
-        let builder = self::builder(url);
+        let builder = self::builder(url)
+            .tls_config(crate::test::tls_connector()?)
+            .headers(headers);
         let socket = builder.clone().build_websocket()?;
 
         test_connection(socket)?;
