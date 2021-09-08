@@ -491,18 +491,22 @@ mod test {
 
         sleep(Duration::from_secs(5));
 
-        SocketBuilder::new(url.clone())
+        let socket = SocketBuilder::new(url.clone())
             .transport_type(TransportType::Polling)
             .connect()?;
-        SocketBuilder::new(url.clone())
+        test_socketio_socket(socket)?;
+        let socket = SocketBuilder::new(url.clone())
             .transport_type(TransportType::Websocket)
             .connect()?;
-        SocketBuilder::new(url.clone())
+        test_socketio_socket(socket)?;
+        let socket = SocketBuilder::new(url.clone())
             .transport_type(TransportType::WebsocketUpgrade)
             .connect()?;
-        SocketBuilder::new(url.clone())
+        test_socketio_socket(socket)?;
+        let socket = SocketBuilder::new(url.clone())
             .transport_type(TransportType::Any)
             .connect()?;
+        test_socketio_socket(socket)?;
 
         Ok(())
     }
