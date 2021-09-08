@@ -409,7 +409,6 @@ mod test {
 
     #[test]
     fn socket_io_integration() -> Result<()> {
-        //TODO: check to make sure we are receiving packets rather than logging.
         let url = crate::test::socket_io_server();
 
         let socket = SocketBuilder::new(url)
@@ -647,5 +646,5 @@ mod test {
         test_socketio_socket(socket)
     }
 
-    // TODO: add secure socketio server
+    // TODO: 0.3.X add secure socketio server
 }
