@@ -97,7 +97,7 @@ pub mod error;
 pub use rust_engineio::header::{HeaderMap, HeaderValue};
 pub use {event::Event, payload::Payload};
 
-pub use client::{Socket, SocketBuilder};
+pub use client::{Socket, SocketBuilder, TransportType};
 
 #[cfg(test)]
 #[allow(unused)]
