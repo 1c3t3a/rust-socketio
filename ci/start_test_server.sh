@@ -7,6 +7,14 @@ if [ $status -ne 0 ]; then
 fi
 echo "Successfully started engine.io instance"
 
+DEBUG=* node engine-io-polling.js &
+status=$?
+if [ $status -ne 0 ]; then
+  echo "Failed to start polling engine.io: $status"
+  exit $status
+fi
+echo "Successfully started polling engine.io instance"
+
 DEBUG=* node socket-io.js &
 status=$?
 if [ $status -ne 0 ]; then

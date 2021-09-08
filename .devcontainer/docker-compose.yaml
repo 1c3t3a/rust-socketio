@@ -16,6 +16,14 @@ services:
             - "4201:4201"
         environment:
             - "DEBUG=*"
+    node-engine-io-polling:
+        build:
+            context: ../ci
+        command: [ "node", "/test/engine-io-polling.js" ]
+        ports:
+            - "4202:4202"
+        environment:
+            - "DEBUG=*"
     node-socket-io:
         build:
             context: ../ci
@@ -38,3 +46,4 @@ services:
             - "ENGINE_IO_SERVER=http://node-engine-io:4201"
             - "ENGINE_IO_SECURE_SERVER=https://node-engine-io-secure:4202"
             - "ENGINE_IO_SECURE_HOST=node-engine-io-secure"
+            - "ENGINE_IO_POLLING_SERVER=http://node-engine-io-polling:4203"
