@@ -40,13 +40,6 @@ impl From<String> for HeaderName {
     }
 }
 
-impl FromStr for HeaderName {
-    type Err = Error;
-    fn from_str(value: &str) -> std::result::Result<Self, <Self as std::str::FromStr>::Err> {
-        Ok(HeaderName::from(value.to_owned()))
-    }
-}
-
 impl TryFrom<HeaderName> for ReqwestHeaderName {
     type Error = Error;
     fn try_from(
@@ -59,13 +52,6 @@ impl TryFrom<HeaderName> for ReqwestHeaderName {
 impl From<ReqwestHeaderName> for HeaderName {
     fn from(header: ReqwestHeaderName) -> Self {
         HeaderName::from(header.to_string())
-    }
-}
-
-impl FromStr for HeaderValue {
-    type Err = Error;
-    fn from_str(value: &str) -> std::result::Result<Self, <Self as std::str::FromStr>::Err> {
-        Ok(HeaderValue::from(value.to_owned()))
     }
 }
 
@@ -153,12 +139,6 @@ impl HeaderMap {
         value: U,
     ) -> Option<HeaderValue> {
         self.map.insert(key.into(), value.into())
-    }
-}
-
-impl Default for HeaderMap {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
