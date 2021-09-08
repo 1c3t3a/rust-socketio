@@ -100,32 +100,12 @@ pub use {event::Event, payload::Payload};
 pub use client::{Socket, SocketBuilder, TransportType};
 
 #[cfg(test)]
-#[allow(unused)]
 pub(crate) mod test {
     use super::*;
-    use native_tls::Certificate;
-    use native_tls::TlsConnector;
-    use std::fs::File;
-    use std::io::Read;
     use url::Url;
 
-    const CERT_PATH: &str = "../ci/cert/ca.crt";
     /// The socket.io server for testing runs on port 4200
     const SERVER_URL: &str = "http://localhost:4200";
-
-    pub(crate) fn tls_connector() -> error::Result<TlsConnector> {
-        let cert_path = std::env::var("CA_CERT_PATH").unwrap_or_else(|_| CERT_PATH.to_owned());
-        let mut cert_file = File::open(cert_path)?;
-        let mut buf = vec![];
-        cert_file.read_to_end(&mut buf)?;
-        let cert: Certificate = Certificate::from_pem(&buf[..]).unwrap();
-        Ok(TlsConnector::builder()
-            // ONLY USE FOR TESTING!
-            .danger_accept_invalid_hostnames(true)
-            .add_root_certificate(cert)
-            .build()
-            .unwrap())
-    }
 
     pub(crate) fn socket_io_server() -> Url {
         let url = std::env::var("SOCKET_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
