@@ -313,11 +313,8 @@ impl Socket {
                 PacketId::Message => {
                     self.socket.handle_data(packet.data.clone())?;
                 }
-
                 PacketId::Close => {
                     self.socket.handle_close()?;
-                    // set current state to not connected and stop polling
-                    self.socket.disconnect()?;
                 }
                 PacketId::Open => {
                     unreachable!("Won't happen as we open the connection beforehand");
@@ -449,15 +446,35 @@ mod test {
     }
 
     #[test]
+    fn test_connection_long() -> Result<()> {
+        // Long lived socket to receive pings
+        let url = crate::test::engine_io_server()?;
+        let socket = builder(url).build()?;
+
+        socket.connect()?;
+
+        let mut iter = socket.iter();
+        // hello client
+        iter.next();
+        // Ping
+        iter.next();
+
+        socket.disconnect()?;
+
+        assert!(!socket.is_connected()?);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_connection_dynamic() -> Result<()> {
         let url = crate::test::engine_io_server()?;
         let socket = builder(url).build()?;
         test_connection(socket)?;
 
         let url = crate::test::engine_io_polling_server()?;
-        assert!(builder(url).build().is_err());
-
-        Ok(())
+        let socket = builder(url).build()?;
+        test_connection(socket)
     }
 
     #[test]
@@ -489,6 +506,9 @@ mod test {
 
     #[test]
     fn test_connection_wss() -> Result<()> {
+        let url = crate::test::engine_io_polling_server()?;
+        assert!(builder(url).build_websocket_with_upgrade().is_err());
+
         let host =
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
         let mut url = crate::test::engine_io_server_secure()?;
@@ -521,6 +541,9 @@ mod test {
 
     #[test]
     fn test_connection_ws() -> Result<()> {
+        let url = crate::test::engine_io_polling_server()?;
+        assert!(builder(url).build_websocket().is_err());
+
         let mut url = crate::test::engine_io_server()?;
 
         let builder = builder(url.clone());
