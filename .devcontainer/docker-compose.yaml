@@ -21,7 +21,7 @@ services:
             context: ../ci
         command: [ "node", "/test/engine-io-polling.js" ]
         ports:
-            - "4202:4202"
+            - "4203:4203"
         environment:
             - "DEBUG=*"
     node-socket-io:
