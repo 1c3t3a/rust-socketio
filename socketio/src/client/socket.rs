@@ -600,14 +600,14 @@ mod test {
     fn builder() -> SocketBuilder {
         let url = crate::test::socket_io_server();
         SocketBuilder::new(url)
-            .on("test".into(), |message, _| {
+            .on("test", |message, _| {
                 if let Payload::String(st) = message {
                     println!("{}", st)
                 }
             })
-            .on("Error".into(), |_, _| {})
-            .on("Connect".into(), |_, _| {})
-            .on("Close".into(), |_, _| {})
+            .on("Error", |_, _| {})
+            .on("Connect", |_, _| {})
+            .on("Close", |_, _| {})
     }
 
     #[test]
