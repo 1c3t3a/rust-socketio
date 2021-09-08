@@ -113,7 +113,7 @@ impl SocketBuilder {
     ///     .connect();
     ///
     /// ```
-    pub fn on<F>(mut self, event: &str, callback: F) -> Self
+    pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
         F: for<'a> FnMut(Payload, Socket) + 'static + Sync + Send,
     {
@@ -194,7 +194,8 @@ impl SocketBuilder {
 
     /// Connects the socket to a certain endpoint. This returns a connected
     /// [`Socket`] instance. This method returns an [`std::result::Result::Err`]
-    /// value if something goes wrong during connection.
+    /// value if something goes wrong during connection. Also starts a separate
+    /// thread to start polling for packets. Used with callbacks.
     /// # Example
     /// ```rust
     /// use rust_socketio::{SocketBuilder, Payload};
