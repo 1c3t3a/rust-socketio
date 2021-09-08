@@ -151,10 +151,7 @@ impl SocketBuilder {
         self.handshake()?;
 
         if self.websocket_upgrade()? {
-            match self.url.scheme() {
-                "http" | "https" => self.build_websocket_with_upgrade(),
-                _ => self.build_polling(),
-            }
+            self.build_websocket_with_upgrade()
         } else {
             self.build_polling()
         }
@@ -201,57 +198,59 @@ impl SocketBuilder {
         // SAFETY: Already a Url
         let url = websocket::client::Url::parse(&self.url.to_string())?;
 
-        if url.scheme() == "http" {
-            let transport = WebsocketTransport::new(
-                url,
-                self.headers
-                    .clone()
-                    .map(|headers| headers.try_into().unwrap()),
-            );
-            if self.handshake.is_some() {
-                transport.upgrade()?;
-            } else {
-                self.handshake_with_transport(&transport)?;
+        match url.scheme() {
+            "http" | "ws" => {
+                let transport = WebsocketTransport::new(
+                    url,
+                    self.headers
+                        .clone()
+                        .map(|headers| headers.try_into().unwrap()),
+                );
+                if self.handshake.is_some() {
+                    transport.upgrade()?;
+                } else {
+                    self.handshake_with_transport(&transport)?;
+                }
+                // NOTE: Although self.url contains the sid, it does not propagate to the transport
+                // SAFETY: handshake function called previously.
+                Ok(Socket {
+                    socket: InnerSocket::new(
+                        transport.into(),
+                        self.handshake.unwrap(),
+                        self.on_close,
+                        self.on_data,
+                        self.on_error,
+                        self.on_open,
+                        self.on_packet,
+                    ),
+                })
             }
-            // NOTE: Although self.url contains the sid, it does not propagate to the transport
-            // SAFETY: handshake function called previously.
-            Ok(Socket {
-                socket: InnerSocket::new(
-                    transport.into(),
-                    self.handshake.unwrap(),
-                    self.on_close,
-                    self.on_data,
-                    self.on_error,
-                    self.on_open,
-                    self.on_packet,
-                ),
-            })
-        } else if url.scheme() == "https" {
-            let transport = WebsocketSecureTransport::new(
-                url,
-                self.tls_config.clone(),
-                self.headers.clone().map(|v| v.try_into().unwrap()),
-            );
-            if self.handshake.is_some() {
-                transport.upgrade()?;
-            } else {
-                self.handshake_with_transport(&transport)?;
+            "https" | "wss" => {
+                let transport = WebsocketSecureTransport::new(
+                    url,
+                    self.tls_config.clone(),
+                    self.headers.clone().map(|v| v.try_into().unwrap()),
+                );
+                if self.handshake.is_some() {
+                    transport.upgrade()?;
+                } else {
+                    self.handshake_with_transport(&transport)?;
+                }
+                // NOTE: Although self.url contains the sid, it does not propagate to the transport
+                // SAFETY: handshake function called previously.
+                Ok(Socket {
+                    socket: InnerSocket::new(
+                        transport.into(),
+                        self.handshake.unwrap(),
+                        self.on_close,
+                        self.on_data,
+                        self.on_error,
+                        self.on_open,
+                        self.on_packet,
+                    ),
+                })
             }
-            // NOTE: Although self.url contains the sid, it does not propagate to the transport
-            // SAFETY: handshake function called previously.
-            Ok(Socket {
-                socket: InnerSocket::new(
-                    transport.into(),
-                    self.handshake.unwrap(),
-                    self.on_close,
-                    self.on_data,
-                    self.on_error,
-                    self.on_open,
-                    self.on_packet,
-                ),
-            })
-        } else {
-            Err(Error::InvalidUrlScheme(url.scheme().to_string()))
+            _ => Err(Error::InvalidUrlScheme(url.scheme().to_string())),
         }
     }
 
@@ -393,6 +392,10 @@ mod test {
 
         assert!(sut.poll().is_ok());
 
+        assert!(builder(Url::parse("fake://fake.fake").unwrap())
+            .build_websocket()
+            .is_err());
+
         Ok(())
     }
     use reqwest::header::HOST;
@@ -449,6 +452,22 @@ mod test {
     fn test_connection_dynamic() -> Result<()> {
         let url = crate::test::engine_io_server()?;
         let socket = builder(url).build()?;
+        test_connection(socket)?;
+
+        let url = crate::test::engine_io_polling_server()?;
+        assert!(builder(url).build().is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_connection_fallback() -> Result<()> {
+        let url = crate::test::engine_io_server()?;
+        let socket = builder(url).build_with_fallback()?;
+        test_connection(socket)?;
+
+        let url = crate::test::engine_io_polling_server()?;
+        let socket = builder(url).build_with_fallback()?;
         test_connection(socket)
     }
 
@@ -472,11 +491,11 @@ mod test {
     fn test_connection_wss() -> Result<()> {
         let host =
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
-        let url = crate::test::engine_io_server_secure()?;
+        let mut url = crate::test::engine_io_server_secure()?;
 
         let mut headers = HeaderMap::new();
         headers.insert(HOST, host);
-        let mut builder = builder(url);
+        let mut builder = builder(url.clone());
 
         builder = builder.tls_config(crate::test::tls_connector()?);
         builder = builder.headers(headers);
@@ -486,19 +505,41 @@ mod test {
 
         let socket = builder.build_websocket()?;
 
-        test_connection(socket)
+        test_connection(socket)?;
+
+        url.set_scheme("wss").unwrap();
+
+        let builder = self::builder(url);
+        let socket = builder.clone().build_websocket()?;
+
+        test_connection(socket)?;
+
+        assert!(builder.build_websocket_with_upgrade().is_err());
+
+        Ok(())
     }
 
     #[test]
     fn test_connection_ws() -> Result<()> {
-        let url = crate::test::engine_io_server()?;
+        let mut url = crate::test::engine_io_server()?;
 
-        let builder = builder(url);
+        let builder = builder(url.clone());
         let socket = builder.clone().build_websocket()?;
         test_connection(socket)?;
 
         let socket = builder.build_websocket_with_upgrade()?;
-        test_connection(socket)
+        test_connection(socket)?;
+
+        url.set_scheme("ws").unwrap();
+
+        let builder = self::builder(url);
+        let socket = builder.clone().build_websocket()?;
+
+        test_connection(socket)?;
+
+        assert!(builder.build_websocket_with_upgrade().is_err());
+
+        Ok(())
     }
 
     #[test]
