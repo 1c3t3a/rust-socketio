@@ -4,7 +4,6 @@
 const engine = require('engine.io');
 const http = require('http').createServer().listen(4201);
 // the engine.io client runs on port 4201
-//TODO: Add engineio servers that refuses upgrades (one http one https) for full coverage
 const server = engine.attach(http);
 
 console.log("Started")
@@ -16,6 +15,8 @@ server.on('connection', socket => {
             console.log(message.toString());
             if (message == "respond") {
                 socket.send("Roger Roger");
+            } else if (message == "close") {
+                socket.close();
             }
         } else {
             console.log("empty message received")
