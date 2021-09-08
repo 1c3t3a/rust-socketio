@@ -147,7 +147,7 @@ mod test {
     fn new() -> Result<WebsocketSecureTransport> {
         let url = crate::test::engine_io_server_secure()?.to_string() + "engine.io/?EIO=4";
         WebsocketSecureTransport::new(
-            Url::from_str(&url[..]).unwrap(),
+            Url::from_str(&url[..])?,
             Some(crate::test::tls_connector()?),
             None,
         )
