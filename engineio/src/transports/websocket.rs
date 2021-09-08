@@ -136,7 +136,7 @@ mod test {
 
     fn new() -> Result<WebsocketTransport> {
         let url = crate::test::engine_io_server()?.to_string() + "engine.io/?EIO=4";
-        WebsocketTransport::new(Url::from_str(&url[..]).unwrap(), None)
+        WebsocketTransport::new(Url::from_str(&url[..])?, None)
     }
 
     #[test]
