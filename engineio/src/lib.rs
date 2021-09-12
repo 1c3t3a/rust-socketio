@@ -90,11 +90,19 @@ pub(crate) mod test {
     }
     /// The `engine.io` server for testing runs on port 4201
     const SERVER_URL: &str = "http://localhost:4201";
+    /// The `engine.io` server that refuses upgrades runs on port 4203
+    const SERVER_POLLING_URL: &str = "http://localhost:4203";
     const SERVER_URL_SECURE: &str = "https://localhost:4202";
     use url::Url;
 
     pub(crate) fn engine_io_server() -> crate::error::Result<Url> {
         let url = std::env::var("ENGINE_IO_SERVER").unwrap_or_else(|_| SERVER_URL.to_owned());
+        Ok(Url::parse(&url)?)
+    }
+
+    pub(crate) fn engine_io_polling_server() -> crate::error::Result<Url> {
+        let url = std::env::var("ENGINE_IO_POLLING_SERVER")
+            .unwrap_or_else(|_| SERVER_POLLING_URL.to_owned());
         Ok(Url::parse(&url)?)
     }
 

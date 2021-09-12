@@ -22,6 +22,8 @@ http.listen(4202, () => {
                 console.log(message.toString());
                 if (message == "respond") {
                     socket.send("Roger Roger");
+                } else if (message == "close") {
+                    socket.close();
                 }
             } else {
                 console.log("empty message received")

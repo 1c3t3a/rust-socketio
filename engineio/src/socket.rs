@@ -183,10 +183,13 @@ impl Socket {
         if let Some(on_close) = self.on_close.as_ref() {
             spawn_scoped!(on_close(()));
         }
+
+        self.connected.store(false, Ordering::Release);
         Ok(())
     }
 }
 
+#[cfg_attr(tarpaulin, ignore)]
 impl Debug for Socket {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
