@@ -465,9 +465,8 @@ mod test {
             .expect("Found illegal configuration");
 
         let socket = socket_builder
-            .namespace("/")
+            .namespace("/admin")
             .tls_config(tls_connector)
-            .opening_header("host", "localhost")
             .opening_header("accept-encoding", "application/json")
             .on("test", |str, _| println!("Received: {:#?}", str))
             .on("message", |payload, _| println!("{:#?}", payload))
@@ -495,12 +494,51 @@ mod test {
     }
 
     #[test]
+    fn socket_io_builder_integration_iterator() -> Result<()> {
+        let url = crate::test::socket_io_server();
+
+        // test socket build logic
+        let socket_builder = SocketBuilder::new(url);
+
+        let tls_connector = TlsConnector::builder()
+            .use_sni(true)
+            .build()
+            .expect("Found illegal configuration");
+
+        let socket = socket_builder
+            .namespace("/admin")
+            .tls_config(tls_connector)
+            .opening_header("accept-encoding", "application/json")
+            .on("test", |str, _| println!("Received: {:#?}", str))
+            .on("message", |payload, _| println!("{:#?}", payload))
+            .connect_manual()?;
+
+        assert!(socket.emit("message", json!("Hello World")).is_ok());
+
+        assert!(socket.emit("binary", Bytes::from_static(&[46, 88])).is_ok());
+
+        assert!(socket
+            .emit_with_ack(
+                "binary",
+                json!("pls ack"),
+                Duration::from_secs(1),
+                |payload, _| {
+                    println!("Yehaa the ack got acked");
+                    println!("With data: {:#?}", payload);
+                }
+            )
+            .is_ok());
+
+        test_socketio_socket(socket, "/admin".to_owned())
+    }
+
+    #[test]
     fn socketio_polling_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
         let socket = SocketBuilder::new(url.clone())
             .transport_type(TransportType::Polling)
             .connect_manual()?;
-        test_socketio_socket(socket)
+        test_socketio_socket(socket, "/".to_owned())
     }
 
     #[test]
@@ -509,7 +547,7 @@ mod test {
         let socket = SocketBuilder::new(url.clone())
             .transport_type(TransportType::Websocket)
             .connect_manual()?;
-        test_socketio_socket(socket)
+        test_socketio_socket(socket, "/".to_owned())
     }
 
     #[test]
@@ -518,7 +556,7 @@ mod test {
         let socket = SocketBuilder::new(url)
             .transport_type(TransportType::WebsocketUpgrade)
             .connect_manual()?;
-        test_socketio_socket(socket)
+        test_socketio_socket(socket, "/".to_owned())
     }
 
     #[test]
@@ -527,10 +565,10 @@ mod test {
         let socket = SocketBuilder::new(url)
             .transport_type(TransportType::Any)
             .connect_manual()?;
-        test_socketio_socket(socket)
+        test_socketio_socket(socket, "/".to_owned())
     }
 
-    fn test_socketio_socket(socket: Socket) -> Result<()> {
+    fn test_socketio_socket(socket: Socket, nsp: String) -> Result<()> {
         let mut iter = socket
             .iter()
             .map(|packet| packet.unwrap())
@@ -545,7 +583,7 @@ mod test {
             packet,
             Packet::new(
                 PacketId::Event,
-                "/".to_owned(),
+                nsp.clone(),
                 Some("[\"Hello from the message event!\"]".to_owned()),
                 None,
                 0,
@@ -562,7 +600,7 @@ mod test {
             packet,
             Packet::new(
                 PacketId::Event,
-                "/".to_owned(),
+                nsp.clone(),
                 Some("[\"test\",\"Hello from the test event!\"]".to_owned()),
                 None,
                 0,
@@ -578,7 +616,7 @@ mod test {
             packet,
             Packet::new(
                 PacketId::BinaryEvent,
-                "/".to_owned(),
+                nsp.clone(),
                 None,
                 None,
                 1,
@@ -594,7 +632,7 @@ mod test {
             packet,
             Packet::new(
                 PacketId::BinaryEvent,
-                "/".to_owned(),
+                nsp.clone(),
                 Some("\"test\"".to_owned()),
                 None,
                 1,
@@ -618,55 +656,6 @@ mod test {
             .is_ok());
 
         Ok(())
-    }
-
-    fn builder() -> SocketBuilder {
-        let url = crate::test::socket_io_server();
-        SocketBuilder::new(url)
-            .on("test", |message, _| {
-                if let Payload::String(st) = message {
-                    println!("{}", st)
-                }
-            })
-            .on("Error", |_, _| {})
-            .on("Connect", |_, _| {})
-            .on("Close", |_, _| {})
-    }
-
-    #[test]
-    fn test_connection() -> Result<()> {
-        let socket = builder()
-            .transport_type(TransportType::Any)
-            .connect_manual()?;
-
-        test_socketio_socket(socket)
-    }
-
-    #[test]
-    fn test_connection_polling() -> Result<()> {
-        let socket = builder()
-            .transport_type(TransportType::Polling)
-            .connect_manual()?;
-
-        test_socketio_socket(socket)
-    }
-
-    #[test]
-    fn test_connection_websocket() -> Result<()> {
-        let socket = builder()
-            .transport_type(TransportType::Websocket)
-            .connect_manual()?;
-
-        test_socketio_socket(socket)
-    }
-
-    #[test]
-    fn test_connection_websocket_upgrade() -> Result<()> {
-        let socket = builder()
-            .transport_type(TransportType::WebsocketUpgrade)
-            .connect_manual()?;
-
-        test_socketio_socket(socket)
     }
 
     // TODO: 0.3.X add secure socketio server

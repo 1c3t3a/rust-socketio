@@ -2,7 +2,7 @@ const server = require('http').createServer();
 const io = require('socket.io')(server);
 
 console.log('Started');
-io.on('connection', client => {
+var callback = client => {
     console.log('Connected!');
     client.on('test', data => {
         // Send a message back to the server to confirm the message was received
@@ -40,6 +40,8 @@ io.on('connection', client => {
     client.emit('test', 'Hello from the test event!');
     client.emit(Buffer.from([4, 5, 6]));
     client.emit('test', Buffer.from([1, 2, 3]));
-});
+};
+io.on('connection', callback);
+io.of('/admin').on('connection', callback);
 // the socket.io client runs on port 4201
 server.listen(4200);
