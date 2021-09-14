@@ -13,14 +13,11 @@ license = "MIT"
 [dependencies]
 base64 = "0.13.0"
 bytes = "1"
-rand = "0.8.1"
 crossbeam-utils = "0.8.1"
 reqwest = { version = "0.11.0", features = ["blocking", "native-tls"] }
 adler32 = "1.2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-regex = "1.4.2"
-byte = "0.2.4"
 websocket = { version = "0.26.2", features = ["sync-ssl"], default-features = false }
 thiserror = "1.0"
 native-tls = "0.2.7"
