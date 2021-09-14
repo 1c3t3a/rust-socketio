@@ -132,10 +132,13 @@ impl std::fmt::Debug for WebsocketTransport {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::ENGINE_IO_VERSION;
     use std::str::FromStr;
 
     fn new() -> Result<WebsocketTransport> {
-        let url = crate::test::engine_io_server()?.to_string() + "engine.io/?EIO=4";
+        let url = crate::test::engine_io_server()?.to_string()
+            + "engine.io/?EIO="
+            + &ENGINE_IO_VERSION.to_string();
         WebsocketTransport::new(Url::from_str(&url[..])?, None)
     }
 
@@ -145,7 +148,7 @@ mod test {
         let mut url = crate::test::engine_io_server()?;
         url.set_path("/engine.io/");
         url.query_pairs_mut()
-            .append_pair("EIO", "4")
+            .append_pair("EIO", &ENGINE_IO_VERSION.to_string())
             .append_pair("transport", "websocket");
         url.set_scheme("ws").unwrap();
         assert_eq!(transport.base_url()?.to_string(), url.to_string());
