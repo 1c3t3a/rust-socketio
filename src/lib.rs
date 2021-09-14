@@ -295,7 +295,7 @@ impl SocketBuilder {
     ///     .connect();
     ///
     /// ```
-    #[deprecated(note = "use opening_header instead")]
+    #[deprecated(note = "use opening_header(key, value) instead")]
     pub fn set_opening_header<K: IntoHeaderName>(mut self, key: K, val: HeaderValue) -> Self {
         match self.opening_headers {
             Some(ref mut map) => {
