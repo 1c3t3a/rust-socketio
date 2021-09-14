@@ -58,6 +58,8 @@ pub(self) mod socket;
 pub mod transport;
 pub mod transports;
 
+pub const ENGINE_IO_VERSION: i32 = 4;
+
 /// Contains the error type which will be returned with every result in this
 /// crate. Handles all kinds of errors.
 pub mod error;

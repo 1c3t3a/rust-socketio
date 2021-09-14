@@ -6,6 +6,7 @@ use crate::error::{Error, Result};
 use crate::header::HeaderMap;
 use crate::packet::{HandshakePacket, Packet, PacketId};
 use crate::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
+use crate::ENGINE_IO_VERSION;
 use bytes::Bytes;
 use native_tls::TlsConnector;
 use std::convert::TryFrom;
@@ -34,7 +35,8 @@ pub struct SocketBuilder {
 impl SocketBuilder {
     pub fn new(url: Url) -> Self {
         let mut url = url;
-        url.query_pairs_mut().append_pair("EIO", "4");
+        url.query_pairs_mut()
+            .append_pair("EIO", &ENGINE_IO_VERSION.to_string());
 
         // No path add engine.io
         if url.path() == "/" {
