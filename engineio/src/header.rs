@@ -103,16 +103,13 @@ impl TryFrom<HeaderMap> for ReqwestHeaderMap {
     }
 }
 
-impl TryFrom<HeaderMap> for WebSocketHeaderMap {
-    type Error = Error;
-    fn try_from(
-        headers: HeaderMap,
-    ) -> std::result::Result<Self, <Self as std::convert::TryFrom<HeaderMap>>::Error> {
+impl From<HeaderMap> for WebSocketHeaderMap {
+    fn from(headers: HeaderMap) -> Self {
         let mut output = WebSocketHeaderMap::new();
         for (key, val) in headers {
             output.append_raw(key.to_string(), val.inner[..].to_vec());
         }
-        Ok(output)
+        output
     }
 }
 
