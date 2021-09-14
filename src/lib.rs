@@ -247,7 +247,7 @@ impl SocketBuilder {
     ///     .connect();
     ///
     /// ```
-    #[deprecated(note = "use tls_config instead")]
+    #[deprecated(note = "use tls_config(tls_config) instead")]
     pub fn set_tls_config(mut self, tls_config: TlsConnector) -> Self {
         self.tls_config = Some(tls_config);
         self
