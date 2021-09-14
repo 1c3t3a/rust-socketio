@@ -177,7 +177,7 @@ impl SocketBuilder {
 
     /// Sets the target namespace of the client. The namespace must start
     /// with a leading `/`. Valid examples are e.g. `/admin`, `/foo`.
-    #[deprecated(note = "use namespace instead")]
+     #[deprecated(note = "use namespace(nsp) instead")]
     pub fn set_namespace<T: Into<String>>(mut self, namespace: T) -> Result<Self> {
         let nsp = namespace.into();
         if !nsp.starts_with('/') {
