@@ -34,6 +34,7 @@ pub enum Error {
     #[error("Did not receive an ack for id: {0}")]
     DidNotReceiveProperAck(i32),
     #[error("An illegal action (such as setting a callback after being connected) was triggered")]
+    #[deprecated(note = "Error removed in 0.3.0")]
     IllegalActionAfterOpen,
     #[error("Specified namespace {0} is not valid")]
     IllegalNamespace(String),

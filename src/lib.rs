@@ -177,6 +177,7 @@ impl SocketBuilder {
 
     /// Sets the target namespace of the client. The namespace must start
     /// with a leading `/`. Valid examples are e.g. `/admin`, `/foo`.
+    #[deprecated(note = "use namespace(nsp) instead")]
     pub fn set_namespace<T: Into<String>>(mut self, namespace: T) -> Result<Self> {
         let nsp = namespace.into();
         if !nsp.starts_with('/') {
@@ -184,6 +185,13 @@ impl SocketBuilder {
         }
         self.namespace = Some(nsp);
         Ok(self)
+    }
+
+    /// Sets the target namespace of the client. The namespace must start
+    /// with a leading `/`. Valid examples are e.g. `/admin`, `/foo`.
+    #[allow(deprecated)]
+    pub fn namespace<T: Into<String>>(mut self, namespace: T) -> Result<Self> {
+        self.set_namespace(namespace)
     }
 
     /// Registers a new callback for a certain [`socketio::event::Event`]. The event could either be
@@ -239,8 +247,66 @@ impl SocketBuilder {
     ///     .connect();
     ///
     /// ```
+    #[deprecated(note = "use tls_config(tls_config) instead")]
     pub fn set_tls_config(mut self, tls_config: TlsConnector) -> Self {
         self.tls_config = Some(tls_config);
+        self
+    }
+
+    /// Uses a preconfigured TLS connector for secure cummunication. This configures
+    /// both the `polling` as well as the `websocket` transport type.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use native_tls::TlsConnector;
+    ///
+    /// let tls_connector =  TlsConnector::builder()
+    ///            .use_sni(true)
+    ///            .build()
+    ///            .expect("Found illegal configuration");
+    ///
+    /// let socket = SocketBuilder::new("http://localhost:4200")
+    ///     .set_namespace("/admin")
+    ///     .expect("illegal namespace")
+    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    ///     .set_tls_config(tls_connector)
+    ///     .connect();
+    ///
+    /// ```
+    #[allow(deprecated)]
+    pub fn tls_config(self, tls_config: TlsConnector) -> Self {
+        self.set_tls_config(tls_config)
+    }
+
+    /// Sets custom http headers for the opening request. The headers will be passed to the underlying
+    /// transport type (either websockets or polling) and then get passed with every request thats made.
+    /// via the transport layer.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use reqwest::header::{ACCEPT_ENCODING};
+    ///
+    ///
+    /// let socket = SocketBuilder::new("http://localhost:4200")
+    ///     .set_namespace("/admin")
+    ///     .expect("illegal namespace")
+    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    ///     .set_opening_header(ACCEPT_ENCODING, "application/json".parse().unwrap())
+    ///     .connect();
+    ///
+    /// ```
+    #[deprecated(note = "use opening_header(key, value) instead")]
+    pub fn set_opening_header<K: IntoHeaderName>(mut self, key: K, val: HeaderValue) -> Self {
+        match self.opening_headers {
+            Some(ref mut map) => {
+                map.insert(key, val);
+            }
+            None => {
+                let mut map = HeaderMap::new();
+                map.insert(key, val);
+                self.opening_headers = Some(map);
+            }
+        }
         self
     }
 
@@ -261,18 +327,9 @@ impl SocketBuilder {
     ///     .connect();
     ///
     /// ```
-    pub fn set_opening_header<K: IntoHeaderName>(mut self, key: K, val: HeaderValue) -> Self {
-        match self.opening_headers {
-            Some(ref mut map) => {
-                map.insert(key, val);
-            }
-            None => {
-                let mut map = HeaderMap::new();
-                map.insert(key, val);
-                self.opening_headers = Some(map);
-            }
-        }
-        self
+    #[allow(deprecated)]
+    pub fn opening_header<K: IntoHeaderName>(self, key: K, val: HeaderValue) -> Self {
+        self.set_opening_header(key, val)
     }
 
     /// Connects the socket to a certain endpoint. This returns a connected
