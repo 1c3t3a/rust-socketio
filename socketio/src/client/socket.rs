@@ -150,8 +150,6 @@ impl Socket {
     /// called. The callback consumes a [`Payload`] which represents the data send
     /// by the server.
     ///
-    /// Stored closures MUST annotate &Socket due to a quirk with Rust's lifetime inference.
-    ///
     /// # Example
     /// ```
     /// use rust_socketio::{SocketBuilder, Payload, Socket};
@@ -164,10 +162,6 @@ impl Socket {
     ///     .connect()
     ///     .expect("connection failed");
     ///
-    ///
-    /// // &Socket MUST be annotated when storing a closure in a variable before
-    /// // passing to emit_with_awk. Inline closures and calling functions work as
-    /// // intended.
     /// let ack_callback = |message: Payload, socket: Socket| {
     ///     match message {
     ///         Payload::String(str) => println!("{}", str),

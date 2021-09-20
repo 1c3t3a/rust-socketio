@@ -95,8 +95,6 @@ impl SocketBuilder {
     /// one of the common events like `message`, `error`, `connect`, `close` or a custom
     /// event defined by a string, e.g. `onPayment` or `foo`.
     ///
-    /// Stored closures MUST annotate &Socket due to a quirk with Rust's lifetime inference.
-    ///
     /// # Example
     /// ```rust
     /// use rust_socketio::{SocketBuilder, Payload};
