@@ -45,7 +45,7 @@ impl TryFrom<u8> for PacketId {
 
 impl Packet {
     /// Creates an instance.
-    pub(crate) const fn new(
+    pub const fn new(
         packet_type: PacketId,
         nsp: String,
         data: Option<String>,
