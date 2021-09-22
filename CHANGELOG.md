@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.3.0-alpha`](#121) - _2021.09.20_
 * [`0.2.4`](#024) - _2021.05.25_
 * [`0.2.3`](#023) - _2021.05.24_
 * [`0.2.2`](#022) - _2021.05.13
@@ -23,6 +24,50 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## _[Unreleased]_
 
 _nothing new to show for… yet!_
+
+
+## <a name="030-alpha">[0.3.0-alpha] - _Refactoring_ </a>
+
+_2021.09.20_
+
+### Changes
+
+* Refactored Errors
+    * Renamed EmptyPacket to EmptyPacket()
+    * Renamed IncompletePacket to IncompletePacket()
+    * Renamed InvalidPacket to InvalidPacket()
+    * Renamed Utf8Error to InvalidUtf8()
+    * Renamed Base64Error to InvalidBase64
+    * Renamed InvalidUrl to InvalidUrlScheme
+    * Renamed ReqwestError to IncompleteResponseFromReqwest
+    * Renamed HttpError to IncompleteHttp
+    * Renamed HandshakeError to InvalidHandshake
+    * Renamed ~ActionBeforeOpen to IllegalActionBeforeOpen()~
+    * Renamed DidNotReceiveProperAck to MissingAck
+    * Renamed PoisonedLockError to InvalidPoisonedLock
+    * Renamed FromWebsocketError to IncompleteResponseFromWebsocket
+    * Renamed FromWebsocketParseError to InvalidWebsocketURL
+    * Renamed FromIoError to IncompleteIo
+    * New error type InvalidUrl(UrlParseError)
+    * New error type InvalidInteger(ParseIntError)
+    * New error type IncompleteResponseFromEngineIo(rust_engineio::Error)
+    * New error type InvalidAttachmentPacketType(u8)
+    * Removed EmptyPacket
+* Refactored Packet
+    * Renamed encode to From<&Packet>
+    * Renamed decode to TryFrom<&Bytes>
+    * Renamed attachments to attachments_count
+    * New struct member attachments: Option<Vec<Bytes>>
+* Refactor PacketId
+    * Renamed u8_to_packet_id to TryFrom<u8> for PacketId
+* Refactored SocketBuilder
+    * Renamed set_namespace to namespace
+    * Renamed set_tls_config to tls_config
+    * Renamed set_opening_header to opening_header
+    * namespace returns Self rather than Result<Self>
+    * opening_header accepts a Into<HeaderValue> rather than HeaderValue
+* Allows for pure websocket connections
+* Refactor EngineIO module
 
 ## <a name="024">[0.2.4] - _Bugfixes_ </a>
 

@@ -1,0 +1,28 @@
+[package]
+name = "rust_socketio"
+version = "0.3.0"
+authors = ["Bastian Kersting <bastian@cmbt.de>"]
+edition = "2018"
+description = "An implementation of a socketio client written in rust."
+readme = "README.md"
+repository = "https://github.com/1c3t3a/rust-socketio"
+keywords = ["socketio", "engineio", "network", "protocol", "client"]
+categories = ["network-programming", "web-programming", "web-programming::websocket"]
+license = "MIT"
+
+[dependencies]
+rust_engineio = { path = "../engineio" }
+base64 = "0.13.0"
+bytes = "1"
+rand = "0.8.1"
+crossbeam-utils = "0.8.1"
+adler32 = "1.2.0"
+serde_json = "1.0"
+regex = "1.4.2"
+byte = "0.2.4"
+thiserror = "1.0"
+native-tls = "0.2.7"
+url = "2.2.2"
+
+[dev-dependencies]
+cargo-tarpaulin = "0.18.0-alpha3"

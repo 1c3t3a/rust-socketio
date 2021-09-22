@@ -1,5 +1,5 @@
 /// An `Event` in `socket.io` could either (`Message`, `Error`) or custom.
-#[derive(Debug, PartialEq, PartialOrd)]
+#[derive(Debug, PartialEq, PartialOrd, Clone, Eq, Hash)]
 pub enum Event {
     Message,
     Error,
@@ -15,7 +15,7 @@ impl From<String> for Event {
             "error" => Event::Error,
             "open" => Event::Connect,
             "close" => Event::Close,
-            custom => Event::Custom(custom.to_owned()),
+            _ => Event::Custom(string),
         }
     }
 }

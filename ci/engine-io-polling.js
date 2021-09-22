@@ -2,9 +2,12 @@
  * This is an example server, used to test the current code.
  */
 const engine = require('engine.io');
-const http = require('http').createServer().listen(4201);
-// the engine.io client runs on port 4201
-const server = engine.attach(http);
+const http = require('http').createServer().listen(4203);
+// the engine.io client runs on port 4203
+const server = engine.attach(http, {
+    allowUpgrades: false,
+    transports: ["polling"]
+});
 
 console.log("Started")
 server.on('connection', socket => {
