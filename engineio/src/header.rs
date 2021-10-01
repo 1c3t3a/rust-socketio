@@ -1,13 +1,9 @@
 use crate::Error;
 use bytes::Bytes;
-use reqwest::header::{
-    HeaderMap as ReqwestHeaderMap, HeaderName as ReqwestHeaderName,
-    HeaderValue as ReqwestHeaderValue,
-};
+use reqwest::header::{HeaderMap as ReqwestHeaderMap, HeaderName as ReqwestHeaderName, HeaderValue as ReqwestHeaderValue};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::str::FromStr;
-use websocket::header::Headers as WebSocketHeaderMap;
 
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub struct HeaderName {
@@ -100,16 +96,6 @@ impl TryFrom<HeaderMap> for ReqwestHeaderMap {
                 )
             })
             .collect())
-    }
-}
-
-impl From<HeaderMap> for WebSocketHeaderMap {
-    fn from(headers: HeaderMap) -> Self {
-        let mut output = WebSocketHeaderMap::new();
-        for (key, val) in headers {
-            output.append_raw(key.to_string(), val.inner[..].to_vec());
-        }
-        output
     }
 }
 

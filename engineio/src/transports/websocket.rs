@@ -1,69 +1,96 @@
-use crate::error::{Error, Result};
+use crate::error::Error;
+use crate::error::Result;
+use crate::header::HeaderMap;
 use crate::packet::Packet;
 use crate::packet::PacketId;
 use crate::transport::Transport;
 use bytes::{BufMut, Bytes, BytesMut};
+use native_tls::TlsConnector;
+use tungstenite::Message;
+use tungstenite::client_tls_with_config;
+use tungstenite::connect;
+use url::Url;
+use tungstenite::WebSocket;
+use tungstenite::stream::MaybeTlsStream;
 use std::borrow::Cow;
+use std::convert::TryFrom;
+use std::convert::TryInto;
+use std::net::TcpStream;
 use std::str::from_utf8;
 use std::sync::{Arc, Mutex, RwLock};
-use websocket::{
-    client::Url, dataframe::Opcode, header::Headers, receiver::Reader, sync::stream::TcpStream,
-    sync::Writer, ws::dataframe::DataFrame, ClientBuilder as WsClientBuilder, Message,
-};
+use tungstenite::client::IntoClientRequest;
+use tungstenite::Connector::NativeTls;
 
 #[derive(Clone)]
 pub struct WebsocketTransport {
-    sender: Arc<Mutex<Writer<TcpStream>>>,
-    receiver: Arc<Mutex<Reader<TcpStream>>>,
+    client: Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>,
     base_url: Arc<RwLock<url::Url>>,
 }
 
 impl WebsocketTransport {
-    /// Creates an instance of `WebsocketTransport`.
-    pub fn new(base_url: Url, headers: Option<Headers>) -> Result<Self> {
+    /// Creates an instance of `WebsocketSecureTransport`.
+    pub fn new(
+        base_url: Url,
+        tls_config: Option<TlsConnector>,
+        headers: Option<HeaderMap>,
+    ) -> Result<Self> {
         let mut url = base_url;
+        match url.scheme() {
+            "http" => url.set_scheme("ws").unwrap(),
+            "https" => url.set_scheme("wss").unwrap(),
+            _ => ()
+        };
         url.query_pairs_mut().append_pair("transport", "websocket");
-        url.set_scheme("ws").unwrap();
-        let mut client_builder = WsClientBuilder::new(url[..].as_ref())?;
+        let mut request = url.clone().into_client_request()?;
         if let Some(headers) = headers {
-            client_builder = client_builder.custom_headers(&headers);
+            let output_headers = request.headers_mut();
+            for (key, value) in headers.into_iter() {
+                output_headers.append(reqwest::header::HeaderName::try_from(key)?, value.try_into()?);
+            }
         }
-        let client = client_builder.connect_insecure()?;
-
-        client.set_nonblocking(false)?;
-
-        let (receiver, sender) = client.split()?;
+        let (client, _) = match tls_config {
+            None => {
+                connect(request)?
+            },
+            Some(connector) => {
+                let stream = TcpStream::connect(url.socket_addrs(|| None)?[0])?;
+                match client_tls_with_config(request, stream, None, Some(NativeTls(connector))) {
+                    Ok(websocket) => Ok(websocket),
+                    Err(err) => Err(Error::InvalidHandshake(err.to_string()))
+                }?
+            }
+        };
 
         Ok(WebsocketTransport {
-            sender: Arc::new(Mutex::new(sender)),
-            receiver: Arc::new(Mutex::new(receiver)),
+            client: Arc::new(Mutex::new(client)),
             // SAFTEY: already a URL parsing can't fail
-            base_url: Arc::new(RwLock::new(url::Url::parse(&url.to_string())?)),
+            base_url: Arc::new(RwLock::new(url)),
         })
     }
 
     /// Sends probe packet to ensure connection is valid, then sends upgrade
     /// request
     pub(crate) fn upgrade(&self) -> Result<()> {
-        let mut sender = self.sender.lock()?;
-        let mut receiver = self.receiver.lock()?;
+        let mut client = self.client.lock()?;
 
         // send the probe packet, the text `2probe` represents a ping packet with
         // the content `probe`
-        sender.send_message(&Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
+        client.write_message(Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
             Packet::new(PacketId::Ping, Bytes::from("probe")),
         ))?)))?;
 
         // expect to receive a probe packet
-        let message = receiver.recv_message()?;
-        if message.take_payload() != Bytes::from(Packet::new(PacketId::Pong, Bytes::from("probe")))
+        let message = client.read_message()?;
+        let payload = message.into_data();
+        if Packet::try_from(Bytes::from(payload))?
+            != Packet::new(PacketId::Pong, Bytes::from("probe"))
         {
             return Err(Error::InvalidPacket());
         }
 
         // finally send the upgrade request. the payload `5` stands for an upgrade
         // packet without any payload
-        sender.send_message(&Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
+        client.write_message(Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
             Packet::new(PacketId::Upgrade, Bytes::from("")),
         ))?)))?;
 
@@ -73,32 +100,34 @@ impl WebsocketTransport {
 
 impl Transport for WebsocketTransport {
     fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()> {
-        let mut sender = self.sender.lock()?;
-
         let message = if is_binary_att {
             Message::binary(Cow::Borrowed(data.as_ref()))
         } else {
             Message::text(Cow::Borrowed(std::str::from_utf8(data.as_ref())?))
         };
-        sender.send_message(&message)?;
+
+        let mut writer = self.client.lock()?;
+        writer.write_message(message)?;
+        drop(writer);
 
         Ok(())
     }
 
     fn poll(&self) -> Result<Bytes> {
-        let mut receiver = self.receiver.lock()?;
+        let mut receiver = self.client.lock()?;
 
-        // if this is a binary payload, we mark it as a message
-        let received_df = receiver.recv_dataframe()?;
-        match received_df.opcode {
-            Opcode::Binary => {
-                let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
+        let message = receiver.read_message()?;
+        drop(receiver);
+        match message {
+            Message::Binary(binary) => {
+                let mut message = BytesMut::with_capacity(binary.len() + 1);
+                // Prepend the message ID for consistency.
                 message.put_u8(PacketId::Message as u8);
-                message.put(received_df.take_payload().as_ref());
+                message.put(binary.as_ref());
 
                 Ok(message.freeze())
             }
-            _ => Ok(Bytes::from(received_df.take_payload())),
+            _ => Ok(Bytes::from(message.into_data())),
         }
     }
 
@@ -114,7 +143,7 @@ impl Transport for WebsocketTransport {
         {
             url.query_pairs_mut().append_pair("transport", "websocket");
         }
-        url.set_scheme("ws").unwrap();
+        url.set_scheme("wss").unwrap();
         *self.base_url.write()? = url;
         Ok(())
     }
@@ -123,7 +152,7 @@ impl Transport for WebsocketTransport {
 impl std::fmt::Debug for WebsocketTransport {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "WebsocketTransport(base_url: {:?})",
+            "WebsocketSecureTransport(base_url: {:?})",
             self.base_url(),
         ))
     }
@@ -134,28 +163,30 @@ mod test {
     use super::*;
     use crate::ENGINE_IO_VERSION;
     use std::str::FromStr;
-
     fn new() -> Result<WebsocketTransport> {
-        let url = crate::test::engine_io_server()?.to_string()
+        let url = crate::test::engine_io_server_secure()?.to_string()
             + "engine.io/?EIO="
             + &ENGINE_IO_VERSION.to_string();
-        WebsocketTransport::new(Url::from_str(&url[..])?, None)
+        WebsocketTransport::new(
+            Url::from_str(&url[..])?,
+            Some(crate::test::tls_connector()?),
+            None,
+        )
     }
-
     #[test]
-    fn websocket_transport_base_url() -> Result<()> {
+    fn websocket_secure_transport_base_url() -> Result<()> {
         let transport = new()?;
-        let mut url = crate::test::engine_io_server()?;
+        let mut url = crate::test::engine_io_server_secure()?;
         url.set_path("/engine.io/");
         url.query_pairs_mut()
             .append_pair("EIO", &ENGINE_IO_VERSION.to_string())
             .append_pair("transport", "websocket");
-        url.set_scheme("ws").unwrap();
+        url.set_scheme("wss").unwrap();
         assert_eq!(transport.base_url()?.to_string(), url.to_string());
         transport.set_base_url(reqwest::Url::parse("https://127.0.0.1")?)?;
         assert_eq!(
             transport.base_url()?.to_string(),
-            "ws://127.0.0.1/?transport=websocket"
+            "wss://127.0.0.1/?transport=websocket"
         );
         assert_ne!(transport.base_url()?.to_string(), url.to_string());
 
@@ -164,7 +195,7 @@ mod test {
         )?)?;
         assert_eq!(
             transport.base_url()?.to_string(),
-            "ws://127.0.0.1/?transport=websocket"
+            "wss://127.0.0.1/?transport=websocket"
         );
         assert_ne!(transport.base_url()?.to_string(), url.to_string());
         Ok(())
@@ -175,7 +206,10 @@ mod test {
         let transport = new()?;
         assert_eq!(
             format!("{:?}", transport),
-            format!("WebsocketTransport(base_url: {:?})", transport.base_url())
+            format!(
+                "WebsocketSecureTransport(base_url: {:?})",
+                transport.base_url()
+            )
         );
         Ok(())
     }

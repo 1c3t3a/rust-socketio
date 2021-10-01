@@ -5,7 +5,7 @@ use std::io::Error as IoError;
 use std::str::Utf8Error;
 use thiserror::Error;
 use url::ParseError as UrlParseError;
-use websocket::{client::ParseError, WebSocketError};
+use tungstenite::Error as WebSocketError;
 
 /// Enumeration of all possible errors in the `socket.io` context.
 #[derive(Error, Debug)]
@@ -42,8 +42,6 @@ pub enum Error {
     InvalidPoisonedLock(),
     #[error("Got a websocket error: {0}")]
     IncompleteResponseFromWebsocket(#[from] WebSocketError),
-    #[error("Error while parsing the url for the websocket connection: {0}")]
-    InvalidWebsocketURL(#[from] ParseError),
     #[error("Got an IO-Error: {0}")]
     IncompleteIo(#[from] IoError),
     #[error("Server did not allow upgrading to websockets")]

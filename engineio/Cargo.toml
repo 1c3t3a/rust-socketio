@@ -18,8 +18,8 @@ reqwest = { version = "0.11.0", features = ["blocking", "native-tls"] }
 adler32 = "1.2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-websocket = { version = "0.26.2", features = ["sync-ssl"], default-features = false }
 thiserror = "1.0"
+tungstenite = { version = "0.15.0", features = ["native-tls"] }
 native-tls = "0.2.7"
 url = "2.2.2"
 

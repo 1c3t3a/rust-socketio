@@ -5,7 +5,7 @@ use crate::transport::Transport;
 use crate::error::{Error, Result};
 use crate::header::HeaderMap;
 use crate::packet::{HandshakePacket, Packet, PacketId};
-use crate::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
+use crate::transports::{PollingTransport, WebsocketTransport};
 use crate::ENGINE_IO_VERSION;
 use bytes::Bytes;
 use native_tls::TlsConnector;
@@ -197,41 +197,16 @@ impl SocketBuilder {
 
     /// Build socket with only a websocket transport
     pub fn build_websocket(mut self) -> Result<Socket> {
-        // SAFETY: Already a Url
-        let url = websocket::client::Url::parse(&self.url.to_string())?;
+        let url = self.url.clone();
 
         match url.scheme() {
-            "http" | "ws" => {
+            "http" | "ws" | "https" | "wss" => {
                 let transport = WebsocketTransport::new(
                     url,
+                    None,
                     self.headers
                         .clone()
                         .map(|headers| headers.try_into().unwrap()),
-                )?;
-                if self.handshake.is_some() {
-                    transport.upgrade()?;
-                } else {
-                    self.handshake_with_transport(&transport)?;
-                }
-                // NOTE: Although self.url contains the sid, it does not propagate to the transport
-                // SAFETY: handshake function called previously.
-                Ok(Socket {
-                    socket: InnerSocket::new(
-                        transport.into(),
-                        self.handshake.unwrap(),
-                        self.on_close,
-                        self.on_data,
-                        self.on_error,
-                        self.on_open,
-                        self.on_packet,
-                    ),
-                })
-            }
-            "https" | "wss" => {
-                let transport = WebsocketSecureTransport::new(
-                    url,
-                    self.tls_config.clone(),
-                    self.headers.clone().map(|v| v.try_into().unwrap()),
                 )?;
                 if self.handshake.is_some() {
                     transport.upgrade()?;

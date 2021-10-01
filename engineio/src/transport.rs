@@ -1,4 +1,4 @@
-use super::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
+use super::transports::{PollingTransport, WebsocketTransport};
 use crate::error::Result;
 use adler32::adler32;
 use bytes::Bytes;
@@ -35,19 +35,12 @@ pub trait Transport {
 #[derive(Debug)]
 pub enum TransportType {
     Polling(PollingTransport),
-    WebsocketSecure(WebsocketSecureTransport),
     Websocket(WebsocketTransport),
 }
 
 impl From<PollingTransport> for TransportType {
     fn from(transport: PollingTransport) -> Self {
         TransportType::Polling(transport)
-    }
-}
-
-impl From<WebsocketSecureTransport> for TransportType {
-    fn from(transport: WebsocketSecureTransport) -> Self {
-        TransportType::WebsocketSecure(transport)
     }
 }
 
@@ -62,7 +55,6 @@ impl TransportType {
         match self {
             TransportType::Polling(transport) => transport,
             TransportType::Websocket(transport) => transport,
-            TransportType::WebsocketSecure(transport) => transport,
         }
     }
 }
