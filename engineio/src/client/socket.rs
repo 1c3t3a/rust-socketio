@@ -203,7 +203,7 @@ impl SocketBuilder {
             "http" | "ws" | "https" | "wss" => {
                 let transport = WebsocketTransport::new(
                     url,
-                    None,
+                    self.tls_config.clone(),
                     self.headers
                         .clone()
                         .map(|headers| headers.try_into().unwrap()),
