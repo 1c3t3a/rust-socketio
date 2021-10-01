@@ -6,12 +6,6 @@ use crate::packet::PacketId;
 use crate::transport::Transport;
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
-use tungstenite::Message;
-use tungstenite::client_tls_with_config;
-use tungstenite::connect;
-use url::Url;
-use tungstenite::WebSocket;
-use tungstenite::stream::MaybeTlsStream;
 use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::convert::TryInto;
@@ -19,7 +13,13 @@ use std::net::TcpStream;
 use std::str::from_utf8;
 use std::sync::{Arc, Mutex, RwLock};
 use tungstenite::client::IntoClientRequest;
+use tungstenite::client_tls_with_config;
+use tungstenite::connect;
+use tungstenite::stream::MaybeTlsStream;
 use tungstenite::Connector::NativeTls;
+use tungstenite::Message;
+use tungstenite::WebSocket;
+use url::Url;
 
 #[derive(Clone)]
 pub struct WebsocketTransport {
@@ -38,25 +38,26 @@ impl WebsocketTransport {
         match url.scheme() {
             "http" => url.set_scheme("ws").unwrap(),
             "https" => url.set_scheme("wss").unwrap(),
-            _ => ()
+            _ => (),
         };
         url.query_pairs_mut().append_pair("transport", "websocket");
         let mut request = url.clone().into_client_request()?;
         if let Some(headers) = headers {
             let output_headers = request.headers_mut();
             for (key, value) in headers.into_iter() {
-                output_headers.append(reqwest::header::HeaderName::try_from(key)?, value.try_into()?);
+                output_headers.append(
+                    reqwest::header::HeaderName::try_from(key)?,
+                    value.try_into()?,
+                );
             }
         }
         let (client, _) = match tls_config {
-            None => {
-                connect(request)?
-            },
+            None => connect(request)?,
             Some(connector) => {
                 let stream = TcpStream::connect(url.socket_addrs(|| None)?[0])?;
                 match client_tls_with_config(request, stream, None, Some(NativeTls(connector))) {
                     Ok(websocket) => Ok(websocket),
-                    Err(err) => Err(Error::InvalidHandshake(err.to_string()))
+                    Err(err) => Err(Error::InvalidHandshake(err.to_string())),
                 }?
             }
         };

@@ -4,8 +4,8 @@ use serde_json::Error as JsonError;
 use std::io::Error as IoError;
 use std::str::Utf8Error;
 use thiserror::Error;
-use url::ParseError as UrlParseError;
 use tungstenite::Error as WebSocketError;
+use url::ParseError as UrlParseError;
 
 /// Enumeration of all possible errors in the `socket.io` context.
 #[derive(Error, Debug)]

@@ -1,6 +1,9 @@
 use crate::Error;
 use bytes::Bytes;
-use reqwest::header::{HeaderMap as ReqwestHeaderMap, HeaderName as ReqwestHeaderName, HeaderValue as ReqwestHeaderValue};
+use reqwest::header::{
+    HeaderMap as ReqwestHeaderMap, HeaderName as ReqwestHeaderName,
+    HeaderValue as ReqwestHeaderValue,
+};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::str::FromStr;
