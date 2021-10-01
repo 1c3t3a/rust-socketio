@@ -23,7 +23,11 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 ## _[Unreleased]_
 
-_nothing new to show for… yet!_
+### Changes
+
+* Switch Websocket library to tungstenite-rs
+    * Removed InvalidWebsocketURL
+    * Changed inner type of WebSocketError to tungstenite-rs'
 
 
 ## <a name="030-alpha">[0.3.0-alpha] - _Refactoring_ </a>
