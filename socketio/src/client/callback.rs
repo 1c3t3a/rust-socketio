@@ -3,7 +3,8 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{Payload, Socket};
+use super::Socket;
+use crate::Payload;
 
 type InnerCallback = Box<dyn for<'a> FnMut(Payload, Socket) + 'static + Sync + Send>;
 

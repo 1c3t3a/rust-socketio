@@ -7,6 +7,7 @@ use thiserror::Error;
 use url::ParseError as UrlParseError;
 
 /// Enumeration of all possible errors in the `socket.io` context.
+/// TODO: 0.4.X Do not expose non-trivial internal errors. Convert error to string.
 #[derive(Error, Debug)]
 #[non_exhaustive]
 #[cfg_attr(tarpaulin, ignore)]

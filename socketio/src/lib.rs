@@ -82,19 +82,23 @@
 
 /// Defines client only structs
 pub mod client;
+/// Deprecated import since 0.3.0-alpha-2, use Event in the crate root instead.
 /// Defines the events that could be sent or received.
 pub mod event;
 pub(crate) mod packet;
+/// Deprecated import since 0.3.0-alpha-2, use Event in the crate root instead.
 /// Defines the types of payload (binary or string), that
 /// could be sent or received.
 pub mod payload;
 pub(self) mod socket;
 
+/// Deprecated import since 0.3.0-alpha-2, use Error in the crate root instead.
 /// Contains the error type which will be returned with every result in this
-/// crate. Handles all kinds of errors.
+/// crate.
 pub mod error;
 
-pub use rust_engineio::header::{HeaderMap, HeaderValue};
+pub use error::Error;
+
 pub use {event::Event, payload::Payload};
 
 pub use client::{Socket, SocketBuilder, TransportType};
