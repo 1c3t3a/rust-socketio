@@ -226,7 +226,7 @@ impl Socket {
         }
     }
 
-    pub fn iter(&self) -> Iter {
+    pub(crate) fn iter(&self) -> Iter {
         Iter { socket: self }
     }
 
