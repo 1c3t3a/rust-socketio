@@ -28,7 +28,7 @@ pub struct Ack {
 /// a specific address as well as an optional namespace to connect to. If `None`
 /// is given the server will connect to the default namespace `"/"`.
 #[derive(Clone)]
-pub struct Socket {
+pub struct Client {
     /// The inner socket client to delegate the methods to.
     socket: InnerSocket,
     on: Arc<RwLock<HashMap<Event, Callback>>>,
@@ -37,7 +37,7 @@ pub struct Socket {
     nsp: String,
 }
 
-impl Socket {
+impl Client {
     /// Creates a socket with a certain address to connect to as well as a
     /// namespace. If `None` is passed in as namespace, the default namespace
     /// `"/"` is taken.
@@ -47,7 +47,7 @@ impl Socket {
         namespace: T,
         on: HashMap<Event, Callback>,
     ) -> Result<Self> {
-        Ok(Socket {
+        Ok(Client {
             socket,
             nsp: namespace.into(),
             on: Arc::new(RwLock::new(on)),
@@ -78,11 +78,11 @@ impl Socket {
     ///
     /// # Example
     /// ```
-    /// use rust_socketio::{SocketBuilder, Socket, Payload};
+    /// use rust_socketio::{ClientBuilder, Client, Payload};
     /// use serde_json::json;
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, socket: Socket| {
+    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///     .on("test", |payload: Payload, socket: Client| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     ///      })
@@ -108,15 +108,15 @@ impl Socket {
     /// packet.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{SocketBuilder, Payload, Socket};
+    /// use rust_socketio::{ClientBuilder, Payload, Client};
     /// use serde_json::json;
     ///
-    /// fn handle_test(payload: Payload, socket: Socket) {
+    /// fn handle_test(payload: Payload, socket: Client) {
     ///     println!("Received: {:#?}", payload);
     ///     socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     /// }
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
+    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
     ///     .on("test", handle_test)
     ///     .connect()
     ///     .expect("connection failed");
@@ -152,17 +152,17 @@ impl Socket {
     ///
     /// # Example
     /// ```
-    /// use rust_socketio::{SocketBuilder, Payload, Socket};
+    /// use rust_socketio::{ClientBuilder, Payload, Client};
     /// use serde_json::json;
     /// use std::time::Duration;
     /// use std::thread::sleep;
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
+    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
     ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
     ///     .connect()
     ///     .expect("connection failed");
     ///
-    /// let ack_callback = |message: Payload, socket: Socket| {
+    /// let ack_callback = |message: Payload, socket: Client| {
     ///     match message {
     ///         Payload::String(str) => println!("{}", str),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
@@ -183,7 +183,7 @@ impl Socket {
         callback: F,
     ) -> Result<()>
     where
-        F: for<'a> FnMut(Payload, Socket) + 'static + Sync + Send,
+        F: for<'a> FnMut(Payload, Client) + 'static + Sync + Send,
         E: Into<Event>,
         D: Into<Payload>,
     {
@@ -294,7 +294,7 @@ impl Socket {
         Ok(())
     }
 
-    /// A method for handling the Event Socket Packets.
+    /// A method for handling the Event Client Packets.
     // this could only be called with an event
     fn handle_event(&self, packet: &Packet) -> Result<()> {
         // unwrap the potential data
@@ -375,7 +375,7 @@ impl Socket {
 }
 
 pub struct Iter<'a> {
-    socket: &'a Socket,
+    socket: &'a Client,
 }
 
 impl<'a> Iterator for Iter<'a> {
@@ -395,7 +395,7 @@ mod test {
     use std::thread::sleep;
 
     use super::*;
-    use crate::{client::TransportType, payload::Payload, SocketBuilder};
+    use crate::{client::TransportType, payload::Payload, ClientBuilder};
     use bytes::Bytes;
     use native_tls::TlsConnector;
     use serde_json::json;
@@ -405,7 +405,7 @@ mod test {
     fn socket_io_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
 
-        let socket = SocketBuilder::new(url)
+        let socket = ClientBuilder::new(url)
             .on("test", |msg, _| match msg {
                 Payload::String(str) => println!("Received string: {}", str),
                 Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
@@ -417,7 +417,7 @@ mod test {
 
         assert!(result.is_ok());
 
-        let ack_callback = move |message: Payload, socket: Socket| {
+        let ack_callback = move |message: Payload, socket: Client| {
             let result = socket.emit(
                 "test",
                 Payload::String(json!({"got ack": true}).to_string()),
@@ -451,7 +451,7 @@ mod test {
         let url = crate::test::socket_io_server();
 
         // test socket build logic
-        let socket_builder = SocketBuilder::new(url);
+        let socket_builder = ClientBuilder::new(url);
 
         let tls_connector = TlsConnector::builder()
             .use_sni(true)
@@ -492,7 +492,7 @@ mod test {
         let url = crate::test::socket_io_server();
 
         // test socket build logic
-        let socket_builder = SocketBuilder::new(url);
+        let socket_builder = ClientBuilder::new(url);
 
         let tls_connector = TlsConnector::builder()
             .use_sni(true)
@@ -529,7 +529,7 @@ mod test {
     #[test]
     fn socketio_polling_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
-        let socket = SocketBuilder::new(url.clone())
+        let socket = ClientBuilder::new(url.clone())
             .transport_type(TransportType::Polling)
             .connect_manual()?;
         test_socketio_socket(socket, "/".to_owned())
@@ -538,7 +538,7 @@ mod test {
     #[test]
     fn socket_io_websocket_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
-        let socket = SocketBuilder::new(url.clone())
+        let socket = ClientBuilder::new(url.clone())
             .transport_type(TransportType::Websocket)
             .connect_manual()?;
         test_socketio_socket(socket, "/".to_owned())
@@ -547,7 +547,7 @@ mod test {
     #[test]
     fn socket_io_websocket_upgrade_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
-        let socket = SocketBuilder::new(url)
+        let socket = ClientBuilder::new(url)
             .transport_type(TransportType::WebsocketUpgrade)
             .connect_manual()?;
         test_socketio_socket(socket, "/".to_owned())
@@ -556,13 +556,13 @@ mod test {
     #[test]
     fn socket_io_any_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
-        let socket = SocketBuilder::new(url)
+        let socket = ClientBuilder::new(url)
             .transport_type(TransportType::Any)
             .connect_manual()?;
         test_socketio_socket(socket, "/".to_owned())
     }
 
-    fn test_socketio_socket(socket: Socket, nsp: String) -> Result<()> {
+    fn test_socketio_socket(socket: Client, nsp: String) -> Result<()> {
         let mut iter = socket
             .iter()
             .map(|packet| packet.unwrap())

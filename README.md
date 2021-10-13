@@ -11,14 +11,14 @@ An implementation of a socket.io client written in the rust programming language
 ## Example usage
 
 ``` rust
-use rust_socketio::{SocketBuilder, Payload, Socket};
+use rust_socketio::{ClientBuilder, Payload, Client};
 use serde_json::json;
 use std::time::Duration;
 
 // define a callback which is called when a payload is received
 // this callback gets the payload as well as an instance of the
 // socket to communicate with the server
-let callback = |payload: Payload, socket: Socket| {
+let callback = |payload: Payload, socket: Client| {
        match payload {
            Payload::String(str) => println!("Received: {}", str),
            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -27,7 +27,7 @@ let callback = |payload: Payload, socket: Socket| {
 };
 
 // get a socket that is connected to the admin namespace
-let socket = SocketBuilder::new("http://localhost:4200")
+let socket = ClientBuilder::new("http://localhost:4200")
      .namespace("/admin")
      .on("test", callback)
      .on("error", |err, _| eprintln!("Error: {:#?}", err))
@@ -54,7 +54,7 @@ socket.disconnect().expect("Disconnect failed")
 
 ```
 
-The main entry point for using this crate is the `SocketBuilder` which provides a way to easily configure a socket in the needed way. When the `connect` method is called on the builder, it returns a connected client which then could be used to emit messages to certain events. One client can only be connected to one namespace. If you need to listen to the messages in different namespaces you need to allocate multiple sockets.
+The main entry point for using this crate is the `ClientBuilder` which provides a way to easily configure a socket in the needed way. When the `connect` method is called on the builder, it returns a connected client which then could be used to emit messages to certain events. One client can only be connected to one namespace. If you need to listen to the messages in different namespaces you need to allocate multiple sockets.
 
 ## Documentation
 

@@ -5,7 +5,7 @@ use native_tls::TlsConnector;
 use rust_engineio::error::Error;
 use rust_engineio::{
     packet::{Packet, PacketId},
-    {Socket, SocketBuilder},
+    {Client, ClientBuilder},
 };
 use std::fs::File;
 use std::io::Read;
@@ -47,26 +47,26 @@ pub mod util {
 
 pub mod tests {
     use super::*;
-    pub fn engine_io_socket_build(url: Url) -> Result<Socket, Error> {
-        SocketBuilder::new(url).build()
+    pub fn engine_io_socket_build(url: Url) -> Result<Client, Error> {
+        ClientBuilder::new(url).build()
     }
 
-    pub fn engine_io_socket_build_polling(url: Url) -> Result<Socket, Error> {
-        SocketBuilder::new(url).build_polling()
+    pub fn engine_io_socket_build_polling(url: Url) -> Result<Client, Error> {
+        ClientBuilder::new(url).build_polling()
     }
 
-    pub fn engine_io_socket_build_polling_secure(url: Url) -> Result<Socket, Error> {
-        SocketBuilder::new(url)
+    pub fn engine_io_socket_build_polling_secure(url: Url) -> Result<Client, Error> {
+        ClientBuilder::new(url)
             .tls_config(tls_connector()?)
             .build_polling()
     }
 
-    pub fn engine_io_socket_build_websocket(url: Url) -> Result<Socket, Error> {
-        SocketBuilder::new(url).build_websocket()
+    pub fn engine_io_socket_build_websocket(url: Url) -> Result<Client, Error> {
+        ClientBuilder::new(url).build_websocket()
     }
 
-    pub fn engine_io_socket_build_websocket_secure(url: Url) -> Result<Socket, Error> {
-        SocketBuilder::new(url)
+    pub fn engine_io_socket_build_websocket_secure(url: Url) -> Result<Client, Error> {
+        ClientBuilder::new(url)
             .tls_config(tls_connector()?)
             .build_websocket()
     }
@@ -75,7 +75,7 @@ pub mod tests {
         Packet::new(PacketId::Message, Bytes::from("hello world"))
     }
 
-    pub fn engine_io_emit(socket: &Socket, packet: Packet) -> Result<(), Error> {
+    pub fn engine_io_emit(socket: &Client, packet: Packet) -> Result<(), Error> {
         socket.emit(packet)
     }
 }

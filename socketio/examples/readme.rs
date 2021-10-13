@@ -1,4 +1,4 @@
-use rust_socketio::{Payload, Socket, SocketBuilder};
+use rust_socketio::{Client, ClientBuilder, Payload};
 use serde_json::json;
 use std::time::Duration;
 
@@ -6,7 +6,7 @@ fn main() {
     // define a callback which is called when a payload is received
     // this callback gets the payload as well as an instance of the
     // socket to communicate with the server
-    let callback = |payload: Payload, socket: Socket| {
+    let callback = |payload: Payload, socket: Client| {
         match payload {
             Payload::String(str) => println!("Received: {}", str),
             Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -17,7 +17,7 @@ fn main() {
     };
 
     // get a socket that is connected to the admin namespace
-    let socket = SocketBuilder::new("http://localhost:4200")
+    let socket = ClientBuilder::new("http://localhost:4200")
         .namespace("/admin")
         .on("test", callback)
         .on("error", |err, _| eprintln!("Error: {:#?}", err))

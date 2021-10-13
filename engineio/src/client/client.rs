@@ -15,12 +15,12 @@ use std::fmt::Debug;
 use url::Url;
 
 #[derive(Clone, Debug)]
-pub struct Socket {
+pub struct Client {
     socket: InnerSocket,
 }
 
 #[derive(Clone, Debug)]
-pub struct SocketBuilder {
+pub struct ClientBuilder {
     url: Url,
     tls_config: Option<TlsConnector>,
     headers: Option<HeaderMap>,
@@ -32,7 +32,7 @@ pub struct SocketBuilder {
     on_packet: OptionalCallback<Packet>,
 }
 
-impl SocketBuilder {
+impl ClientBuilder {
     pub fn new(url: Url) -> Self {
         let mut url = url;
         url.query_pairs_mut()
@@ -42,7 +42,7 @@ impl SocketBuilder {
         if url.path() == "/" {
             url.set_path("/engine.io/");
         }
-        SocketBuilder {
+        ClientBuilder {
             url,
             headers: None,
             tls_config: None,
@@ -149,7 +149,7 @@ impl SocketBuilder {
     }
 
     /// Build websocket if allowed, if not fall back to polling
-    pub fn build(mut self) -> Result<Socket> {
+    pub fn build(mut self) -> Result<Client> {
         self.handshake()?;
 
         if self.websocket_upgrade()? {
@@ -160,7 +160,7 @@ impl SocketBuilder {
     }
 
     /// Build socket with polling transport
-    pub fn build_polling(mut self) -> Result<Socket> {
+    pub fn build_polling(mut self) -> Result<Client> {
         self.handshake()?;
 
         // Make a polling transport with new sid
@@ -171,7 +171,7 @@ impl SocketBuilder {
         );
 
         // SAFETY: handshake function called previously.
-        Ok(Socket {
+        Ok(Client {
             socket: InnerSocket::new(
                 transport.into(),
                 self.handshake.unwrap(),
@@ -185,7 +185,7 @@ impl SocketBuilder {
     }
 
     /// Build socket with a polling transport then upgrade to websocket transport
-    pub fn build_websocket_with_upgrade(mut self) -> Result<Socket> {
+    pub fn build_websocket_with_upgrade(mut self) -> Result<Client> {
         self.handshake()?;
 
         if self.websocket_upgrade()? {
@@ -196,7 +196,7 @@ impl SocketBuilder {
     }
 
     /// Build socket with only a websocket transport
-    pub fn build_websocket(mut self) -> Result<Socket> {
+    pub fn build_websocket(mut self) -> Result<Client> {
         // SAFETY: Already a Url
         let url = websocket::client::Url::parse(&self.url.to_string())?;
 
@@ -215,7 +215,7 @@ impl SocketBuilder {
                 }
                 // NOTE: Although self.url contains the sid, it does not propagate to the transport
                 // SAFETY: handshake function called previously.
-                Ok(Socket {
+                Ok(Client {
                     socket: InnerSocket::new(
                         transport.into(),
                         self.handshake.unwrap(),
@@ -240,7 +240,7 @@ impl SocketBuilder {
                 }
                 // NOTE: Although self.url contains the sid, it does not propagate to the transport
                 // SAFETY: handshake function called previously.
-                Ok(Socket {
+                Ok(Client {
                     socket: InnerSocket::new(
                         transport.into(),
                         self.handshake.unwrap(),
@@ -258,7 +258,7 @@ impl SocketBuilder {
 
     /// Build websocket if allowed, if not allowed or errored fall back to polling.
     /// WARNING: websocket errors suppressed, no indication of websocket success or failure.
-    pub fn build_with_fallback(self) -> Result<Socket> {
+    pub fn build_with_fallback(self) -> Result<Client> {
         let result = self.clone().build();
         if result.is_err() {
             self.build_polling()
@@ -280,7 +280,7 @@ impl SocketBuilder {
     }
 }
 
-impl Socket {
+impl Client {
     pub fn close(&self) -> Result<()> {
         self.socket.disconnect()
     }
@@ -356,7 +356,7 @@ impl Socket {
 
 #[derive(Clone)]
 pub struct Iter<'a> {
-    socket: &'a Socket,
+    socket: &'a Client,
     iter: Option<crate::packet::IntoIter>,
 }
 
@@ -401,8 +401,8 @@ mod test {
 
     use crate::packet::Packet;
 
-    fn builder(url: Url) -> SocketBuilder {
-        SocketBuilder::new(url)
+    fn builder(url: Url) -> ClientBuilder {
+        ClientBuilder::new(url)
             .on_open(|_| {
                 println!("Open event!");
             })
@@ -420,7 +420,7 @@ mod test {
             })
     }
 
-    fn test_connection(socket: Socket) -> Result<()> {
+    fn test_connection(socket: Client) -> Result<()> {
         let socket = socket;
 
         socket.connect().unwrap();
