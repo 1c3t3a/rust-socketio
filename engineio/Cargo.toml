@@ -1,6 +1,6 @@
 [package]
 name = "rust_engineio"
-version = "0.3.0-alpha.1"
+version = "0.3.0-alpha.2"
 authors = ["Bastian Kersting <bastian@cmbt.de>"]
 edition = "2018"
 description = "An implementation of a engineio client written in rust."

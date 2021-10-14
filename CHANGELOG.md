@@ -12,7 +12,8 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
-* [`0.3.0-alpha`](#121) - _2021.09.20_
+* [`0.3.0-alpha.2`](#030a2) - _2021.10.14_
+* [`0.3.0-alpha.1`](#030a1) - _2021.09.20_
 * [`0.2.4`](#024) - _2021.05.25_
 * [`0.2.3`](#023) - _2021.05.24_
 * [`0.2.2`](#022) - _2021.05.13
@@ -25,8 +26,21 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 _nothing new to show for… yet!_
 
+## <a name="030a2">[0.3.0-alpha.1] - _Further refactoring_ </a>
 
-## <a name="030-alpha">[0.3.0-alpha] - _Refactoring_ </a>
+_2021.10.14_
+
+### Changes
+
+* Rename `Socket` to `Client` and `SocketBuilder` to `ClientBuilder`
+* Removed headermap from pub use, internal type only
+
+* Deprecations:
+    * crate::payload (use crate::Payload instead)
+    * crate::error (use crate::Error instead)
+    * crate::event (use crate::Event instead)
+
+## <a name="030a1">[0.3.0-alpha.1] - _Refactoring_ </a>
 
 _2021.09.20_
 
