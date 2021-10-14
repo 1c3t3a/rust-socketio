@@ -8,7 +8,7 @@ An implementation of a engine.io client written in the rust programming language
 ## Example usage
 
 ``` rust
- use rust_engineio::{ClientBuilder, Client, packet::{Packet, PacketId}};
+use rust_engineio::{ClientBuilder, Client, packet::{Packet, PacketId}};
 use url::Url;
 use bytes::Bytes;
 
