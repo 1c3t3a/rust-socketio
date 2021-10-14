@@ -164,7 +164,7 @@ impl ClientBuilder {
                 map.insert(key.into(), val.into());
             }
             None => {
-                let mut map = HeaderMap::new();
+                let mut map = HeaderMap::default();
                 map.insert(key.into(), val.into());
                 self.opening_headers = Some(map);
             }

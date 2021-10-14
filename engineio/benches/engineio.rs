@@ -2,10 +2,10 @@ use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use native_tls::Certificate;
 use native_tls::TlsConnector;
-use rust_engineio::error::Error;
 use rust_engineio::{
+    error::Error,
     packet::{Packet, PacketId},
-    {Client, ClientBuilder},
+    Client, ClientBuilder,
 };
 use std::fs::File;
 use std::io::Read;
