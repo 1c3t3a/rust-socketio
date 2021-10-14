@@ -6,7 +6,7 @@
 //!
 //! ```
 //!
-//! The main entry point for using this crate is the [`SocketBuilder`] which provides
+//! The main entry point for using this crate is the [`ClientBuilder`] which provides
 //! a way to easily configure a socket in the needed way. When the `connect` method
 //! is called on the builder, it returns a connected client which then could be used
 //! to emit messages to certain events. One client can only be connected to one namespace.
@@ -64,7 +64,7 @@ pub const ENGINE_IO_VERSION: i32 = 4;
 /// crate. Handles all kinds of errors.
 pub mod error;
 
-pub use client::{Socket, SocketBuilder};
+pub use client::{Client, ClientBuilder};
 pub use error::Error;
 pub use packet::{Packet, PacketId};
 

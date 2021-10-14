@@ -1,7 +1,7 @@
 mod builder;
-mod socket;
-pub use builder::SocketBuilder;
+mod client;
+pub use builder::ClientBuilder;
 pub use builder::TransportType;
-pub use socket::Socket;
+pub use client::Client;
 /// Internal callback type
 mod callback;

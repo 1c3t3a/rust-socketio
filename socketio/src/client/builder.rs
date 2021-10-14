@@ -1,8 +1,8 @@
 use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
-use crate::Socket;
+use crate::Client;
 use native_tls::TlsConnector;
-use rust_engineio::client::SocketBuilder as EngineIoSocketBuilder;
+use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
 use rust_engineio::header::{HeaderMap, HeaderValue};
 use url::Url;
 
@@ -28,8 +28,8 @@ pub enum TransportType {
 /// A builder class for a `socket.io` socket. This handles setting up the client and
 /// configuring the callback, the namespace and metadata of the socket. If no
 /// namespace is specified, the default namespace `/` is taken. The `connect` method
-/// acts the `build` method and returns a connected [`Socket`].
-pub struct SocketBuilder {
+/// acts the `build` method and returns a connected [`Client`].
+pub struct ClientBuilder {
     address: String,
     on: HashMap<Event, Callback>,
     namespace: String,
@@ -38,25 +38,25 @@ pub struct SocketBuilder {
     transport_type: TransportType,
 }
 
-impl SocketBuilder {
+impl ClientBuilder {
     /// Create as client builder from a URL. URLs must be in the form
     /// `[ws or wss or http or https]://[domain]:[port]/[path]`. The
     /// path of the URL is optional and if no port is given, port 80
     /// will be used.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{SocketBuilder, Payload, Socket};
+    /// use rust_socketio::{ClientBuilder, Payload, Client};
     /// use serde_json::json;
     ///
     ///
-    /// let callback = |payload: Payload, socket: Socket| {
+    /// let callback = |payload: Payload, socket: Client| {
     ///            match payload {
     ///                Payload::String(str) => println!("Received: {}", str),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
     ///            }
     /// };
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200")
+    /// let mut socket = ClientBuilder::new("http://localhost:4200")
     ///     .namespace("/admin")
     ///     .on("test", callback)
     ///     .connect()
@@ -97,9 +97,9 @@ impl SocketBuilder {
     ///
     /// # Example
     /// ```rust
-    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use rust_socketio::{ClientBuilder, Payload};
     ///
-    /// let socket = SocketBuilder::new("http://localhost:4200/")
+    /// let socket = ClientBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
     ///     .on("test", |payload: Payload, _| {
     ///            match payload {
@@ -113,7 +113,7 @@ impl SocketBuilder {
     /// ```
     pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
-        F: for<'a> FnMut(Payload, Socket) + 'static + Sync + Send,
+        F: for<'a> FnMut(Payload, Client) + 'static + Sync + Send,
     {
         self.on.insert(event.into(), Callback::new(callback));
         self
@@ -123,7 +123,7 @@ impl SocketBuilder {
     /// both the `polling` as well as the `websocket` transport type.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use rust_socketio::{ClientBuilder, Payload};
     /// use native_tls::TlsConnector;
     ///
     /// let tls_connector =  TlsConnector::builder()
@@ -131,7 +131,7 @@ impl SocketBuilder {
     ///            .build()
     ///            .expect("Found illegal configuration");
     ///
-    /// let socket = SocketBuilder::new("http://localhost:4200/")
+    /// let socket = ClientBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
     ///     .tls_config(tls_connector)
@@ -148,10 +148,10 @@ impl SocketBuilder {
     /// via the transport layer.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use rust_socketio::{ClientBuilder, Payload};
     ///
     ///
-    /// let socket = SocketBuilder::new("http://localhost:4200/")
+    /// let socket = ClientBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
     ///     .opening_header("accept-encoding", "application/json")
@@ -175,9 +175,9 @@ impl SocketBuilder {
     /// Specifies which EngineIO [`TransportType`] to use.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{SocketBuilder, TransportType};
+    /// use rust_socketio::{ClientBuilder, TransportType};
     ///
-    /// let socket = SocketBuilder::new("http://localhost:4200/")
+    /// let socket = ClientBuilder::new("http://localhost:4200/")
     ///     // Use websockets to handshake and connect.
     ///     .transport_type(TransportType::Websocket)
     ///     .connect()
@@ -191,18 +191,18 @@ impl SocketBuilder {
     }
 
     /// Connects the socket to a certain endpoint. This returns a connected
-    /// [`Socket`] instance. This method returns an [`std::result::Result::Err`]
+    /// [`Client`] instance. This method returns an [`std::result::Result::Err`]
     /// value if something goes wrong during connection. Also starts a separate
     /// thread to start polling for packets. Used with callbacks.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{SocketBuilder, Payload};
+    /// use rust_socketio::{ClientBuilder, Payload};
     /// use serde_json::json;
     ///
     ///
-    /// let mut socket = SocketBuilder::new("http://localhost:4200/")
+    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .on("error", |err, _| eprintln!("Socket error!: {:#?}", err))
+    ///     .on("error", |err, _| eprintln!("Client error!: {:#?}", err))
     ///     .connect()
     ///     .expect("connection failed");
     ///
@@ -213,7 +213,7 @@ impl SocketBuilder {
     ///
     /// assert!(result.is_ok());
     /// ```
-    pub fn connect(self) -> Result<Socket> {
+    pub fn connect(self) -> Result<Client> {
         let socket = self.connect_manual()?;
         let socket_clone = socket.clone();
 
@@ -235,7 +235,7 @@ impl SocketBuilder {
     }
 
     //TODO: 0.3.X stabilize
-    pub(crate) fn connect_manual(self) -> Result<Socket> {
+    pub(crate) fn connect_manual(self) -> Result<Client> {
         // Parse url here rather than in new to keep new returning Self.
         let mut url = Url::parse(&self.address)?;
 
@@ -243,7 +243,7 @@ impl SocketBuilder {
             url.set_path("/socket.io/");
         }
 
-        let mut builder = EngineIoSocketBuilder::new(url);
+        let mut builder = EngineIoClientBuilder::new(url);
 
         if let Some(tls_config) = self.tls_config {
             builder = builder.tls_config(tls_config);
@@ -252,16 +252,16 @@ impl SocketBuilder {
             builder = builder.headers(headers);
         }
 
-        let engine_socket = match self.transport_type {
+        let engine_client = match self.transport_type {
             TransportType::Any => builder.build_with_fallback()?,
             TransportType::Polling => builder.build_polling()?,
             TransportType::Websocket => builder.build_websocket()?,
             TransportType::WebsocketUpgrade => builder.build_websocket_with_upgrade()?,
         };
 
-        let inner_socket = InnerSocket::new(engine_socket)?;
+        let inner_socket = InnerSocket::new(engine_client)?;
 
-        let socket = Socket::new(inner_socket, &self.namespace, self.on)?;
+        let socket = Client::new(inner_socket, &self.namespace, self.on)?;
         socket.connect()?;
 
         Ok(socket)

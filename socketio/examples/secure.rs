@@ -1,6 +1,6 @@
 use native_tls::Certificate;
 use native_tls::TlsConnector;
-use rust_socketio::SocketBuilder;
+use rust_socketio::ClientBuilder;
 use std::fs::File;
 use std::io::Read;
 
@@ -19,7 +19,7 @@ fn main() {
         .build()
         .expect("Failed to build TLS Connector");
 
-    let socket = SocketBuilder::new("https://localhost:4200")
+    let socket = ClientBuilder::new("https://localhost:4200")
         .tls_config(tls_connector)
         // Not strictly required for HTTPS
         .opening_header("HOST", "localhost")
