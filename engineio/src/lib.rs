@@ -16,7 +16,7 @@
 //!      .on_open(|_| println!("Connection opened!"))
 //!      .build()
 //!      .expect("Creating client failed");
-//! 
+//!
 //! // connect to the server
 //! client.connect().expect("Connection failed");
 //!
