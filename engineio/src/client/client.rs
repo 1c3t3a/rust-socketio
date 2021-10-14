@@ -335,9 +335,9 @@ impl Client {
                 }
                 PacketId::Noop => (),
             }
-            return Ok(Some(packet));
+            Ok(Some(packet))
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 
@@ -366,7 +366,7 @@ impl<'a> Iterator for Iter<'a> {
         match self.socket.poll() {
             Ok(Some(packet)) => Some(Ok(packet)),
             Ok(None) => None,
-            Err(err) => Some(Err(err.into())),
+            Err(err) => Some(Err(err)),
         }
     }
 }
@@ -515,7 +515,7 @@ mod test {
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
         let mut url = crate::test::engine_io_server_secure()?;
 
-        let mut headers = HeaderMap::new();
+        let mut headers = HeaderMap::default();
         headers.insert(HOST, host);
         let mut builder = builder(url.clone());
 
@@ -589,7 +589,7 @@ mod test {
         assert!(matches!(Error::IllegalActionBeforeOpen(), _error));
 
         // test missing match arm in socket constructor
-        let mut headers = HeaderMap::new();
+        let mut headers = HeaderMap::default();
         let host =
             std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
         headers.insert(HOST, host);

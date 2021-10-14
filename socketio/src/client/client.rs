@@ -211,7 +211,7 @@ impl Client {
             match self.socket.poll() {
                 Err(err) => {
                     self.callback(&Event::Error, err.to_string())?;
-                    return Err(err.into());
+                    return Err(err);
                 }
                 Ok(Some(packet)) => {
                     if packet.nsp == self.nsp {
@@ -236,7 +236,6 @@ impl Client {
         if let Some(callback) = lock.get_mut(event) {
             callback(payload.into(), self.clone());
         }
-        drop(lock);
         drop(on);
         Ok(())
     }
@@ -302,7 +301,7 @@ impl Client {
             // the string must be a valid json array with the event at index 0 and the
             // payload at index 1. if no event is specified, the message callback is used
             if let Ok(serde_json::Value::Array(contents)) =
-                serde_json::from_str::<serde_json::Value>(&data)
+                serde_json::from_str::<serde_json::Value>(data)
             {
                 let event: Event = if contents.len() > 1 {
                     contents
@@ -335,15 +334,14 @@ impl Client {
     fn handle_socketio_packet(&self, packet: &Packet) -> Result<()> {
         if packet.nsp == self.nsp {
             match packet.packet_type {
-                PacketId::Ack | PacketId::BinaryAck => match self.handle_ack(&packet) {
-                    Err(err) => {
+                PacketId::Ack | PacketId::BinaryAck => {
+                    if let Err(err) = self.handle_ack(packet) {
                         self.callback(&Event::Error, err.to_string())?;
-                        return Err(err.into());
+                        return Err(err);
                     }
-                    Ok(_) => (),
-                },
+                }
                 PacketId::BinaryEvent => {
-                    if let Err(err) = self.handle_binary_event(&packet) {
+                    if let Err(err) = self.handle_binary_event(packet) {
                         self.callback(&Event::Error, err.to_string())?;
                     }
                 }
@@ -364,7 +362,7 @@ impl Client {
                     )?;
                 }
                 PacketId::Event => {
-                    if let Err(err) = self.handle_event(&packet) {
+                    if let Err(err) = self.handle_event(packet) {
                         self.callback(&Event::Error, err.to_string())?;
                     }
                 }
@@ -382,9 +380,9 @@ impl<'a> Iterator for Iter<'a> {
     type Item = Result<Packet>;
     fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
         match self.socket.poll() {
-            Err(err) => return Some(Err(err)),
-            Ok(Some(packet)) => return Some(Ok(packet)),
-            Ok(None) => return None,
+            Err(err) => Some(Err(err)),
+            Ok(Some(packet)) => Some(Ok(packet)),
+            Ok(None) => None,
         }
     }
 }

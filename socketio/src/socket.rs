@@ -176,7 +176,7 @@ impl Socket {
                     Ok(Some(packet)) => match packet.packet_id {
                         EnginePacketId::MessageBinary | EnginePacketId::Message => {
                             attachments.push(packet.data);
-                            attachments_left = attachments_left - 1;
+                            attachments_left -= 1;
                         }
                         _ => {
                             return Err(Error::InvalidAttachmentPacketType(

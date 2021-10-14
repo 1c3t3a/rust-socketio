@@ -139,6 +139,14 @@ impl HeaderMap {
     }
 }
 
+impl Default for HeaderMap {
+    fn default() -> Self {
+        Self {
+            map: Default::default(),
+        }
+    }
+}
+
 impl Iterator for IntoIter {
     type Item = (HeaderName, HeaderValue);
     fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {

@@ -9,16 +9,19 @@
 //! ``` rust
 //! use rust_engineio::{ClientBuilder, Client, packet::{Packet, PacketId}};
 //! use url::Url;
-//! use Bytes;
+//! use bytes::Bytes;
 //!
-//! // get a client that is connected to the server
+//! // get a client with an `on_open` callback
 //! let client: Client = ClientBuilder::new(Url::parse("http://localhost:4201").unwrap())
 //!      .on_open(|_| println!("Connection opened!"))
 //!      .build()
-//!      .expect("Connection failed");
+//!      .expect("Creating client failed");
+//! 
+//! // connect to the server
+//! client.connect().expect("Connection failed");
 //!
 //! // create a packet, in this case a message packet and emit it
-//! let packet = Packet::new(PacketId::Message, &b"Hello World");
+//! let packet = Packet::new(PacketId::Message, Bytes::from_static(b"Hello World"));
 //! client.emit(packet).expect("Server unreachable");
 //!
 //! // disconnect from the server
