@@ -1,4 +1,4 @@
-[![Latest Version](https://img.shields.io/crates/v/rust_engineio)](https://crates.io/crates/rust_engine)
+[![Latest Version](https://img.shields.io/crates/v/rust_engineio)](https://crates.io/crates/rust_engineio)
 [![docs.rs](https://docs.rs/rust_engineio/badge.svg)](https://docs.rs/rust_engineio)
 
 # Rust-engineio-client
