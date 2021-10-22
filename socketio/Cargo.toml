@@ -2,7 +2,7 @@
 name = "rust_socketio"
 version = "0.3.0-alpha.2"
 authors = ["Bastian Kersting <bastian@cmbt.de>"]
-edition = "2018"
+edition = "2021"
 description = "An implementation of a socketio client written in rust."
 readme = "../README.md"
 repository = "https://github.com/1c3t3a/rust-socketio"
