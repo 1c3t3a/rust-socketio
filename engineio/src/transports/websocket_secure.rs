@@ -45,7 +45,7 @@ impl WebsocketSecureTransport {
 
         Ok(WebsocketSecureTransport {
             client: Arc::new(Mutex::new(client)),
-            // SAFTEY: already a URL parsing can't fail
+            // SAFETY: already a URL parsing can't fail
             base_url: Arc::new(RwLock::new(url::Url::parse(&url.to_string())?)),
         })
     }

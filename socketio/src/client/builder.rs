@@ -119,7 +119,7 @@ impl ClientBuilder {
         self
     }
 
-    /// Uses a preconfigured TLS connector for secure cummunication. This configures
+    /// Uses a preconfigured TLS connector for secure communication. This configures
     /// both the `polling` as well as the `websocket` transport type.
     /// # Example
     /// ```rust

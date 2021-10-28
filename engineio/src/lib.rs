@@ -41,7 +41,7 @@
 //!
 //! This implementation now supports all of the features of the engine.io protocol mentioned [here](https://github.com/socketio/engine.io-protocol).
 //! This includes various transport options, the possibility of sending engine.io packets and registering the
-//! commmon engine.io event callbacks:
+//! common engine.io event callbacks:
 //! * on_open
 //! * on_close
 //! * on_data

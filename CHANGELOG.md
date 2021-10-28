@@ -91,7 +91,7 @@ _2021.05.25_
 
 * Fixed a bug that prevented the client from receiving data for a message event issued on the server.
 
-## <a name="023">[0.2.3] - _Disconnect methos on the Socket struct_ </a>
+## <a name="023">[0.2.3] - _Disconnect methods on the Socket struct_ </a>
 
 _2021.05.24_
 
@@ -115,7 +115,7 @@ _2021.04.27_
 
 ### Changes
 
-* Corrected memory odering issues which might have become an issue on certain platforms.
+* Corrected memory ordering issues which might have become an issue on certain platforms.
 * Added this CHANGELOG to keep track of all changes.
 * Small stylistic changes to the codebase in general.
 
@@ -147,7 +147,7 @@ _2021.01.10_
 
 _2021.01.05_
 
-* First version of the libary written in async rust. The features included:
+* First version of the library written in async rust. The features included:
     * connecting to a server.
     * register callbacks for the following event types:
         * open, close, error, message
