@@ -216,7 +216,7 @@ impl TryFrom<&Bytes> for Packet {
             }
 
             if end != start {
-                // unwrapping here is infact safe as we checked for errors in the
+                // unwrapping here is in fact safe as we checked for errors in the
                 // condition of the loop
                 json_data = serde_json::from_str(
                     &payload

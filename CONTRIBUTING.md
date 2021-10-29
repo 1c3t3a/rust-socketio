@@ -88,7 +88,7 @@ while read line
 do
     if [[ $(echo "$line" | wc -c) -gt 51 ]]
     then
-        echo "Line '$line' is longer than 50 charecters."
+        echo "Line '$line' is longer than 50 characters."
         echo "Consider splitting into these two lines"
         echo "$line" | head -c 50
         echo
