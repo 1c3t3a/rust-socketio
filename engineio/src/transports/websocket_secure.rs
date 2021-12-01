@@ -9,13 +9,17 @@ use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::str::from_utf8;
 use std::sync::{Arc, Mutex, RwLock};
+use std::thread::sleep;
+use std::time::Duration;
+use websocket::WebSocketError;
 use websocket::{
     client::sync::Client as WsClient,
     client::Url,
+    dataframe::DataFrame,
     dataframe::Opcode,
     header::Headers,
     sync::stream::{TcpStream, TlsStream},
-    ws::dataframe::DataFrame,
+    ws::dataframe::DataFrame as DataFrameable,
     ClientBuilder as WsClientBuilder, Message,
 };
 
@@ -96,11 +100,24 @@ impl Transport for WebsocketSecureTransport {
     }
 
     fn poll(&self) -> Result<Bytes> {
-        let mut receiver = self.client.lock()?;
+        let received_df: DataFrame;
+        loop {
+            let mut receiver = self.client.lock()?;
+            receiver.set_nonblocking(true)?;
+            match receiver.recv_dataframe() {
+                Ok(payload) => {
+                    received_df = payload;
+                    break;
+                }
+                Err(WebSocketError::Other(_)) => (),
+                Err(err) => return Err(err.into()),
+            }
+            receiver.set_nonblocking(false)?;
+            drop(receiver);
+            sleep(Duration::from_millis(200));
+        }
 
         // if this is a binary payload, we mark it as a message
-        let received_df = receiver.recv_dataframe()?;
-        drop(receiver);
         match received_df.opcode {
             Opcode::Binary => {
                 let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
