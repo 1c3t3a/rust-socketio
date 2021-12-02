@@ -11,7 +11,6 @@ use std::str::from_utf8;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
-use websocket::WebSocketError;
 use websocket::{
     client::sync::Client as WsClient,
     client::Url,
@@ -109,8 +108,7 @@ impl Transport for WebsocketSecureTransport {
                     received_df = payload;
                     break;
                 }
-                Err(WebSocketError::Other(_)) => (),
-                Err(err) => return Err(err.into()),
+                Err(err) => println!("Error while polling: {}", err),
             }
             receiver.set_nonblocking(false)?;
             drop(receiver);
