@@ -7,10 +7,12 @@ use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
 use std::borrow::Cow;
 use std::convert::TryFrom;
+use std::io::ErrorKind;
 use std::str::from_utf8;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
+use websocket::WebSocketError;
 use websocket::{
     client::sync::Client as WsClient,
     client::Url,
@@ -108,7 +110,13 @@ impl Transport for WebsocketSecureTransport {
                     received_df = payload;
                     break;
                 }
-                Err(err) => println!("Error while polling: {}", err),
+                // Special case to fix https://github.com/1c3t3a/rust-socketio/issues/133
+                // This error occures when the websocket connection is set to nonblock,
+                // but receive is called on the socket without having a current package to handle.
+                // As a result we're going to sleep for 200ms and release the lock on the client,
+                // so that other threads (especially emit) are able to access the client.
+                Err(WebSocketError::IoError(err)) if err.kind() == ErrorKind::WouldBlock => (),
+                _ => (),
             }
             receiver.set_nonblocking(false)?;
             drop(receiver);
@@ -170,6 +178,7 @@ mod test {
             None,
         )
     }
+
     #[test]
     fn websocket_secure_transport_base_url() -> Result<()> {
         let transport = new()?;
@@ -201,6 +210,7 @@ mod test {
     #[test]
     fn websocket_secure_debug() -> Result<()> {
         let transport = new()?;
+        transport.poll()?;
         assert_eq!(
             format!("{:?}", transport),
             format!(
