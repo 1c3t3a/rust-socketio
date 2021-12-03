@@ -24,7 +24,7 @@ native-tls = "0.2.7"
 url = "2.2.2"
 
 [dev-dependencies]
-cargo-tarpaulin = "0.18.3"
+cargo-tarpaulin = "0.18.5"
 criterion = "0.3"
 
 [[bench]]
