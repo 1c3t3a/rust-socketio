@@ -7,15 +7,19 @@ use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
 use std::borrow::Cow;
 use std::convert::TryFrom;
+use std::io::ErrorKind;
 use std::str::from_utf8;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
+use websocket::WebSocketError;
 use websocket::{
     client::sync::Client as WsClient,
     client::Url,
+    dataframe::DataFrame,
     dataframe::Opcode,
     header::Headers,
     sync::stream::{TcpStream, TlsStream},
-    ws::dataframe::DataFrame,
+    ws::dataframe::DataFrame as DataFrameable,
     ClientBuilder as WsClientBuilder, Message,
 };
 
@@ -40,6 +44,11 @@ impl WebsocketSecureTransport {
             client_builder = client_builder.custom_headers(&headers);
         }
         let client = client_builder.connect_secure(tls_config)?;
+        // set a read timeout on the client to occasionally release the client lock during read.
+        client
+            .stream_ref()
+            .get_ref()
+            .set_read_timeout(Some(Duration::from_millis(200)))?;
 
         client.set_nonblocking(false)?;
 
@@ -96,11 +105,29 @@ impl Transport for WebsocketSecureTransport {
     }
 
     fn poll(&self) -> Result<Bytes> {
-        let mut receiver = self.client.lock()?;
+        let received_df: DataFrame;
+        loop {
+            let mut receiver = self.client.lock()?;
+            match receiver.recv_dataframe() {
+                Ok(payload) => {
+                    received_df = payload;
+                    break;
+                }
+                // Special case to fix https://github.com/1c3t3a/rust-socketio/issues/133
+                // This error occures when the websocket connection times out on the receive method.
+                // The timeout is defined on the underlying TcpStream (see `WebsocketSecureTransport::new`).
+                // The error kind is platform specific, on Unix systems this errors with `ErrorKind::WouldBlock`,
+                // on Windows with `ErrorKind::TimedOut`.
+                // As a result we're going to release the lock on the client,
+                // so that other threads (especially emit) are able to access the client.
+                Err(WebSocketError::IoError(err))
+                    if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+                Err(err) => return Err(err.into()),
+            }
+            drop(receiver);
+        }
 
         // if this is a binary payload, we mark it as a message
-        let received_df = receiver.recv_dataframe()?;
-        drop(receiver);
         match received_df.opcode {
             Opcode::Binary => {
                 let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
@@ -155,6 +182,7 @@ mod test {
             None,
         )
     }
+
     #[test]
     fn websocket_secure_transport_base_url() -> Result<()> {
         let transport = new()?;
