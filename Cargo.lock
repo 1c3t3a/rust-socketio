@@ -178,9 +178,9 @@ dependencies = [
 
 [[package]]
 name = "cargo-tarpaulin"
-version = "0.18.3"
+version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94f04a3a4c0aca346bf98f6b70cb24b1ccfb25d8b17f2838975229cd17968ad7"
+checksum = "69a1da147110c10e18bb0d5f241173e54e6fefa1b36f3aba9845663aa078cfef"
 dependencies = [
  "cargo_metadata",
  "cfg-if",
@@ -625,9 +625,9 @@ dependencies = [
 
 [[package]]
 name = "gimli"
-version = "0.25.0"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0a01e0497841a3b2db4f8afa483cce65f7e96a3498bd6c541734792aeac8fe7"
+checksum = "78cc372d058dcf6d5ecd98510e7fbc9e5aec4d21de70f65fea8fecebcd881bd4"
 dependencies = [
  "fallible-iterator",
  "indexmap",
