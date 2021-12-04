@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.3.0-alpha.2`](#030a3) - _2021.12.04_
 * [`0.3.0-alpha.2`](#030a2) - _2021.10.14_
 * [`0.3.0-alpha.1`](#030a1) - _2021.09.20_
 * [`0.2.4`](#024) - _2021.05.25_
@@ -26,7 +27,16 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 _nothing new to show for… yet!_
 
-## <a name="030a2">[0.3.0-alpha.1] - _Further refactoring_ </a>
+## <a name="030a3">[0.3.0-alpha.3] - _Bugfixes_ </a>
+
+_2021.12.04_
+
+### Changes
+
+- fix a bug that resulted in a blocking `emit` method (see [#133](https://github.com/1c3t3a/rust-socketio/issues/133)).
+- Bump dependencies.
+
+## <a name="030a2">[0.3.0-alpha.2] - _Further refactoring_ </a>
 
 _2021.10.14_
 

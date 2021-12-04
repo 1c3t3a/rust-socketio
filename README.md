@@ -10,6 +10,14 @@ An implementation of a socket.io client written in the rust programming language
 
 ## Example usage
 
+Add the following to your `Cargo.toml` file:
+
+```toml
+rust-socketio = "0.3.0-alpha.3"
+```
+
+Then you're able to run the following example code:
+
 ``` rust
 use rust_socketio::{ClientBuilder, Payload, Client};
 use serde_json::json;
