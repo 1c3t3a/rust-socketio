@@ -10,6 +10,7 @@ use std::convert::TryFrom;
 use std::io::ErrorKind;
 use std::str::from_utf8;
 use std::sync::{Arc, Mutex, RwLock};
+use std::thread::sleep;
 use std::time::Duration;
 use websocket::WebSocketError;
 use websocket::{
@@ -44,11 +45,6 @@ impl WebsocketSecureTransport {
             client_builder = client_builder.custom_headers(&headers);
         }
         let client = client_builder.connect_secure(tls_config)?;
-        // set a read timeout on the client to occasionally release the client lock during read.
-        client
-            .stream_ref()
-            .get_ref()
-            .set_read_timeout(Some(Duration::from_millis(200)))?;
 
         client.set_nonblocking(false)?;
 
@@ -108,6 +104,8 @@ impl Transport for WebsocketSecureTransport {
         let received_df: DataFrame;
         loop {
             let mut receiver = self.client.lock()?;
+            receiver.set_nonblocking(true)?;
+
             match receiver.recv_dataframe() {
                 Ok(payload) => {
                     received_df = payload;
@@ -115,7 +113,6 @@ impl Transport for WebsocketSecureTransport {
                 }
                 // Special case to fix https://github.com/1c3t3a/rust-socketio/issues/133
                 // This error occures when the websocket connection times out on the receive method.
-                // The timeout is defined on the underlying TcpStream (see `WebsocketSecureTransport::new`).
                 // The error kind is platform specific, on Unix systems this errors with `ErrorKind::WouldBlock`,
                 // on Windows with `ErrorKind::TimedOut`.
                 // As a result we're going to release the lock on the client,
@@ -124,7 +121,9 @@ impl Transport for WebsocketSecureTransport {
                     if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
                 Err(err) => return Err(err.into()),
             }
+            receiver.set_nonblocking(false)?;
             drop(receiver);
+            sleep(Duration::from_millis(200));
         }
 
         // if this is a binary payload, we mark it as a message
