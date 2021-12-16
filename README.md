@@ -13,7 +13,7 @@ An implementation of a socket.io client written in the rust programming language
 Add the following to your `Cargo.toml` file:
 
 ```toml
-rust-socketio = "0.3.0-alpha.3"
+rust-socketio = "0.3.0"
 ```
 
 Then you're able to run the following example code:
