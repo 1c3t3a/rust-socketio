@@ -1547,7 +1547,7 @@ dependencies = [
 
 [[package]]
 name = "rust_engineio"
-version = "0.3.0-alpha.3"
+version = "0.3.0"
 dependencies = [
  "adler32",
  "base64 0.13.0",
@@ -1566,7 +1566,7 @@ dependencies = [
 
 [[package]]
 name = "rust_socketio"
-version = "0.3.0-alpha.3"
+version = "0.3.0"
 dependencies = [
  "adler32",
  "base64 0.13.0",
