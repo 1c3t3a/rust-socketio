@@ -1,0 +1,25 @@
+name: Publish
+
+on:
+  workflow_dispatch
+
+jobs:
+  publish:
+    name: Publish dry run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+            toolchain: stable
+            override: true
+      # Publish the engine.io crate
+      - uses: katyo/publish-crates@v1
+        with:
+            path: './engineio'
+            dry-run: true
+      # Publish the socket.io crate
+      - uses: katyo/publish-crates@v1
+        with:
+            path: './socketio'
+            dry-run: true
