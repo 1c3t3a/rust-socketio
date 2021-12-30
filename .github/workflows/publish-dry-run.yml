@@ -1,4 +1,4 @@
-name: Publish
+name: Publish dry run
 
 on:
   workflow_dispatch
