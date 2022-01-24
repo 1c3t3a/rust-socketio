@@ -1,11 +1,11 @@
 use crate::error::Result;
+use crate::header::HeaderMap;
 use crate::transport::{AsyncTransport, Transport};
 use crate::transports_async::websocket::AsyncWebsocketTransport;
 use bytes::Bytes;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use url::Url;
-use websocket::header::Headers;
 
 #[derive(Clone)]
 pub struct WebsocketTransport {
@@ -15,12 +15,24 @@ pub struct WebsocketTransport {
 
 impl WebsocketTransport {
     /// Creates an instance of `WebsocketTransport`.
-    pub fn new(base_url: Url, _headers: Option<Headers>) -> Result<Self> {
+    pub fn new(base_url: Url, headers: Option<HeaderMap>) -> Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
-        
-        let inner = runtime.block_on(AsyncWebsocketTransport::new(base_url))?;
+
+        let mut url = base_url;
+        url.query_pairs_mut().append_pair("transport", "websocket");
+        url.set_scheme("ws").unwrap();
+
+        let mut req = http::Request::builder().uri(url.clone().as_str());
+        if let Some(map) = headers {
+            // SAFETY: this unwrap never panics as the underlying request is always in proper state
+            req.headers_mut()
+                .unwrap()
+                .extend::<reqwest::header::HeaderMap>(map.try_into()?);
+        }
+
+        let inner = runtime.block_on(AsyncWebsocketTransport::new(req.body(())?, url))?;
 
         Ok(WebsocketTransport {
             runtime: Arc::new(runtime),

@@ -3,31 +3,41 @@ use std::sync::Arc;
 use crate::{error::Result, transport::AsyncTransport};
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures_util::stream::StreamExt;
+use futures_util::StreamExt;
+use native_tls::TlsConnector;
 use tokio::sync::RwLock;
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::connect_async_tls_with_config;
+use tokio_tungstenite::Connector;
 use url::Url;
 
 use super::AsyncWebsocketGeneralTransport;
 
 /// An asynchronous websocket transport type.
-/// This type only allows for plain websocket
-/// connections ("ws://").
-pub(crate) struct AsyncWebsocketTransport {
+/// This type only allows for secure websocket
+/// connections ("wss://").
+pub(crate) struct AsyncWebsocketSecureTransport {
     inner: AsyncWebsocketGeneralTransport,
     base_url: Arc<RwLock<url::Url>>,
 }
 
-impl AsyncWebsocketTransport {
-    /// Creates a new instance over a request that might hold additional headers and an URL.
-    pub async fn new(request: http::request::Request<()>, url: url::Url) -> Result<Self> {
-        let (ws_stream, _) = connect_async(request).await?;
-        let (sen, rec) = ws_stream.split();
+impl AsyncWebsocketSecureTransport {
+    /// Creates a new instance over a request that might hold additional headers, a possible
+    /// Tls connector and an URL.
+    pub(crate) async fn new(
+        request: http::request::Request<()>,
+        base_url: url::Url,
+        tls_config: Option<TlsConnector>,
+    ) -> Result<Self> {
+        let (ws_stream, _) =
+            connect_async_tls_with_config(request, None, tls_config.map(Connector::NativeTls))
+                .await?;
 
+        let (sen, rec) = ws_stream.split();
         let inner = AsyncWebsocketGeneralTransport::new(sen, rec).await;
-        Ok(AsyncWebsocketTransport {
+
+        Ok(AsyncWebsocketSecureTransport {
             inner,
-            base_url: Arc::new(RwLock::new(url)),
+            base_url: Arc::new(RwLock::new(base_url)),
         })
     }
 
@@ -39,7 +49,7 @@ impl AsyncWebsocketTransport {
 }
 
 #[async_trait]
-impl AsyncTransport for AsyncWebsocketTransport {
+impl AsyncTransport for AsyncWebsocketSecureTransport {
     async fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()> {
         self.inner.emit(data, is_binary_att).await
     }
@@ -60,7 +70,7 @@ impl AsyncTransport for AsyncWebsocketTransport {
         {
             url.query_pairs_mut().append_pair("transport", "websocket");
         }
-        url.set_scheme("ws").unwrap();
+        url.set_scheme("wss").unwrap();
         *self.base_url.write().await = url;
         Ok(())
     }

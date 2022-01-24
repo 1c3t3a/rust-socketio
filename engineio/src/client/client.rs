@@ -198,17 +198,11 @@ impl ClientBuilder {
     /// Build socket with only a websocket transport
     pub fn build_websocket(mut self) -> Result<Client> {
         // SAFETY: Already a Url
-        let url = websocket::client::Url::parse(&self.url.to_string())?;
-        let u_url = url::Url::parse(&self.url.to_string())?;
+        let url = url::Url::parse(&self.url.to_string())?;
 
         match url.scheme() {
             "http" | "ws" => {
-                let transport = WebsocketTransport::new(
-                    u_url,
-                    self.headers
-                        .clone()
-                        .map(|headers| headers.try_into().unwrap()),
-                )?;
+                let transport = WebsocketTransport::new(url, self.headers.clone())?;
                 if self.handshake.is_some() {
                     transport.upgrade()?;
                 } else {
@@ -232,7 +226,7 @@ impl ClientBuilder {
                 let transport = WebsocketSecureTransport::new(
                     url,
                     self.tls_config.clone(),
-                    self.headers.clone().map(|v| v.try_into().unwrap()),
+                    self.headers.clone(),
                 )?;
                 if self.handshake.is_some() {
                     transport.upgrade()?;
