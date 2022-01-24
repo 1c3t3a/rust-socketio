@@ -74,6 +74,7 @@ pub mod packet;
 pub(self) mod socket;
 pub mod transport;
 pub mod transports;
+pub mod transports_async;
 
 pub const ENGINE_IO_VERSION: i32 = 4;
 

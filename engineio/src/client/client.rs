@@ -199,11 +199,12 @@ impl ClientBuilder {
     pub fn build_websocket(mut self) -> Result<Client> {
         // SAFETY: Already a Url
         let url = websocket::client::Url::parse(&self.url.to_string())?;
+        let u_url = url::Url::parse(&self.url.to_string())?;
 
         match url.scheme() {
             "http" | "ws" => {
                 let transport = WebsocketTransport::new(
-                    url,
+                    u_url,
                     self.headers
                         .clone()
                         .map(|headers| headers.try_into().unwrap()),

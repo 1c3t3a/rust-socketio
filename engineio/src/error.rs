@@ -5,6 +5,7 @@ use std::io::Error as IoError;
 use std::str::Utf8Error;
 use thiserror::Error;
 use url::ParseError as UrlParseError;
+use tungstenite::Error as TungsteniteError;
 use websocket::{client::ParseError, WebSocketError};
 
 /// Enumeration of all possible errors in the `socket.io` context.
@@ -30,6 +31,8 @@ pub enum Error {
     InvalidUrlScheme(String),
     #[error("Error during connection via http: {0}")]
     IncompleteResponseFromReqwest(#[from] ReqwestError),
+    #[error("Error with websocket connection: {0}")]
+    AsyncWebsocketError(#[from] TungsteniteError),
     #[error("Network request returned with status code: {0}")]
     IncompleteHttp(u16),
     #[error("Got illegal handshake response: {0}")]
