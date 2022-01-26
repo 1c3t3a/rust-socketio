@@ -66,6 +66,7 @@ macro_rules! spawn_scoped {
         .unwrap();
     };
 }
+pub mod async_transports;
 mod callback;
 pub mod client;
 /// Generic header map
@@ -74,7 +75,6 @@ pub mod packet;
 pub(self) mod socket;
 pub mod transport;
 pub mod transports;
-pub mod transports_async;
 
 pub const ENGINE_IO_VERSION: i32 = 4;
 

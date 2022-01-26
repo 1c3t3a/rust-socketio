@@ -10,6 +10,7 @@ use tokio::{net::TcpStream, sync::Mutex};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tungstenite::Message;
 
+pub(crate) mod transport;
 pub(crate) mod websocket;
 pub(crate) mod websocket_secure;
 

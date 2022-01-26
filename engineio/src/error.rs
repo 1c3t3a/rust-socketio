@@ -31,7 +31,7 @@ pub enum Error {
     #[error("Error during connection via http: {0}")]
     IncompleteResponseFromReqwest(#[from] ReqwestError),
     #[error("Error with websocket connection: {0}")]
-    AsyncWebsocketError(#[from] TungsteniteError),
+    WebsocketError(#[from] TungsteniteError),
     #[error("Network request returned with status code: {0}")]
     IncompleteHttp(u16),
     #[error("Got illegal handshake response: {0}")]

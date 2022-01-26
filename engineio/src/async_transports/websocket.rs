@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{error::Result, transport::AsyncTransport};
+use crate::error::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::stream::StreamExt;
@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 use tokio_tungstenite::connect_async;
 use url::Url;
 
+use super::transport::AsyncTransport;
 use super::AsyncWebsocketGeneralTransport;
 
 /// An asynchronous websocket transport type.
@@ -15,12 +16,12 @@ use super::AsyncWebsocketGeneralTransport;
 /// connections ("ws://").
 pub(crate) struct AsyncWebsocketTransport {
     inner: AsyncWebsocketGeneralTransport,
-    base_url: Arc<RwLock<url::Url>>,
+    base_url: Arc<RwLock<Url>>,
 }
 
 impl AsyncWebsocketTransport {
     /// Creates a new instance over a request that might hold additional headers and an URL.
-    pub async fn new(request: http::request::Request<()>, url: url::Url) -> Result<Self> {
+    pub async fn new(request: http::request::Request<()>, url: Url) -> Result<Self> {
         let (ws_stream, _) = connect_async(request).await?;
         let (sen, rec) = ws_stream.split();
 

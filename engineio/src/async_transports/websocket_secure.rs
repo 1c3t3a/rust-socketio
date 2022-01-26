@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{error::Result, transport::AsyncTransport};
+use crate::error::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -10,6 +10,7 @@ use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::Connector;
 use url::Url;
 
+use super::transport::AsyncTransport;
 use super::AsyncWebsocketGeneralTransport;
 
 /// An asynchronous websocket transport type.
