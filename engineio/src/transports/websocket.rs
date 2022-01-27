@@ -1,10 +1,10 @@
 use crate::{
     async_transports::{transport::AsyncTransport, websocket::AsyncWebsocketTransport},
     error::Result,
-    header::HeaderMap,
     transport::Transport,
 };
 use bytes::Bytes;
+use http::HeaderMap;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use url::Url;
@@ -29,9 +29,7 @@ impl WebsocketTransport {
         let mut req = http::Request::builder().uri(url.clone().as_str());
         if let Some(map) = headers {
             // SAFETY: this unwrap never panics as the underlying request is just initialized and in proper state
-            req.headers_mut()
-                .unwrap()
-                .extend::<reqwest::header::HeaderMap>(map.try_into()?);
+            req.headers_mut().unwrap().extend(map);
         }
 
         let inner = runtime.block_on(AsyncWebsocketTransport::new(req.body(())?, url))?;

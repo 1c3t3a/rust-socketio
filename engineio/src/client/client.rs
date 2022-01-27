@@ -200,9 +200,15 @@ impl ClientBuilder {
         // SAFETY: Already a Url
         let url = url::Url::parse(&self.url.to_string())?;
 
+        let headers: Option<http::HeaderMap> = if let Some(map) = self.headers.clone() {
+            Some(map.try_into()?)
+        } else {
+            None
+        };
+
         match url.scheme() {
             "http" | "ws" => {
-                let transport = WebsocketTransport::new(url, self.headers.clone())?;
+                let transport = WebsocketTransport::new(url, headers)?;
                 if self.handshake.is_some() {
                     transport.upgrade()?;
                 } else {
@@ -223,11 +229,8 @@ impl ClientBuilder {
                 })
             }
             "https" | "wss" => {
-                let transport = WebsocketSecureTransport::new(
-                    url,
-                    self.tls_config.clone(),
-                    self.headers.clone(),
-                )?;
+                let transport =
+                    WebsocketSecureTransport::new(url, self.tls_config.clone(), headers)?;
                 if self.handshake.is_some() {
                     transport.upgrade()?;
                 } else {

@@ -39,7 +39,7 @@ pub enum Error {
     #[error("Called an action before the connection was established")]
     IllegalActionBeforeOpen(),
     #[error("Error setting up the http request: {0}")]
-    InvalidHttpRequest(#[from] http::Error),
+    InvalidHttpConfiguration(#[from] http::Error),
     #[error("string is not json serializable: {0}")]
     InvalidJson(#[from] JsonError),
     #[error("A lock was poisoned")]

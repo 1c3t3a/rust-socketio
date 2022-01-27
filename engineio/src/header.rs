@@ -1,8 +1,8 @@
 use crate::Error;
 use bytes::Bytes;
-use reqwest::header::{
-    HeaderMap as ReqwestHeaderMap, HeaderName as ReqwestHeaderName,
-    HeaderValue as ReqwestHeaderValue,
+use http::{
+    header::HeaderName as HttpHeaderName, HeaderMap as HttpHeaderMap,
+    HeaderValue as HttpHeaderValue,
 };
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -39,17 +39,17 @@ impl From<String> for HeaderName {
     }
 }
 
-impl TryFrom<HeaderName> for ReqwestHeaderName {
+impl TryFrom<HeaderName> for HttpHeaderName {
     type Error = Error;
     fn try_from(
         header: HeaderName,
     ) -> std::result::Result<Self, <Self as std::convert::TryFrom<HeaderName>>::Error> {
-        Ok(ReqwestHeaderName::from_str(&header.to_string())?)
+        Ok(HttpHeaderName::from_str(&header.to_string())?)
     }
 }
 
-impl From<ReqwestHeaderName> for HeaderName {
-    fn from(header: ReqwestHeaderName) -> Self {
+impl From<HttpHeaderName> for HeaderName {
+    fn from(header: HttpHeaderName) -> Self {
         HeaderName::from(header.to_string())
     }
 }
@@ -62,17 +62,17 @@ impl From<String> for HeaderValue {
     }
 }
 
-impl TryFrom<HeaderValue> for ReqwestHeaderValue {
+impl TryFrom<HeaderValue> for HttpHeaderValue {
     type Error = Error;
     fn try_from(
         value: HeaderValue,
     ) -> std::result::Result<Self, <Self as std::convert::TryFrom<HeaderValue>>::Error> {
-        Ok(ReqwestHeaderValue::from_bytes(&value.inner[..])?)
+        Ok(HttpHeaderValue::from_bytes(&value.inner[..])?)
     }
 }
 
-impl From<ReqwestHeaderValue> for HeaderValue {
-    fn from(value: ReqwestHeaderValue) -> Self {
+impl From<HttpHeaderValue> for HeaderValue {
+    fn from(value: HttpHeaderValue) -> Self {
         HeaderValue {
             inner: Bytes::copy_from_slice(value.as_bytes()),
         }
@@ -85,20 +85,20 @@ impl From<&str> for HeaderValue {
     }
 }
 
-impl TryFrom<HeaderMap> for ReqwestHeaderMap {
+impl TryFrom<HeaderMap> for HttpHeaderMap {
     type Error = Error;
     fn try_from(
         headers: HeaderMap,
     ) -> std::result::Result<Self, <Self as std::convert::TryFrom<HeaderMap>>::Error> {
-        Ok(headers
-            .into_iter()
-            .map(|(k, v)| {
-                (
-                    ReqwestHeaderName::try_from(k).unwrap(),
-                    ReqwestHeaderValue::try_from(v).unwrap(),
-                )
-            })
-            .collect())
+        let mut result = HttpHeaderMap::new();
+        for (key, value) in headers {
+            result.append(
+                HttpHeaderName::try_from(key)?,
+                HttpHeaderValue::try_from(value)?,
+            );
+        }
+
+        Ok(result)
     }
 }
 

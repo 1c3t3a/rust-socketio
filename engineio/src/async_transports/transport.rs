@@ -6,7 +6,7 @@ use std::time::SystemTime;
 use url::Url;
 
 #[async_trait]
-pub trait AsyncTransport {
+pub(crate) trait AsyncTransport {
     /// Sends a packet to the server. This optionally handles sending of a
     /// socketio binary attachment via the boolean attribute `is_binary_att`.
     async fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()>;

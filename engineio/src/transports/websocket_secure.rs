@@ -1,9 +1,12 @@
-use crate::async_transports::transport::AsyncTransport;
-use crate::async_transports::websocket_secure::AsyncWebsocketSecureTransport;
-use crate::error::Result;
-use crate::header::HeaderMap;
-use crate::transport::Transport;
+use crate::{
+    async_transports::{
+        transport::AsyncTransport, websocket_secure::AsyncWebsocketSecureTransport,
+    },
+    error::Result,
+    transport::Transport,
+};
 use bytes::Bytes;
+use http::HeaderMap;
 use native_tls::TlsConnector;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -33,9 +36,7 @@ impl WebsocketSecureTransport {
         let mut req = http::Request::builder().uri(url.clone().as_str());
         if let Some(map) = headers {
             // SAFETY: this unwrap never panics as the underlying request is just initialized and in proper state
-            req.headers_mut()
-                .unwrap()
-                .extend::<reqwest::header::HeaderMap>(map.try_into()?);
+            req.headers_mut().unwrap().extend(map);
         }
 
         let inner = runtime.block_on(AsyncWebsocketSecureTransport::new(
