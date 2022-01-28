@@ -4,8 +4,8 @@ use serde_json::Error as JsonError;
 use std::io::Error as IoError;
 use std::str::Utf8Error;
 use thiserror::Error;
+use tungstenite::Error as TungsteniteError;
 use url::ParseError as UrlParseError;
-use websocket::{client::ParseError, WebSocketError};
 
 /// Enumeration of all possible errors in the `socket.io` context.
 #[derive(Error, Debug)]
@@ -30,20 +30,20 @@ pub enum Error {
     InvalidUrlScheme(String),
     #[error("Error during connection via http: {0}")]
     IncompleteResponseFromReqwest(#[from] ReqwestError),
+    #[error("Error with websocket connection: {0}")]
+    WebsocketError(#[from] TungsteniteError),
     #[error("Network request returned with status code: {0}")]
     IncompleteHttp(u16),
     #[error("Got illegal handshake response: {0}")]
     InvalidHandshake(String),
     #[error("Called an action before the connection was established")]
     IllegalActionBeforeOpen(),
+    #[error("Error setting up the http request: {0}")]
+    InvalidHttpConfiguration(#[from] http::Error),
     #[error("string is not json serializable: {0}")]
     InvalidJson(#[from] JsonError),
     #[error("A lock was poisoned")]
     InvalidPoisonedLock(),
-    #[error("Got a websocket error: {0}")]
-    IncompleteResponseFromWebsocket(#[from] WebSocketError),
-    #[error("Error while parsing the url for the websocket connection: {0}")]
-    InvalidWebsocketURL(#[from] ParseError),
     #[error("Got an IO-Error: {0}")]
     IncompleteIo(#[from] IoError),
     #[error("Server did not allow upgrading to websockets")]

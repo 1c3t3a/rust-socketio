@@ -198,16 +198,17 @@ impl ClientBuilder {
     /// Build socket with only a websocket transport
     pub fn build_websocket(mut self) -> Result<Client> {
         // SAFETY: Already a Url
-        let url = websocket::client::Url::parse(&self.url.to_string())?;
+        let url = url::Url::parse(&self.url.to_string())?;
+
+        let headers: Option<http::HeaderMap> = if let Some(map) = self.headers.clone() {
+            Some(map.try_into()?)
+        } else {
+            None
+        };
 
         match url.scheme() {
             "http" | "ws" => {
-                let transport = WebsocketTransport::new(
-                    url,
-                    self.headers
-                        .clone()
-                        .map(|headers| headers.try_into().unwrap()),
-                )?;
+                let transport = WebsocketTransport::new(url, headers)?;
                 if self.handshake.is_some() {
                     transport.upgrade()?;
                 } else {
@@ -228,11 +229,8 @@ impl ClientBuilder {
                 })
             }
             "https" | "wss" => {
-                let transport = WebsocketSecureTransport::new(
-                    url,
-                    self.tls_config.clone(),
-                    self.headers.clone().map(|v| v.try_into().unwrap()),
-                )?;
+                let transport =
+                    WebsocketSecureTransport::new(url, self.tls_config.clone(), headers)?;
                 if self.handshake.is_some() {
                     transport.upgrade()?;
                 } else {

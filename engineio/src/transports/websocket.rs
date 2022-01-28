@@ -1,122 +1,67 @@
-use crate::error::{Error, Result};
-use crate::packet::Packet;
-use crate::packet::PacketId;
-use crate::transport::Transport;
-use bytes::{BufMut, Bytes, BytesMut};
-use std::borrow::Cow;
-use std::str::from_utf8;
-use std::sync::{Arc, Mutex, RwLock};
-use websocket::{
-    client::Url, dataframe::Opcode, header::Headers, receiver::Reader, sync::stream::TcpStream,
-    sync::Writer, ws::dataframe::DataFrame, ClientBuilder as WsClientBuilder, Message,
+use crate::{
+    async_transports::{transport::AsyncTransport, websocket::AsyncWebsocketTransport},
+    error::Result,
+    transport::Transport,
 };
+use bytes::Bytes;
+use http::HeaderMap;
+use std::sync::Arc;
+use tokio::runtime::Runtime;
+use url::Url;
 
 #[derive(Clone)]
 pub struct WebsocketTransport {
-    sender: Arc<Mutex<Writer<TcpStream>>>,
-    receiver: Arc<Mutex<Reader<TcpStream>>>,
-    base_url: Arc<RwLock<url::Url>>,
+    runtime: Arc<Runtime>,
+    inner: Arc<AsyncWebsocketTransport>,
 }
 
 impl WebsocketTransport {
     /// Creates an instance of `WebsocketTransport`.
-    pub fn new(base_url: Url, headers: Option<Headers>) -> Result<Self> {
+    pub fn new(base_url: Url, headers: Option<HeaderMap>) -> Result<Self> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+
         let mut url = base_url;
         url.query_pairs_mut().append_pair("transport", "websocket");
         url.set_scheme("ws").unwrap();
-        let mut client_builder = WsClientBuilder::new(url[..].as_ref())?;
-        if let Some(headers) = headers {
-            client_builder = client_builder.custom_headers(&headers);
+
+        let mut req = http::Request::builder().uri(url.clone().as_str());
+        if let Some(map) = headers {
+            // SAFETY: this unwrap never panics as the underlying request is just initialized and in proper state
+            req.headers_mut().unwrap().extend(map);
         }
-        let client = client_builder.connect_insecure()?;
 
-        client.set_nonblocking(false)?;
-
-        let (receiver, sender) = client.split()?;
+        let inner = runtime.block_on(AsyncWebsocketTransport::new(req.body(())?, url))?;
 
         Ok(WebsocketTransport {
-            sender: Arc::new(Mutex::new(sender)),
-            receiver: Arc::new(Mutex::new(receiver)),
-            // SAFETY: already a URL parsing can't fail
-            base_url: Arc::new(RwLock::new(url::Url::parse(&url.to_string())?)),
+            runtime: Arc::new(runtime),
+            inner: Arc::new(inner),
         })
     }
 
     /// Sends probe packet to ensure connection is valid, then sends upgrade
     /// request
     pub(crate) fn upgrade(&self) -> Result<()> {
-        let mut sender = self.sender.lock()?;
-        let mut receiver = self.receiver.lock()?;
-
-        // send the probe packet, the text `2probe` represents a ping packet with
-        // the content `probe`
-        sender.send_message(&Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
-            Packet::new(PacketId::Ping, Bytes::from("probe")),
-        ))?)))?;
-
-        // expect to receive a probe packet
-        let message = receiver.recv_message()?;
-        if message.take_payload() != Bytes::from(Packet::new(PacketId::Pong, Bytes::from("probe")))
-        {
-            return Err(Error::InvalidPacket());
-        }
-
-        // finally send the upgrade request. the payload `5` stands for an upgrade
-        // packet without any payload
-        sender.send_message(&Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
-            Packet::new(PacketId::Upgrade, Bytes::from("")),
-        ))?)))?;
-
-        Ok(())
+        self.runtime.block_on(self.inner.upgrade())
     }
 }
 
 impl Transport for WebsocketTransport {
     fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()> {
-        let mut sender = self.sender.lock()?;
-
-        let message = if is_binary_att {
-            Message::binary(Cow::Borrowed(data.as_ref()))
-        } else {
-            Message::text(Cow::Borrowed(std::str::from_utf8(data.as_ref())?))
-        };
-        sender.send_message(&message)?;
-
-        Ok(())
+        self.runtime.block_on(self.inner.emit(data, is_binary_att))
     }
 
     fn poll(&self) -> Result<Bytes> {
-        let mut receiver = self.receiver.lock()?;
-
-        // if this is a binary payload, we mark it as a message
-        let received_df = receiver.recv_dataframe()?;
-        match received_df.opcode {
-            Opcode::Binary => {
-                let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
-                message.put_u8(PacketId::Message as u8);
-                message.put(received_df.take_payload().as_ref());
-
-                Ok(message.freeze())
-            }
-            _ => Ok(Bytes::from(received_df.take_payload())),
-        }
+        self.runtime.block_on(self.inner.poll())
     }
 
     fn base_url(&self) -> Result<url::Url> {
-        Ok(self.base_url.read()?.clone())
+        self.runtime.block_on(self.inner.base_url())
     }
 
     fn set_base_url(&self, url: url::Url) -> Result<()> {
-        let mut url = url;
-        if !url
-            .query_pairs()
-            .any(|(k, v)| k == "transport" && v == "websocket")
-        {
-            url.query_pairs_mut().append_pair("transport", "websocket");
-        }
-        url.set_scheme("ws").unwrap();
-        *self.base_url.write()? = url;
-        Ok(())
+        self.runtime.block_on(self.inner.set_base_url(url))
     }
 }
 
@@ -177,6 +122,8 @@ mod test {
             format!("{:?}", transport),
             format!("WebsocketTransport(base_url: {:?})", transport.base_url())
         );
+        println!("{:?}", transport.poll().unwrap());
+        println!("{:?}", transport.poll().unwrap());
         Ok(())
     }
 }

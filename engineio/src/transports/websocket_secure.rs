@@ -1,33 +1,21 @@
-use crate::error::Error;
-use crate::error::Result;
-use crate::packet::Packet;
-use crate::packet::PacketId;
-use crate::transport::Transport;
-use bytes::{BufMut, Bytes, BytesMut};
-use native_tls::TlsConnector;
-use std::borrow::Cow;
-use std::convert::TryFrom;
-use std::io::ErrorKind;
-use std::str::from_utf8;
-use std::sync::{Arc, Mutex, RwLock};
-use std::thread::sleep;
-use std::time::Duration;
-use websocket::WebSocketError;
-use websocket::{
-    client::sync::Client as WsClient,
-    client::Url,
-    dataframe::DataFrame,
-    dataframe::Opcode,
-    header::Headers,
-    sync::stream::{TcpStream, TlsStream},
-    ws::dataframe::DataFrame as DataFrameable,
-    ClientBuilder as WsClientBuilder, Message,
+use crate::{
+    async_transports::{
+        transport::AsyncTransport, websocket_secure::AsyncWebsocketSecureTransport,
+    },
+    error::Result,
+    transport::Transport,
 };
+use bytes::Bytes;
+use http::HeaderMap;
+use native_tls::TlsConnector;
+use std::sync::Arc;
+use tokio::runtime::Runtime;
+use url::Url;
 
 #[derive(Clone)]
 pub struct WebsocketSecureTransport {
-    client: Arc<Mutex<WsClient<TlsStream<TcpStream>>>>,
-    base_url: Arc<RwLock<url::Url>>,
+    runtime: Arc<Runtime>,
+    inner: Arc<AsyncWebsocketSecureTransport>,
 }
 
 impl WebsocketSecureTransport {
@@ -35,125 +23,56 @@ impl WebsocketSecureTransport {
     pub fn new(
         base_url: Url,
         tls_config: Option<TlsConnector>,
-        headers: Option<Headers>,
+        headers: Option<HeaderMap>,
     ) -> Result<Self> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+
         let mut url = base_url;
         url.query_pairs_mut().append_pair("transport", "websocket");
         url.set_scheme("wss").unwrap();
-        let mut client_builder = WsClientBuilder::new(url[..].as_ref())?;
-        if let Some(headers) = headers {
-            client_builder = client_builder.custom_headers(&headers);
-        }
-        let client = client_builder.connect_secure(tls_config)?;
 
-        client.set_nonblocking(false)?;
+        let mut req = http::Request::builder().uri(url.clone().as_str());
+        if let Some(map) = headers {
+            // SAFETY: this unwrap never panics as the underlying request is just initialized and in proper state
+            req.headers_mut().unwrap().extend(map);
+        }
+
+        let inner = runtime.block_on(AsyncWebsocketSecureTransport::new(
+            req.body(())?,
+            url,
+            tls_config,
+        ))?;
 
         Ok(WebsocketSecureTransport {
-            client: Arc::new(Mutex::new(client)),
-            // SAFETY: already a URL parsing can't fail
-            base_url: Arc::new(RwLock::new(url::Url::parse(&url.to_string())?)),
+            runtime: Arc::new(runtime),
+            inner: Arc::new(inner),
         })
     }
 
     /// Sends probe packet to ensure connection is valid, then sends upgrade
     /// request
     pub(crate) fn upgrade(&self) -> Result<()> {
-        let mut client = self.client.lock()?;
-
-        // send the probe packet, the text `2probe` represents a ping packet with
-        // the content `probe`
-        client.send_message(&Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
-            Packet::new(PacketId::Ping, Bytes::from("probe")),
-        ))?)))?;
-
-        // expect to receive a probe packet
-        let message = client.recv_message()?;
-        let payload = message.take_payload();
-        if Packet::try_from(Bytes::from(payload))?
-            != Packet::new(PacketId::Pong, Bytes::from("probe"))
-        {
-            return Err(Error::InvalidPacket());
-        }
-
-        // finally send the upgrade request. the payload `5` stands for an upgrade
-        // packet without any payload
-        client.send_message(&Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
-            Packet::new(PacketId::Upgrade, Bytes::from("")),
-        ))?)))?;
-
-        Ok(())
+        self.runtime.block_on(self.inner.upgrade())
     }
 }
 
 impl Transport for WebsocketSecureTransport {
     fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()> {
-        let message = if is_binary_att {
-            Message::binary(Cow::Borrowed(data.as_ref()))
-        } else {
-            Message::text(Cow::Borrowed(std::str::from_utf8(data.as_ref())?))
-        };
-
-        let mut writer = self.client.lock()?;
-        writer.send_message(&message)?;
-        drop(writer);
-
-        Ok(())
+        self.runtime.block_on(self.inner.emit(data, is_binary_att))
     }
 
     fn poll(&self) -> Result<Bytes> {
-        let received_df: DataFrame;
-        loop {
-            let mut receiver = self.client.lock()?;
-            receiver.set_nonblocking(true)?;
-
-            match receiver.recv_dataframe() {
-                Ok(payload) => {
-                    received_df = payload;
-                    break;
-                }
-                // Special case to fix https://github.com/1c3t3a/rust-socketio/issues/133
-                // This error occures when the websocket connection times out on the receive method.
-                // The error kind is platform specific, on Unix systems this errors with `ErrorKind::WouldBlock`,
-                // on Windows with `ErrorKind::TimedOut`.
-                // As a result we're going to release the lock on the client,
-                // so that other threads (especially emit) are able to access the client.
-                Err(WebSocketError::IoError(err))
-                    if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
-                Err(err) => return Err(err.into()),
-            }
-            receiver.set_nonblocking(false)?;
-            drop(receiver);
-            sleep(Duration::from_millis(200));
-        }
-
-        // if this is a binary payload, we mark it as a message
-        match received_df.opcode {
-            Opcode::Binary => {
-                let mut message = BytesMut::with_capacity(received_df.data.len() + 1);
-                message.put_u8(PacketId::Message as u8);
-                message.put(received_df.take_payload().as_ref());
-
-                Ok(message.freeze())
-            }
-            _ => Ok(Bytes::from(received_df.take_payload())),
-        }
+        self.runtime.block_on(self.inner.poll())
     }
 
     fn base_url(&self) -> Result<url::Url> {
-        Ok(self.base_url.read()?.clone())
+        self.runtime.block_on(self.inner.base_url())
     }
 
     fn set_base_url(&self, url: url::Url) -> Result<()> {
-        let mut url = url;
-        if !url
-            .query_pairs()
-            .any(|(k, v)| k == "transport" && v == "websocket")
-        {
-            url.query_pairs_mut().append_pair("transport", "websocket");
-        }
-        url.set_scheme("wss").unwrap();
-        *self.base_url.write()? = url;
-        Ok(())
+        self.runtime.block_on(self.inner.set_base_url(url))
     }
 }
 

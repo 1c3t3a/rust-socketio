@@ -66,6 +66,7 @@ macro_rules! spawn_scoped {
         .unwrap();
     };
 }
+pub mod async_transports;
 mod callback;
 pub mod client;
 /// Generic header map
