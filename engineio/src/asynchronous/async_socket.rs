@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+use std::{
+    fmt::Debug,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use bytes::Bytes;
@@ -10,7 +13,7 @@ use tokio::{
 };
 
 use crate::{
-    asynchronous::{transport::AsyncTransportType, callback::OptionalCallback},
+    asynchronous::{callback::OptionalCallback, transport::AsyncTransportType},
     error::Result,
     packet::{HandshakePacket, Payload},
     Error, Packet, PacketId,
@@ -190,5 +193,23 @@ impl Socket {
         }
 
         self.connected.store(false, Ordering::Release);
+    }
+}
+
+impl Debug for Socket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Socket")
+            .field("transport", &self.transport)
+            .field("on_close", &self.on_close)
+            .field("on_data", &self.on_data)
+            .field("on_error", &self.on_error)
+            .field("on_open", &self.on_open)
+            .field("on_packet", &self.on_packet)
+            .field("connected", &self.connected)
+            .field("last_ping", &self.last_ping)
+            .field("last_pong", &self.last_pong)
+            .field("connection_data", &self.connection_data)
+            .field("remaining_packets", &self.remaining_packets)
+            .finish()
     }
 }

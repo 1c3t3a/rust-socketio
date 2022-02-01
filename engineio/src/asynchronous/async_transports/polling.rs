@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use url::Url;
 
-use crate::{error::Result, Error, asynchronous::transport::AsyncTransport};
+use crate::{asynchronous::transport::AsyncTransport, error::Result, Error};
 
 #[derive(Clone, Debug)]
 pub struct AsyncPollingTransport {

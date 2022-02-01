@@ -15,7 +15,6 @@ use url::Url;
 
 use super::websocket_general::AsyncWebsocketGeneralTransport;
 
-
 /// An asynchronous websocket transport type.
 /// This type only allows for secure websocket
 /// connections ("wss://").

@@ -1,7 +1,6 @@
 use crate::{
     asynchronous::{
-        async_transports::WebsocketTransport as AsyncWebsocketTransport,
-        transport::AsyncTransport,
+        async_transports::WebsocketTransport as AsyncWebsocketTransport, transport::AsyncTransport,
     },
     error::Result,
     transport::Transport,

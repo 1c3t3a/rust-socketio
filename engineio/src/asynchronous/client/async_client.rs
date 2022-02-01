@@ -15,12 +15,12 @@ use native_tls::TlsConnector;
 use std::{future::Future, pin::Pin};
 use url::Url;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Client {
     socket: InnerSocket,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ClientBuilder {
     url: Url,
     tls_config: Option<TlsConnector>,

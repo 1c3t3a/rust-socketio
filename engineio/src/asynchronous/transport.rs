@@ -5,8 +5,9 @@ use bytes::Bytes;
 use std::time::SystemTime;
 use url::Url;
 
-use super::async_transports::{AsyncPollingTransport, WebsocketTransport, WebsocketSecureTransport};
-
+use super::async_transports::{
+    AsyncPollingTransport, WebsocketSecureTransport, WebsocketTransport,
+};
 
 #[async_trait]
 pub trait AsyncTransport {
@@ -39,6 +40,7 @@ pub trait AsyncTransport {
     }
 }
 
+#[derive(Debug)]
 pub enum AsyncTransportType {
     Polling(AsyncPollingTransport),
     Websocket(WebsocketTransport),
