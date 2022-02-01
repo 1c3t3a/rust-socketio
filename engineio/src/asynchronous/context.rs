@@ -3,6 +3,9 @@ use std::sync::Arc;
 use futures_util::Future;
 use tokio::runtime::{Builder, Runtime};
 
+/// A Context type that needs to be created once and is passed
+/// to the [`crate::asynchronous::client::ClientBuilder`] while 
+/// creatinga client. Provides means for executing the callbacks.
 #[derive(Clone, Debug)]
 pub struct Context {
     rt: Arc<Runtime>,
@@ -11,7 +14,7 @@ pub struct Context {
 impl Context {
     pub fn new() -> Result<Context> {
         Ok(Context {
-            rt: Arc::new(Builder::new_multi_thread().enable_all().build()?),
+            rt: Arc::new(Builder::new_multi_thread().build()?),
         })
     }
 

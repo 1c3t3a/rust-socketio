@@ -23,8 +23,8 @@ pub struct WebsocketTransport {
 
 impl WebsocketTransport {
     /// Creates a new instance over a request that might hold additional headers and an URL.
-    pub async fn new(url: Url, headers: Option<HeaderMap>) -> Result<Self> {
-        let mut url = url;
+    pub async fn new(base_url: Url, headers: Option<HeaderMap>) -> Result<Self> {
+        let mut url = base_url;
         url.query_pairs_mut().append_pair("transport", "websocket");
         url.set_scheme("ws").unwrap();
 

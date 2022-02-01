@@ -9,6 +9,8 @@ use url::Url;
 
 use crate::{asynchronous::transport::AsyncTransport, error::Result, Error};
 
+/// An asynchronous polling type. Makes use of the nonblocking reqwest types and
+/// methods.
 #[derive(Clone, Debug)]
 pub struct PollingTransport {
     client: Client,

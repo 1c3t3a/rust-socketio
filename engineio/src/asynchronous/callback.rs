@@ -4,8 +4,10 @@ use std::{fmt::Debug, ops::Deref, sync::Arc};
 
 use crate::Packet;
 
+/// Internal type, provides a way to store futures and return them in a boxed manner.
 pub(crate) type DynAsyncCallback<I> = dyn 'static + Send + Sync + Fn(I) -> BoxFuture<'static, ()>;
 
+/// Internal type, might hold an async callback.
 #[derive(Clone)]
 pub(crate) struct OptionalCallback<I> {
     inner: Option<Arc<DynAsyncCallback<I>>>,

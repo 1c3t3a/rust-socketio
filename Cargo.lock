@@ -1346,7 +1346,6 @@ dependencies = [
  "crossbeam-utils",
  "futures-util",
  "http",
- "lazy_static",
  "native-tls",
  "reqwest",
  "serde",
