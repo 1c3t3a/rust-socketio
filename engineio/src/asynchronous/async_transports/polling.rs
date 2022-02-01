@@ -10,12 +10,12 @@ use url::Url;
 use crate::{asynchronous::transport::AsyncTransport, error::Result, Error};
 
 #[derive(Clone, Debug)]
-pub struct AsyncPollingTransport {
+pub struct PollingTransport {
     client: Client,
     base_url: Arc<RwLock<Url>>,
 }
 
-impl AsyncPollingTransport {
+impl PollingTransport {
     pub fn new(
         base_url: Url,
         tls_config: Option<TlsConnector>,
@@ -38,7 +38,7 @@ impl AsyncPollingTransport {
         let mut url = base_url;
         url.query_pairs_mut().append_pair("transport", "polling");
 
-        AsyncPollingTransport {
+        PollingTransport {
             client,
             base_url: Arc::new(RwLock::new(url)),
         }
@@ -46,7 +46,7 @@ impl AsyncPollingTransport {
 }
 
 #[async_trait]
-impl AsyncTransport for AsyncPollingTransport {
+impl AsyncTransport for PollingTransport {
     async fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()> {
         let data_to_send = if is_binary_att {
             // the binary attachment gets `base64` encoded
@@ -102,5 +102,45 @@ impl AsyncTransport for AsyncPollingTransport {
         }
         *self.base_url.write().await = url;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use tokio::runtime::Builder;
+
+    use crate::asynchronous::transport::AsyncTransport;
+
+    use super::*;
+    use std::str::FromStr;
+    #[test]
+    fn polling_transport_base_url() -> Result<()> {
+        let rt = Builder::new_multi_thread().enable_all().build()?;
+        rt.block_on(async {
+            let url = crate::test::engine_io_server()?.to_string();
+            let transport = PollingTransport::new(Url::from_str(&url[..]).unwrap(), None, None);
+            assert_eq!(
+                transport.base_url().await?.to_string(),
+                url.clone() + "?transport=polling"
+            );
+            transport
+                .set_base_url(Url::parse("https://127.0.0.1")?)
+                .await?;
+            assert_eq!(
+                transport.base_url().await?.to_string(),
+                "https://127.0.0.1/?transport=polling"
+            );
+            assert_ne!(transport.base_url().await?.to_string(), url);
+
+            transport
+                .set_base_url(Url::parse("http://127.0.0.1/?transport=polling")?)
+                .await?;
+            assert_eq!(
+                transport.base_url().await?.to_string(),
+                "http://127.0.0.1/?transport=polling"
+            );
+            assert_ne!(transport.base_url().await?.to_string(), url);
+            Ok(())
+        })
     }
 }

@@ -105,7 +105,7 @@ pub(crate) mod test {
         Ok(TlsConnector::builder()
             // ONLY USE FOR TESTING!
             .danger_accept_invalid_hostnames(true)
-            .add_root_certificate(cert)
+            .danger_accept_invalid_certs(true)
             .build()
             .unwrap())
     }

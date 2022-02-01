@@ -1,7 +1,7 @@
 use crate::{
     asynchronous::{
         async_socket::Socket as InnerSocket,
-        async_transports::{AsyncPollingTransport, WebsocketSecureTransport, WebsocketTransport},
+        async_transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport},
         callback::OptionalCallback,
         transport::AsyncTransport,
     },
@@ -146,8 +146,7 @@ impl ClientBuilder {
         };
 
         // Start with polling transport
-        let transport =
-            AsyncPollingTransport::new(self.url.clone(), self.tls_config.clone(), headers);
+        let transport = PollingTransport::new(self.url.clone(), self.tls_config.clone(), headers);
 
         self.handshake_with_transport(&transport).await
     }
@@ -168,7 +167,7 @@ impl ClientBuilder {
         self.handshake().await?;
 
         // Make a polling transport with new sid
-        let transport = AsyncPollingTransport::new(
+        let transport = PollingTransport::new(
             self.url,
             self.tls_config,
             self.headers.map(|v| v.try_into().unwrap()),
@@ -352,29 +351,275 @@ impl Client {
 
 #[cfg(test)]
 mod test {
+
     use super::*;
+    use crate::packet::PacketId;
+    use std::future::Future;
 
     #[test]
-    fn it_works() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-
+    fn test_illegal_actions() -> Result<()> {
+        let rt = Builder::new_multi_thread().enable_all().build()?;
         rt.block_on(async {
-            let client = ClientBuilder::new(url::Url::parse("http://localhost:4201").unwrap())
-                .on_error(|msg| Box::pin(async move { println!("{}", msg) }))
-                .on_packet(|msg| Box::pin(async move { println!("{:?}", msg) }))
+            let url = crate::test::engine_io_server()?;
+            let sut = builder(url.clone()).build().await?;
+
+            assert!(sut
+                .emit(Packet::new(PacketId::Close, Bytes::new()))
+                .await
+                .is_err());
+
+            sut.connect().await?;
+
+            assert!(sut.poll().await.is_ok());
+
+            assert!(builder(Url::parse("fake://fake.fake").unwrap())
+                .build_websocket()
+                .await
+                .is_err());
+
+            Ok(())
+        })
+    }
+    use reqwest::header::HOST;
+    use tokio::runtime::Builder;
+
+    use crate::packet::Packet;
+
+    fn builder(url: Url) -> ClientBuilder {
+        ClientBuilder::new(url)
+            .on_open(|_| {
+                Box::pin(async {
+                    println!("Open event!");
+                })
+            })
+            .on_packet(|packet| {
+                Box::pin(async move {
+                    println!("Received packet: {:?}", packet);
+                })
+            })
+            .on_data(|data| {
+                Box::pin(async move {
+                    println!("Received data: {:?}", std::str::from_utf8(&data));
+                })
+            })
+            .on_close(|_| {
+                Box::pin(async {
+                    println!("Close event!");
+                })
+            })
+            .on_error(|error| {
+                Box::pin(async move {
+                    println!("Error {}", error);
+                })
+            })
+    }
+
+    fn test_connection(socket: Client) -> impl Future<Output = Result<()>> {
+        async {
+            let socket = socket;
+
+            socket.connect().await.unwrap();
+
+            assert_eq!(
+                socket.poll().await?,
+                Some(Packet::new(PacketId::Message, "hello client"))
+            );
+
+            socket
+                .emit(Packet::new(PacketId::Message, "respond"))
+                .await?;
+
+            assert_eq!(
+                socket.poll().await?,
+                Some(Packet::new(PacketId::Message, "Roger Roger"))
+            );
+
+            socket.close().await
+        }
+    }
+
+    #[test]
+    fn test_connection_long() -> Result<()> {
+        let rt = Builder::new_multi_thread().enable_all().build()?;
+        rt.block_on(async {
+            // Long lived socket to receive pings
+            let url = crate::test::engine_io_server()?;
+            let socket = builder(url).build().await?;
+
+            socket.connect().await?;
+
+            // hello client
+            let _ = socket.poll().await?;
+            // Ping
+            let _ = socket.poll().await?;
+
+            socket.disconnect().await?;
+
+            assert!(!socket.is_connected()?);
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_connection_dynamic() -> Result<()> {
+        let rt = Builder::new_multi_thread().enable_all().build()?;
+        rt.block_on(async {
+            let url = crate::test::engine_io_server()?;
+            let socket = builder(url).build().await?;
+            test_connection(socket).await?;
+
+            let url = crate::test::engine_io_polling_server()?;
+            let socket = builder(url).build().await?;
+            test_connection(socket).await
+        })
+    }
+
+    #[test]
+    fn test_connection_fallback() -> Result<()> {
+        let rt = Builder::new_multi_thread().enable_all().build()?;
+        rt.block_on(async {
+            let url = crate::test::engine_io_server()?;
+            let socket = builder(url).build_with_fallback().await?;
+            test_connection(socket).await?;
+
+            let url = crate::test::engine_io_polling_server()?;
+            let socket = builder(url).build_with_fallback().await?;
+            test_connection(socket).await
+        })
+    }
+
+    #[test]
+    fn test_connection_dynamic_secure() -> Result<()> {
+        let rt = Builder::new_multi_thread().enable_all().build()?;
+        rt.block_on(async {
+            let url = crate::test::engine_io_server_secure()?;
+            let mut builder = builder(url);
+            builder = builder.tls_config(crate::test::tls_connector()?);
+            let socket = builder.build().await?;
+            test_connection(socket).await
+        })
+    }
+
+    #[test]
+    fn test_connection_polling() -> Result<()> {
+        let rt = Builder::new_multi_thread().enable_all().build()?;
+        rt.block_on(async {
+            let url = crate::test::engine_io_server()?;
+            let socket = builder(url).build_polling().await?;
+            test_connection(socket).await
+        })
+    }
+
+    #[test]
+    fn test_connection_wss() -> Result<()> {
+        let rt = Builder::new_multi_thread().enable_all().build()?;
+        rt.block_on(async {
+            let url = crate::test::engine_io_polling_server()?;
+            assert!(builder(url).build_websocket_with_upgrade().await.is_err());
+
+            let host =
+                std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
+            let mut url = crate::test::engine_io_server_secure()?;
+
+            let mut headers = HeaderMap::default();
+            headers.insert(HOST, host);
+            let mut builder = builder(url.clone());
+
+            builder = builder.tls_config(crate::test::tls_connector()?);
+            builder = builder.headers(headers.clone());
+            let socket = builder.clone().build_websocket_with_upgrade().await?;
+
+            test_connection(socket).await?;
+
+            let socket = builder.build_websocket().await?;
+
+            test_connection(socket).await?;
+
+            url.set_scheme("wss").unwrap();
+
+            let builder = self::builder(url)
+                .tls_config(crate::test::tls_connector()?)
+                .headers(headers);
+            let socket = builder.clone().build_websocket().await?;
+
+            test_connection(socket).await?;
+
+            assert!(builder.build_websocket_with_upgrade().await.is_err());
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_connection_ws() -> Result<()> {
+        let rt = Builder::new_multi_thread().enable_all().build()?;
+        rt.block_on(async {
+            let url = crate::test::engine_io_polling_server()?;
+            assert!(builder(url.clone()).build_websocket().await.is_err());
+            assert!(builder(url).build_websocket_with_upgrade().await.is_err());
+
+            let mut url = crate::test::engine_io_server()?;
+
+            let builder = builder(url.clone());
+            let socket = builder.clone().build_websocket().await?;
+            test_connection(socket).await?;
+
+            let socket = builder.build_websocket_with_upgrade().await?;
+            test_connection(socket).await?;
+
+            url.set_scheme("ws").unwrap();
+
+            let builder = self::builder(url);
+            let socket = builder.clone().build_websocket().await?;
+
+            test_connection(socket).await?;
+
+            assert!(builder.build_websocket_with_upgrade().await.is_err());
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_open_invariants() -> Result<()> {
+        let rt = Builder::new_multi_thread().enable_all().build()?;
+        rt.block_on(async {
+            let url = crate::test::engine_io_server()?;
+            let illegal_url = "this is illegal";
+
+            assert!(Url::parse(illegal_url).is_err());
+
+            let invalid_protocol = "file:///tmp/foo";
+            assert!(builder(Url::parse(invalid_protocol).unwrap())
                 .build()
                 .await
-                .unwrap();
+                .is_err());
 
-            client.connect().await.unwrap();
-
-            client
-                .emit(Packet::new(PacketId::Message, "Foo"))
+            let sut = builder(url.clone()).build().await?;
+            let _error = sut
+                .emit(Packet::new(PacketId::Close, Bytes::new()))
                 .await
-                .unwrap();
-        });
+                .expect_err("error");
+            assert!(matches!(Error::IllegalActionBeforeOpen(), _error));
+
+            // test missing match arm in socket constructor
+            let mut headers = HeaderMap::default();
+            let host =
+                std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
+            headers.insert(HOST, host);
+
+            let _ = builder(url.clone())
+                .tls_config(
+                    TlsConnector::builder()
+                        .danger_accept_invalid_certs(true)
+                        .build()
+                        .unwrap(),
+                )
+                .build()
+                .await?;
+            let _ = builder(url).headers(headers).build().await?;
+            Ok(())
+        })
     }
 }

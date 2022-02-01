@@ -3,6 +3,6 @@ mod websocket;
 mod websocket_general;
 mod websocket_secure;
 
-pub use self::polling::AsyncPollingTransport;
+pub use self::polling::PollingTransport;
 pub use self::websocket::WebsocketTransport;
 pub use self::websocket_secure::WebsocketSecureTransport;
