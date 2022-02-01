@@ -305,16 +305,16 @@ impl Client {
         let packet = self.socket.poll()?;
         if let Some(packet) = packet {
             // check for the appropriate action or callback
-            self.socket.handle_packet(packet.clone())?;
+            self.socket.handle_packet(packet.clone());
             match packet.packet_id {
                 PacketId::MessageBinary => {
-                    self.socket.handle_data(packet.data.clone())?;
+                    self.socket.handle_data(packet.data.clone());
                 }
                 PacketId::Message => {
-                    self.socket.handle_data(packet.data.clone())?;
+                    self.socket.handle_data(packet.data.clone());
                 }
                 PacketId::Close => {
-                    self.socket.handle_close()?;
+                    self.socket.handle_close();
                 }
                 PacketId::Open => {
                     unreachable!("Won't happen as we open the connection beforehand");
@@ -345,17 +345,13 @@ impl Client {
     }
 
     pub fn iter(&self) -> Iter {
-        Iter {
-            socket: self,
-            iter: None,
-        }
+        Iter { socket: self }
     }
 }
 
 #[derive(Clone)]
 pub struct Iter<'a> {
     socket: &'a Client,
-    iter: Option<crate::packet::IntoIter>,
 }
 
 impl<'a> Iterator for Iter<'a> {

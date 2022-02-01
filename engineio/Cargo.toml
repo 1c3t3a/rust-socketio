@@ -35,3 +35,7 @@ criterion = "0.3"
 [[bench]]
 name = "engineio"
 harness = false
+
+[features]
+default = ["async"]
+async = []
