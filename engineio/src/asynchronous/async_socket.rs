@@ -19,8 +19,11 @@ use crate::{
     Error, Packet, PacketId,
 };
 
+use super::context::Context;
+
 #[derive(Clone)]
 pub struct Socket {
+    context: Context,
     transport: Arc<AsyncTransportType>,
     on_close: OptionalCallback<()>,
     on_data: OptionalCallback<Bytes>,
@@ -37,6 +40,7 @@ pub struct Socket {
 
 impl Socket {
     pub(crate) fn new(
+        context: Context,
         transport: AsyncTransportType,
         handshake: HandshakePacket,
         on_close: OptionalCallback<()>,
@@ -46,6 +50,7 @@ impl Socket {
         on_packet: OptionalCallback<Packet>,
     ) -> Self {
         Socket {
+            context,
             on_close,
             on_data,
             on_error,
@@ -67,9 +72,7 @@ impl Socket {
         self.connected.store(true, Ordering::Release);
 
         if let Some(on_open) = self.on_open.as_ref() {
-            // TODO: Check how this can be spawned in a runtime, we don't want to
-            // block we only want to execute it somewhere
-            on_open(()).await;
+            self.context.spawn_future(on_open(()));
         }
 
         // set the last ping to now and set the connected state
@@ -115,9 +118,7 @@ impl Socket {
     }
 
     pub async fn disconnect(&self) -> Result<()> {
-        if let Some(on_close) = self.on_close.as_ref() {
-            on_close(()).await;
-        }
+        self.handle_close().await;
 
         self.emit(Packet::new(PacketId::Close, Bytes::new()))
             .await?;
@@ -131,9 +132,7 @@ impl Socket {
     pub async fn emit(&self, packet: Packet) -> Result<()> {
         if !self.connected.load(Ordering::Acquire) {
             let error = Error::IllegalActionBeforeOpen();
-            // TODO: Check how this can be spawned in a runtime, we don't want to
-            // block we only want to execute it somewhere
-            self.call_error_callback(format!("{}", error)).await;
+            self.call_error_callback(format!("{}", error));
             return Err(error);
         }
 
@@ -148,9 +147,7 @@ impl Socket {
         };
 
         if let Err(error) = self.transport.as_transport().emit(data, is_binary).await {
-            // TODO: Check how this can be spawned in a runtime, we don't want to
-            // block we only want to execute it somewhere
-            self.call_error_callback(error.to_string()).await;
+            self.call_error_callback(error.to_string());
             return Err(error);
         }
 
@@ -159,9 +156,9 @@ impl Socket {
 
     /// Calls the error callback with a given message.
     #[inline]
-    async fn call_error_callback(&self, text: String) {
-        if let Some(function) = self.on_error.as_ref() {
-            function(text).await;
+    fn call_error_callback(&self, text: String) {
+        if let Some(on_error) = self.on_error.as_ref() {
+            self.context.spawn_future(on_error(text));
         }
     }
 
@@ -177,19 +174,19 @@ impl Socket {
 
     pub(crate) async fn handle_packet(&self, packet: Packet) {
         if let Some(on_packet) = self.on_packet.as_ref() {
-            on_packet(packet).await;
+            self.context.spawn_future(on_packet(packet));
         }
     }
 
     pub(crate) async fn handle_data(&self, data: Bytes) {
         if let Some(on_data) = self.on_data.as_ref() {
-            on_data(data).await;
+            self.context.spawn_future(on_data(data));
         }
     }
 
     pub(crate) async fn handle_close(&self) {
         if let Some(on_close) = self.on_close.as_ref() {
-            on_close(()).await;
+            self.context.spawn_future(on_close(()));
         }
 
         self.connected.store(false, Ordering::Release);

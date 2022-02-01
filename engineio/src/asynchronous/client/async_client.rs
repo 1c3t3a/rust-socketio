@@ -4,6 +4,7 @@ use crate::{
         async_transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport},
         callback::OptionalCallback,
         transport::AsyncTransport,
+        context::Context,
     },
     error::Result,
     header::HeaderMap,
@@ -11,8 +12,8 @@ use crate::{
     Error, Packet, PacketId, ENGINE_IO_VERSION,
 };
 use bytes::Bytes;
+use futures_util::future::BoxFuture;
 use native_tls::TlsConnector;
-use std::{future::Future, pin::Pin};
 use url::Url;
 
 #[derive(Clone, Debug)]
@@ -22,6 +23,7 @@ pub struct Client {
 
 #[derive(Clone, Debug)]
 pub struct ClientBuilder {
+    context: Context,
     url: Url,
     tls_config: Option<TlsConnector>,
     headers: Option<HeaderMap>,
@@ -34,7 +36,7 @@ pub struct ClientBuilder {
 }
 
 impl ClientBuilder {
-    pub fn new(url: Url) -> Self {
+    pub fn new(url: Url, context: Context) -> Self {
         let mut url = url;
         url.query_pairs_mut()
             .append_pair("EIO", &ENGINE_IO_VERSION.to_string());
@@ -44,6 +46,7 @@ impl ClientBuilder {
             url.set_path("/engine.io/");
         }
         ClientBuilder {
+            context,
             url,
             headers: None,
             tls_config: None,
@@ -71,7 +74,7 @@ impl ClientBuilder {
     /// Registers the `on_close` callback.
     pub fn on_close<T>(mut self, callback: T) -> Self
     where
-        T: Fn(()) -> Pin<Box<dyn Future<Output = ()>>> + 'static,
+        T: 'static + Send + Sync + Fn(()) -> BoxFuture<'static, ()>,
     {
         self.on_close = OptionalCallback::new(callback);
         self
@@ -80,7 +83,7 @@ impl ClientBuilder {
     /// Registers the `on_data` callback.
     pub fn on_data<T>(mut self, callback: T) -> Self
     where
-        T: Fn(Bytes) -> Pin<Box<dyn Future<Output = ()>>> + 'static,
+        T: 'static + Send + Sync + Fn(Bytes) -> BoxFuture<'static, ()>,
     {
         self.on_data = OptionalCallback::new(callback);
         self
@@ -89,7 +92,7 @@ impl ClientBuilder {
     /// Registers the `on_error` callback.
     pub fn on_error<T>(mut self, callback: T) -> Self
     where
-        T: Fn(String) -> Pin<Box<dyn Future<Output = ()>>> + 'static,
+        T: 'static + Send + Sync + Fn(String) -> BoxFuture<'static, ()>,
     {
         self.on_error = OptionalCallback::new(callback);
         self
@@ -98,7 +101,7 @@ impl ClientBuilder {
     /// Registers the `on_open` callback.
     pub fn on_open<T>(mut self, callback: T) -> Self
     where
-        T: Fn(()) -> Pin<Box<dyn Future<Output = ()>>> + 'static,
+        T: 'static + Send + Sync + Fn(()) -> BoxFuture<'static, ()>,
     {
         self.on_open = OptionalCallback::new(callback);
         self
@@ -107,7 +110,7 @@ impl ClientBuilder {
     /// Registers the `on_packet` callback.
     pub fn on_packet<T>(mut self, callback: T) -> Self
     where
-        T: Fn(Packet) -> Pin<Box<dyn Future<Output = ()>>> + 'static,
+        T: 'static + Send + Sync + Fn(Packet) -> BoxFuture<'static, ()>,
     {
         self.on_packet = OptionalCallback::new(callback);
         self
@@ -176,6 +179,7 @@ impl ClientBuilder {
         // SAFETY: handshake function called previously.
         Ok(Client {
             socket: InnerSocket::new(
+                self.context,
                 transport.into(),
                 self.handshake.unwrap(),
                 self.on_close,
@@ -221,6 +225,7 @@ impl ClientBuilder {
                 // SAFETY: handshake function called previously.
                 Ok(Client {
                     socket: InnerSocket::new(
+                        self.context,
                         transport.into(),
                         self.handshake.unwrap(),
                         self.on_close,
@@ -244,6 +249,7 @@ impl ClientBuilder {
                 // SAFETY: handshake function called previously.
                 Ok(Client {
                     socket: InnerSocket::new(
+                        self.context,
                         transport.into(),
                         self.handshake.unwrap(),
                         self.on_close,
@@ -386,7 +392,8 @@ mod test {
     use crate::packet::Packet;
 
     fn builder(url: Url) -> ClientBuilder {
-        ClientBuilder::new(url)
+        let ctx = Context::new().unwrap();
+        ClientBuilder::new(url, ctx)
             .on_open(|_| {
                 Box::pin(async {
                     println!("Open event!");

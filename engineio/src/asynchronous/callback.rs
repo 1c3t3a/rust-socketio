@@ -1,30 +1,28 @@
 use bytes::Bytes;
-use futures_util::Future;
-use std::{fmt::Debug, ops::Deref, pin::Pin, sync::Arc};
+use futures_util::future::BoxFuture;
+use std::{fmt::Debug, ops::Deref, sync::Arc};
 
 use crate::Packet;
 
-pub(crate) type AsyncCallback<I> = dyn Fn(I) -> Pin<Box<dyn Future<Output = ()>>>;
+pub(crate) type DynAsyncCallback<I> = dyn 'static + Send + Sync + Fn(I) -> BoxFuture<'static, ()>;
 
 #[derive(Clone)]
 pub(crate) struct OptionalCallback<I> {
-    inner: Arc<Option<Box<AsyncCallback<I>>>>,
+    inner: Option<Arc<DynAsyncCallback<I>>>,
 }
 
 impl<I> OptionalCallback<I> {
     pub(crate) fn new<T>(callback: T) -> Self
     where
-        T: Fn(I) -> Pin<Box<dyn Future<Output = ()>>> + 'static,
+        T: 'static + Send + Sync + Fn(I) -> BoxFuture<'static, ()>,
     {
         OptionalCallback {
-            inner: Arc::new(Some(Box::new(callback))),
+            inner: Some(Arc::new(callback)),
         }
     }
 
     pub(crate) fn default() -> Self {
-        OptionalCallback {
-            inner: Arc::new(None),
-        }
+        OptionalCallback { inner: None }
     }
 }
 
@@ -85,8 +83,8 @@ impl Debug for OptionalCallback<Bytes> {
 }
 
 impl<I> Deref for OptionalCallback<I> {
-    type Target = Option<Box<AsyncCallback<I>>>;
+    type Target = Option<Arc<DynAsyncCallback<I>>>;
     fn deref(&self) -> &<Self as std::ops::Deref>::Target {
-        self.inner.as_ref()
+        &self.inner
     }
 }
