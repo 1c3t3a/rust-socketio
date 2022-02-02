@@ -4,12 +4,12 @@ use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
 
-pub(crate) type Callback<I> = dyn Fn(I) + 'static + Sync + Send;
+pub(crate) type DynCallback<I> = dyn Fn(I) + 'static + Sync + Send;
 
 #[derive(Clone)]
 /// Internal type, only implements debug on fixed set of generics
 pub(crate) struct OptionalCallback<I> {
-    inner: Arc<Option<Box<Callback<I>>>>,
+    inner: Arc<Option<Box<DynCallback<I>>>>,
 }
 
 impl<I> OptionalCallback<I> {
@@ -86,7 +86,7 @@ impl Debug for OptionalCallback<Bytes> {
 }
 
 impl<I> Deref for OptionalCallback<I> {
-    type Target = Option<Box<Callback<I>>>;
+    type Target = Option<Box<DynCallback<I>>>;
     fn deref(&self) -> &<Self as std::ops::Deref>::Target {
         self.inner.as_ref()
     }
