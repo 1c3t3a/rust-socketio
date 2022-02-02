@@ -8,6 +8,7 @@ use std::{
 
 use bytes::Bytes;
 use tokio::{
+    runtime::Handle,
     sync::{Mutex, RwLock},
     time::Instant,
 };
@@ -19,11 +20,9 @@ use crate::{
     Error, Packet, PacketId,
 };
 
-use super::context::Context;
-
 #[derive(Clone)]
 pub struct Socket {
-    context: Context,
+    handle: Handle,
     transport: Arc<AsyncTransportType>,
     on_close: OptionalCallback<()>,
     on_data: OptionalCallback<Bytes>,
@@ -40,7 +39,6 @@ pub struct Socket {
 
 impl Socket {
     pub(crate) fn new(
-        context: Context,
         transport: AsyncTransportType,
         handshake: HandshakePacket,
         on_close: OptionalCallback<()>,
@@ -50,7 +48,7 @@ impl Socket {
         on_packet: OptionalCallback<Packet>,
     ) -> Self {
         Socket {
-            context,
+            handle: Handle::current(),
             on_close,
             on_data,
             on_error,
@@ -72,7 +70,8 @@ impl Socket {
         self.connected.store(true, Ordering::Release);
 
         if let Some(on_open) = self.on_open.as_ref() {
-            self.context.spawn_future(on_open(()));
+            let on_open = on_open.clone();
+            self.handle.spawn(async move { on_open(()).await });
         }
 
         // set the last ping to now and set the connected state
@@ -118,7 +117,10 @@ impl Socket {
     }
 
     pub async fn disconnect(&self) -> Result<()> {
-        self.handle_close().await;
+        if let Some(on_close) = self.on_close.as_ref() {
+            let on_close = on_close.clone();
+            self.handle.spawn(async move { on_close(()).await });
+        }
 
         self.emit(Packet::new(PacketId::Close, Bytes::new()))
             .await?;
@@ -158,7 +160,8 @@ impl Socket {
     #[inline]
     fn call_error_callback(&self, text: String) {
         if let Some(on_error) = self.on_error.as_ref() {
-            self.context.spawn_future(on_error(text));
+            let on_error = on_error.clone();
+            self.handle.spawn(async move { on_error(text).await });
         }
     }
 
@@ -174,19 +177,22 @@ impl Socket {
 
     pub(crate) async fn handle_packet(&self, packet: Packet) {
         if let Some(on_packet) = self.on_packet.as_ref() {
-            self.context.spawn_future(on_packet(packet));
+            let on_packet = on_packet.clone();
+            self.handle.spawn(async move { on_packet(packet).await });
         }
     }
 
     pub(crate) async fn handle_data(&self, data: Bytes) {
         if let Some(on_data) = self.on_data.as_ref() {
-            self.context.spawn_future(on_data(data));
+            let on_data = on_data.clone();
+            self.handle.spawn(async move { on_data(data).await });
         }
     }
 
     pub(crate) async fn handle_close(&self) {
         if let Some(on_close) = self.on_close.as_ref() {
-            self.context.spawn_future(on_close(()));
+            let on_close = on_close.clone();
+            self.handle.spawn(async move { on_close(()).await });
         }
 
         self.connected.store(false, Ordering::Release);

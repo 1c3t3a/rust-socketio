@@ -28,7 +28,7 @@
 //! client.disconnect().expect("Disconnect failed")
 //! ```
 //!
-//! The main entry point for using this crate is the [`ClientBuilder`] (or [`asynchronous::ClientBuilder`] respectively) 
+//! The main entry point for using this crate is the [`ClientBuilder`] (or [`asynchronous::ClientBuilder`] respectively)
 //! which provides the opportunity to define how you want to connect to a certain endpoint.
 //! The following connection methods are available:
 //! * `build`: Build websocket if allowed, if not fall back to polling. Standard configuration.
@@ -50,14 +50,13 @@
 //!
 //! It is also possible to pass in custom tls configurations via the `TlsConnector` as well
 //! as custom headers for the opening request.
-//! 
+//!
 //! ## Async version
-//! 
+//!
 //! The crate also ships with an asynchronous version that can be enabled with a feature flag.
 //! The async version implements the same features mentioned above.
 //! The asynchronous version has a similar API, just with async functions. Currently the futures
-//! can only be executed with [`tokio`](https://tokio.rs). The async version also introduces the
-//! [`asynchronous::context::Context`] type, where an instance needs to be created once.
+//! can only be executed with [`tokio`](https://tokio.rs).
 //! To make use of the async version, import the crate as follows:
 //! ```toml
 //! [depencencies]

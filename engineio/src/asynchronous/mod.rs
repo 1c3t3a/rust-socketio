@@ -7,8 +7,6 @@ pub(self) mod async_socket;
 mod callback;
 #[cfg(feature = "async")]
 pub mod client;
-#[cfg(feature = "async")]
-pub mod context;
 
 #[cfg(feature = "async")]
 pub use client::{Client, ClientBuilder};

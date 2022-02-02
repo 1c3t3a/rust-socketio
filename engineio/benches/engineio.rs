@@ -195,9 +195,8 @@ mod criterion_wrappers {
 #[cfg(feature = "async")]
 pub mod tests {
     use bytes::Bytes;
-    use lazy_static::lazy_static;
     use rust_engineio::{
-        asynchronous::{context::Context, Client, ClientBuilder},
+        asynchronous::{Client, ClientBuilder},
         Error, Packet, PacketId,
     };
     use std::future::Future;
@@ -205,27 +204,19 @@ pub mod tests {
 
     use crate::tls_connector;
 
-    lazy_static! {
-        static ref CONTEXT: Context = Context::new().unwrap();
-    }
-
     pub fn engine_io_socket_build(url: Url) -> impl Future<Output = Result<Client, Error>> {
-        async { ClientBuilder::new(url, CONTEXT.clone()).build().await }
+        async { ClientBuilder::new(url).build().await }
     }
 
     pub fn engine_io_socket_build_polling(url: Url) -> impl Future<Output = Result<Client, Error>> {
-        async {
-            ClientBuilder::new(url, CONTEXT.clone())
-                .build_polling()
-                .await
-        }
+        async { ClientBuilder::new(url).build_polling().await }
     }
 
     pub fn engine_io_socket_build_polling_secure(
         url: Url,
     ) -> impl Future<Output = Result<Client, Error>> {
         async {
-            ClientBuilder::new(url, CONTEXT.clone())
+            ClientBuilder::new(url)
                 .tls_config(tls_connector()?)
                 .build_polling()
                 .await
@@ -235,18 +226,14 @@ pub mod tests {
     pub fn engine_io_socket_build_websocket(
         url: Url,
     ) -> impl Future<Output = Result<Client, Error>> {
-        async {
-            ClientBuilder::new(url, CONTEXT.clone())
-                .build_websocket()
-                .await
-        }
+        async { ClientBuilder::new(url).build_websocket().await }
     }
 
     pub fn engine_io_socket_build_websocket_secure(
         url: Url,
     ) -> impl Future<Output = Result<Client, Error>> {
         async {
-            ClientBuilder::new(url, CONTEXT.clone())
+            ClientBuilder::new(url)
                 .tls_config(tls_connector()?)
                 .build_websocket()
                 .await
@@ -264,7 +251,6 @@ pub mod tests {
         async { socket.emit(packet).await }
     }
 }
-
 
 #[cfg(feature = "async")]
 mod criterion_wrappers {

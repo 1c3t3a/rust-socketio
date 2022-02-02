@@ -60,9 +60,9 @@ Documentation of this crate can be found up on [docs.rs](https://docs.rs/rust_en
 
 The crate also ships with an asynchronous version that can be enabled with a feature flag.
 The async version implements the same features mentioned above.
-The asynchronous version has a similar API, just with async functions. Currently the futures 
-can only be executed with [`tokio`](https://tokio.rs). The async version also introduces the
-`asynchronous::context::Context` type, where an instance needs to be created once.
+The asynchronous version has a similar API, just with async functions. Currently the futures
+can only be executed with [`tokio`](https://tokio.rs). In the first benchmarks the async version
+showed improvements of up to 93% in speed.
 To make use of the async version, import the crate as follows:
 ```toml
 [depencencies]
