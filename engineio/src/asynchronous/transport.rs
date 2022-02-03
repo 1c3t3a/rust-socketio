@@ -2,13 +2,14 @@ use crate::error::Result;
 use adler32::adler32;
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures_util::Stream;
 use std::time::SystemTime;
 use url::Url;
 
 use super::async_transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
 
 #[async_trait]
-pub trait AsyncTransport {
+pub trait AsyncTransport: Stream<Item = Result<Bytes>> + Unpin {
     /// Sends a packet to the server. This optionally handles sending of a
     /// socketio binary attachment via the boolean attribute `is_binary_att`.
     async fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()>;
@@ -65,6 +66,14 @@ impl From<WebsocketSecureTransport> for AsyncTransportType {
 
 #[cfg(feature = "async")]
 impl AsyncTransportType {
+    pub fn as_mut_transport(&mut self) -> &mut dyn AsyncTransport {
+        match self {
+            AsyncTransportType::Polling(transport) => transport,
+            AsyncTransportType::Websocket(transport) => transport,
+            AsyncTransportType::WebsocketSecure(transport) => transport,
+        }
+    }
+
     pub fn as_transport(&self) -> &dyn AsyncTransport {
         match self {
             AsyncTransportType::Polling(transport) => transport,
@@ -73,3 +82,14 @@ impl AsyncTransportType {
         }
     }
 }
+
+// impl Stream for &dyn AsyncTransport {
+//     type Item = Result<Bytes>;
+
+//     fn poll_next(
+//         self: std::pin::Pin<&mut Self>,
+//         cx: &mut std::task::Context<'_>,
+//     ) -> std::task::Poll<Option<Self::Item>> {
+//         self.poll_next(cx)
+//     }
+// }

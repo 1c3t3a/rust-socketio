@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
+use futures_util::{ready, Future, Stream};
 use http::HeaderMap;
 use native_tls::TlsConnector;
 use reqwest::{Client, ClientBuilder};
-use std::sync::Arc;
+use std::{pin::Pin, sync::Arc, task::Poll};
 use tokio::sync::RwLock;
 use url::Url;
 
@@ -44,6 +45,23 @@ impl PollingTransport {
             client,
             base_url: Arc::new(RwLock::new(url)),
         }
+    }
+}
+
+impl Stream for PollingTransport {
+    type Item = Result<Bytes>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let address = ready!(Pin::new(&mut self.address()).poll(cx))?;
+
+        let response = ready!(Pin::new(&mut self.client.get(address).send()).poll(cx))?;
+        let resp = ready!(Pin::new(&mut Box::pin(response.bytes_stream())).poll_next(cx))
+            .map(|req| req.map_err(Error::from));
+
+        Poll::Ready(resp)
     }
 }
 

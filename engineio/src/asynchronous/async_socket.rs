@@ -1,12 +1,15 @@
 use std::{
     fmt::Debug,
+    pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    task::Poll,
 };
 
 use bytes::Bytes;
+use futures_util::{ready, Future, Stream};
 use tokio::{
     runtime::Handle,
     sync::{Mutex, RwLock},
@@ -23,7 +26,7 @@ use crate::{
 #[derive(Clone)]
 pub struct Socket {
     handle: Handle,
-    transport: Arc<AsyncTransportType>,
+    transport: Arc<Mutex<AsyncTransportType>>,
     on_close: OptionalCallback<()>,
     on_data: OptionalCallback<Bytes>,
     on_error: OptionalCallback<String>,
@@ -54,7 +57,7 @@ impl Socket {
             on_error,
             on_open,
             on_packet,
-            transport: Arc::new(transport),
+            transport: Arc::new(Mutex::new(transport)),
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
@@ -81,39 +84,6 @@ impl Socket {
         self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
 
         Ok(())
-    }
-
-    /// Polls for next payload
-    pub(crate) async fn poll(&self) -> Result<Option<Packet>> {
-        loop {
-            if self.connected.load(Ordering::Acquire) {
-                if self.remaining_packets.read().await.is_some() {
-                    // SAFETY: checked is some above
-                    let mut iter = self.remaining_packets.write().await;
-                    let iter = iter.as_mut().unwrap();
-                    if let Some(packet) = iter.next() {
-                        return Ok(Some(packet));
-                    }
-                }
-
-                // Iterator has run out of packets, get a new payload
-                let data = self.transport.as_transport().poll().await?;
-
-                if data.is_empty() {
-                    continue;
-                }
-
-                let payload = Payload::try_from(data)?;
-                let mut iter = payload.into_iter();
-
-                if let Some(packet) = iter.next() {
-                    *self.remaining_packets.write().await = Some(iter);
-                    return Ok(Some(packet));
-                }
-            } else {
-                return Ok(None);
-            }
-        }
     }
 
     pub async fn disconnect(&self) -> Result<()> {
@@ -148,7 +118,14 @@ impl Socket {
             packet.into()
         };
 
-        if let Err(error) = self.transport.as_transport().emit(data, is_binary).await {
+        if let Err(error) = self
+            .transport
+            .lock()
+            .await
+            .as_transport()
+            .emit(data, is_binary)
+            .await
+        {
             self.call_error_callback(error.to_string());
             return Err(error);
         }
@@ -195,6 +172,56 @@ impl Socket {
         }
 
         self.connected.store(false, Ordering::Release);
+    }
+}
+
+impl Stream for Socket {
+    type Item = Result<Packet>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        if !self.connected.load(Ordering::Acquire) {
+            return Poll::Ready(None);
+        }
+        if ready!(Pin::new(&mut Box::pin(self.remaining_packets.read())).poll(cx)).is_some() {
+            // SAFETY: checked is some above
+            let mut iter = ready!(Pin::new(&mut Box::pin(self.remaining_packets.write())).poll(cx));
+            let iter = iter.as_mut().unwrap();
+            if let Some(packet) = iter.next() {
+                return Poll::Ready(Some(Ok(packet)));
+            }
+        }
+
+        let mut transport = ready!(Pin::new(&mut Box::pin(self.transport.lock())).poll(cx));
+        let data = ready!(Pin::new(transport.as_mut_transport()).poll_next(cx));
+
+        match data {
+            Some(result) => match result {
+                Ok(data) => {
+                    if data.is_empty() {
+                        return Poll::Pending;
+                    }
+
+                    let payload = Payload::try_from(data)?;
+                    let mut iter = payload.into_iter();
+
+                    if let Some(packet) = iter.next() {
+                        let mut lock = ready!(Pin::new(&mut Box::pin(
+                            self.remaining_packets.write()
+                        ))
+                        .poll(cx));
+                        *lock = Some(iter);
+                        return Poll::Ready(Some(Ok(packet)));
+                    }
+
+                    Poll::Pending
+                }
+                Err(e) => Poll::Ready(Some(Err(e))),
+            },
+            None => Poll::Ready(None),
+        }
     }
 }
 

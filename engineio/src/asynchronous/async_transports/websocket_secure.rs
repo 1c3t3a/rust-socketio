@@ -1,16 +1,13 @@
-use std::fmt::Debug;
-use std::sync::Arc;
+use std::{fmt::Debug, future::Future, pin::Pin, sync::Arc, task::Poll};
 
-use crate::asynchronous::transport::AsyncTransport;
-use crate::error::Result;
+use crate::{asynchronous::transport::AsyncTransport, error::Result};
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures_util::StreamExt;
+use futures_util::{ready, Stream, StreamExt};
 use http::HeaderMap;
 use native_tls::TlsConnector;
 use tokio::sync::RwLock;
-use tokio_tungstenite::connect_async_tls_with_config;
-use tokio_tungstenite::Connector;
+use tokio_tungstenite::{connect_async_tls_with_config, Connector};
 use url::Url;
 
 use super::websocket_general::AsyncWebsocketGeneralTransport;
@@ -61,6 +58,19 @@ impl WebsocketSecureTransport {
     /// request
     pub(crate) async fn upgrade(&self) -> Result<()> {
         self.inner.upgrade().await
+    }
+}
+
+impl Stream for WebsocketSecureTransport {
+    type Item = Result<Bytes>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let data = ready!(Pin::new(&mut Box::pin(self.inner.poll())).poll(cx))?;
+
+        Poll::Ready(Some(Ok(data)))
     }
 }
 
