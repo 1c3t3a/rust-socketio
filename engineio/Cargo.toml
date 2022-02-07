@@ -21,7 +21,7 @@ serde_json = "1.0"
 http = "0.2.5"
 tokio-tungstenite = { version = "0.16.1", features = ["native-tls"] }
 tungstenite = "0.16.0"
-tokio = "1.0.0"
+tokio = "1.16.1"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 async-trait = "0.1.51"
 thiserror = "1.0"
@@ -32,6 +32,10 @@ url = "2.2.2"
 cargo-tarpaulin = "0.18.5"
 criterion = { version = "0.3.4", features = ["async_tokio"] }
 lazy_static = "1.4.0"
+
+[dev-dependencies.tokio]
+# we need the `#[tokio::test]` macro
+features = ["macros"]
 
 [[bench]]
 name = "engineio"

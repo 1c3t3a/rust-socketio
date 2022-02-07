@@ -199,56 +199,42 @@ pub mod tests {
         asynchronous::{Client, ClientBuilder},
         Error, Packet, PacketId,
     };
-    use std::future::Future;
     use url::Url;
 
     use crate::tls_connector;
 
-    pub fn engine_io_socket_build(url: Url) -> impl Future<Output = Result<Client, Error>> {
-        async { ClientBuilder::new(url).build().await }
+    pub async fn engine_io_socket_build(url: Url) -> Result<Client, Error> {
+        ClientBuilder::new(url).build().await
     }
 
-    pub fn engine_io_socket_build_polling(url: Url) -> impl Future<Output = Result<Client, Error>> {
-        async { ClientBuilder::new(url).build_polling().await }
+    pub async fn engine_io_socket_build_polling(url: Url) -> Result<Client, Error> {
+        ClientBuilder::new(url).build_polling().await
     }
 
-    pub fn engine_io_socket_build_polling_secure(
-        url: Url,
-    ) -> impl Future<Output = Result<Client, Error>> {
-        async {
-            ClientBuilder::new(url)
-                .tls_config(tls_connector()?)
-                .build_polling()
-                .await
-        }
+    pub async fn engine_io_socket_build_polling_secure(url: Url) -> Result<Client, Error> {
+        ClientBuilder::new(url)
+            .tls_config(tls_connector()?)
+            .build_polling()
+            .await
     }
 
-    pub fn engine_io_socket_build_websocket(
-        url: Url,
-    ) -> impl Future<Output = Result<Client, Error>> {
-        async { ClientBuilder::new(url).build_websocket().await }
+    pub async fn engine_io_socket_build_websocket(url: Url) -> Result<Client, Error> {
+        ClientBuilder::new(url).build_websocket().await
     }
 
-    pub fn engine_io_socket_build_websocket_secure(
-        url: Url,
-    ) -> impl Future<Output = Result<Client, Error>> {
-        async {
-            ClientBuilder::new(url)
-                .tls_config(tls_connector()?)
-                .build_websocket()
-                .await
-        }
+    pub async fn engine_io_socket_build_websocket_secure(url: Url) -> Result<Client, Error> {
+        ClientBuilder::new(url)
+            .tls_config(tls_connector()?)
+            .build_websocket()
+            .await
     }
 
     pub fn engine_io_packet() -> Packet {
         Packet::new(PacketId::Message, Bytes::from("hello world"))
     }
 
-    pub fn engine_io_emit(
-        socket: &Client,
-        packet: Packet,
-    ) -> impl Future<Output = Result<(), Error>> + '_ {
-        async { socket.emit(packet).await }
+    pub async fn engine_io_emit(socket: &Client, packet: Packet) -> Result<(), Error> {
+        socket.emit(packet).await
     }
 }
 
@@ -256,8 +242,10 @@ pub mod tests {
 mod criterion_wrappers {
     use std::sync::Arc;
 
+    use bytes::Bytes;
     use criterion::{black_box, Criterion};
     use lazy_static::lazy_static;
+    use rust_engineio::{Packet, PacketId};
     use tokio::runtime::{Builder, Runtime};
 
     use super::tests::{
@@ -338,7 +326,9 @@ mod criterion_wrappers {
     }
 
     pub fn criterion_engine_io_packet(c: &mut Criterion) {
-        c.bench_function("engine io packet", move |b| b.iter(|| engine_io_packet()));
+        c.bench_function("engine io packet", move |b| {
+            b.iter(|| Packet::new(PacketId::Message, Bytes::from("hello world")))
+        });
     }
 
     pub fn criterion_engine_io_emit_polling(c: &mut Criterion) {

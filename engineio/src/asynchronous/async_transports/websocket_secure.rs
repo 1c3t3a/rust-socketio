@@ -108,75 +108,64 @@ impl Debug for WebsocketSecureTransport {
 
 #[cfg(test)]
 mod test {
-    use tokio::runtime::Builder;
-
     use super::*;
     use crate::ENGINE_IO_VERSION;
-    use std::future::Future;
     use std::str::FromStr;
 
-    fn new() -> impl Future<Output = Result<WebsocketSecureTransport>> {
-        async {
-            let url = crate::test::engine_io_server_secure()?.to_string()
-                + "engine.io/?EIO="
-                + &ENGINE_IO_VERSION.to_string();
-            WebsocketSecureTransport::new(
-                Url::from_str(&url[..])?,
-                Some(crate::test::tls_connector()?),
-                None,
+    async fn new() -> Result<WebsocketSecureTransport> {
+        let url = crate::test::engine_io_server_secure()?.to_string()
+            + "engine.io/?EIO="
+            + &ENGINE_IO_VERSION.to_string();
+        WebsocketSecureTransport::new(
+            Url::from_str(&url[..])?,
+            Some(crate::test::tls_connector()?),
+            None,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn websocket_secure_transport_base_url() -> Result<()> {
+        let transport = new().await?;
+        let mut url = crate::test::engine_io_server_secure()?;
+        url.set_path("/engine.io/");
+        url.query_pairs_mut()
+            .append_pair("EIO", &ENGINE_IO_VERSION.to_string())
+            .append_pair("transport", "websocket");
+        url.set_scheme("wss").unwrap();
+        assert_eq!(transport.base_url().await?.to_string(), url.to_string());
+        transport
+            .set_base_url(reqwest::Url::parse("https://127.0.0.1")?)
+            .await?;
+        assert_eq!(
+            transport.base_url().await?.to_string(),
+            "wss://127.0.0.1/?transport=websocket"
+        );
+        assert_ne!(transport.base_url().await?.to_string(), url.to_string());
+
+        transport
+            .set_base_url(reqwest::Url::parse(
+                "http://127.0.0.1/?transport=websocket",
+            )?)
+            .await?;
+        assert_eq!(
+            transport.base_url().await?.to_string(),
+            "wss://127.0.0.1/?transport=websocket"
+        );
+        assert_ne!(transport.base_url().await?.to_string(), url.to_string());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn websocket_secure_debug() -> Result<()> {
+        let transport = new().await?;
+        assert_eq!(
+            format!("{:?}", transport),
+            format!(
+                "AsyncWebsocketSecureTransport {{ base_url: {:?} }}",
+                transport.base_url().await?.to_string()
             )
-            .await
-        }
-    }
-
-    #[test]
-    fn websocket_secure_transport_base_url() -> Result<()> {
-        let rt = Builder::new_multi_thread().enable_all().build()?;
-        rt.block_on(async {
-            let transport = new().await?;
-            let mut url = crate::test::engine_io_server_secure()?;
-            url.set_path("/engine.io/");
-            url.query_pairs_mut()
-                .append_pair("EIO", &ENGINE_IO_VERSION.to_string())
-                .append_pair("transport", "websocket");
-            url.set_scheme("wss").unwrap();
-            assert_eq!(transport.base_url().await?.to_string(), url.to_string());
-            transport
-                .set_base_url(reqwest::Url::parse("https://127.0.0.1")?)
-                .await?;
-            assert_eq!(
-                transport.base_url().await?.to_string(),
-                "wss://127.0.0.1/?transport=websocket"
-            );
-            assert_ne!(transport.base_url().await?.to_string(), url.to_string());
-
-            transport
-                .set_base_url(reqwest::Url::parse(
-                    "http://127.0.0.1/?transport=websocket",
-                )?)
-                .await?;
-            assert_eq!(
-                transport.base_url().await?.to_string(),
-                "wss://127.0.0.1/?transport=websocket"
-            );
-            assert_ne!(transport.base_url().await?.to_string(), url.to_string());
-            Ok(())
-        })
-    }
-
-    #[test]
-    fn websocket_secure_debug() -> Result<()> {
-        let rt = Builder::new_multi_thread().enable_all().build()?;
-        rt.block_on(async {
-            let transport = new().await?;
-            assert_eq!(
-                format!("{:?}", transport),
-                format!(
-                    "AsyncWebsocketSecureTransport {{ base_url: {:?} }}",
-                    transport.base_url().await?.to_string()
-                )
-            );
-            Ok(())
-        })
+        );
+        Ok(())
     }
 }
