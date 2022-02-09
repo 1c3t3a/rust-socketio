@@ -40,7 +40,7 @@ pub mod util {
     }
 }
 
-/*            sync benches            */
+/// sync benches
 
 #[cfg(not(feature = "async"))]
 pub mod tests {
@@ -190,7 +190,7 @@ mod criterion_wrappers {
     }
 }
 
-/*            async benches            */
+/// async benches
 
 #[cfg(feature = "async")]
 pub mod tests {

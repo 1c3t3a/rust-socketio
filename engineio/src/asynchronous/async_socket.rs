@@ -170,9 +170,8 @@ impl Socket {
         Ok(self.connected.load(Ordering::Acquire))
     }
 
-    pub(crate) async fn pinged(&self) -> Result<()> {
+    pub(crate) async fn pinged(&self) {
         *self.last_ping.lock().await = Instant::now();
-        Ok(())
     }
 
     pub(crate) async fn handle_packet(&self, packet: Packet) {

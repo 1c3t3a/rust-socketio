@@ -1,4 +1,6 @@
-use crate::{asynchronous::async_socket::Socket as InnerSocket, error::Result, Packet, PacketId};
+use crate::{
+    asynchronous::async_socket::Socket as InnerSocket, error::Result, Error, Packet, PacketId,
+};
 use bytes::Bytes;
 
 #[derive(Clone, Debug)]
@@ -51,13 +53,13 @@ impl Client {
                     // this is already checked during the handshake, so just do nothing here
                 }
                 PacketId::Ping => {
-                    self.socket.pinged().await?;
+                    self.socket.pinged().await;
                     self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
                 }
                 PacketId::Pong => {
                     // this will never happen as the pong packet is
                     // only sent by the client
-                    unreachable!();
+                    return Err(Error::InvalidPacket());
                 }
                 PacketId::Noop => (),
             }
