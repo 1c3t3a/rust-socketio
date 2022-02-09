@@ -18,7 +18,7 @@ pub struct HeaderValue {
     inner: Bytes,
 }
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Eq, PartialEq, Debug, Clone, Default)]
 pub struct HeaderMap {
     map: HashMap<HeaderName, HeaderValue>,
 }
@@ -125,14 +125,6 @@ impl HeaderMap {
         value: U,
     ) -> Option<HeaderValue> {
         self.map.insert(key.into(), value.into())
-    }
-}
-
-impl Default for HeaderMap {
-    fn default() -> Self {
-        Self {
-            map: Default::default(),
-        }
     }
 }
 

@@ -1,6 +1,7 @@
 use crate::{
-    async_transports::{
-        transport::AsyncTransport, websocket_secure::AsyncWebsocketSecureTransport,
+    asynchronous::{
+        async_transports::WebsocketSecureTransport as AsyncWebsocketSecureTransport,
+        transport::AsyncTransport,
     },
     error::Result,
     transport::Transport,
@@ -29,20 +30,8 @@ impl WebsocketSecureTransport {
             .enable_all()
             .build()?;
 
-        let mut url = base_url;
-        url.query_pairs_mut().append_pair("transport", "websocket");
-        url.set_scheme("wss").unwrap();
-
-        let mut req = http::Request::builder().uri(url.clone().as_str());
-        if let Some(map) = headers {
-            // SAFETY: this unwrap never panics as the underlying request is just initialized and in proper state
-            req.headers_mut().unwrap().extend(map);
-        }
-
         let inner = runtime.block_on(AsyncWebsocketSecureTransport::new(
-            req.body(())?,
-            url,
-            tls_config,
+            base_url, tls_config, headers,
         ))?;
 
         Ok(WebsocketSecureTransport {

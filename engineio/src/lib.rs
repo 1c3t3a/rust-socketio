@@ -28,8 +28,8 @@
 //! client.disconnect().expect("Disconnect failed")
 //! ```
 //!
-//! The main entry point for using this crate is the [`ClientBuilder`] which provides
-//! the opportunity to define how you want to connect to a certain endpoint.
+//! The main entry point for using this crate is the [`ClientBuilder`] (or [`asynchronous::ClientBuilder`] respectively)
+//! which provides the opportunity to define how you want to connect to a certain endpoint.
 //! The following connection methods are available:
 //! * `build`: Build websocket if allowed, if not fall back to polling. Standard configuration.
 //! * `build_polling`: enforces a `polling` transport.
@@ -51,6 +51,19 @@
 //! It is also possible to pass in custom tls configurations via the `TlsConnector` as well
 //! as custom headers for the opening request.
 //!
+//! ## Async version
+//!
+//! The crate also ships with an asynchronous version that can be enabled with a feature flag.
+//! The async version implements the same features mentioned above.
+//! The asynchronous version has a similar API, just with async functions. Currently the futures
+//! can only be executed with [`tokio`](https://tokio.rs). In the first benchmarks the async version
+//! showed improvements of up to 93% in speed.
+//! To make use of the async version, import the crate as follows:
+//! ```toml
+//! [depencencies]
+//! rust-engineio = { version = "0.3.1", features = ["async"] }
+//! ```
+//!
 #![allow(clippy::rc_buffer)]
 #![warn(clippy::complexity)]
 #![warn(clippy::style)]
@@ -66,7 +79,8 @@ macro_rules! spawn_scoped {
         .unwrap();
     };
 }
-pub mod async_transports;
+
+pub mod asynchronous;
 mod callback;
 pub mod client;
 /// Generic header map

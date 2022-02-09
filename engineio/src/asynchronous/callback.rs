@@ -1,31 +1,30 @@
-use crate::Packet;
 use bytes::Bytes;
-use std::fmt::Debug;
-use std::ops::Deref;
-use std::sync::Arc;
+use futures_util::future::BoxFuture;
+use std::{fmt::Debug, ops::Deref, sync::Arc};
 
-pub(crate) type DynCallback<I> = dyn Fn(I) + 'static + Sync + Send;
+use crate::Packet;
 
+/// Internal type, provides a way to store futures and return them in a boxed manner.
+pub(crate) type DynAsyncCallback<I> = dyn 'static + Send + Sync + Fn(I) -> BoxFuture<'static, ()>;
+
+/// Internal type, might hold an async callback.
 #[derive(Clone)]
-/// Internal type, only implements debug on fixed set of generics
 pub(crate) struct OptionalCallback<I> {
-    inner: Arc<Option<Box<DynCallback<I>>>>,
+    inner: Option<Arc<DynAsyncCallback<I>>>,
 }
 
 impl<I> OptionalCallback<I> {
     pub(crate) fn new<T>(callback: T) -> Self
     where
-        T: Fn(I) + 'static + Sync + Send,
+        T: 'static + Send + Sync + Fn(I) -> BoxFuture<'static, ()>,
     {
         OptionalCallback {
-            inner: Arc::new(Some(Box::new(callback))),
+            inner: Some(Arc::new(callback)),
         }
     }
 
     pub(crate) fn default() -> Self {
-        OptionalCallback {
-            inner: Arc::new(None),
-        }
+        OptionalCallback { inner: None }
     }
 }
 
@@ -86,8 +85,8 @@ impl Debug for OptionalCallback<Bytes> {
 }
 
 impl<I> Deref for OptionalCallback<I> {
-    type Target = Option<Box<DynCallback<I>>>;
+    type Target = Option<Arc<DynAsyncCallback<I>>>;
     fn deref(&self) -> &<Self as std::ops::Deref>::Target {
-        self.inner.as_ref()
+        &self.inner
     }
 }

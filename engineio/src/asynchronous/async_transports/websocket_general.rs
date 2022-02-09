@@ -10,10 +10,6 @@ use tokio::{net::TcpStream, sync::Mutex};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tungstenite::Message;
 
-pub(crate) mod transport;
-pub(crate) mod websocket;
-pub(crate) mod websocket_secure;
-
 /// A general purpose asynchronous websocket transport type. Holds
 /// the sender and receiver stream of a websocket connection
 /// and implements the common methods `update`, `poll` and `emit`.
@@ -63,7 +59,7 @@ impl AsyncWebsocketGeneralTransport {
         Ok(())
     }
 
-    async fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()> {
+    pub(crate) async fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()> {
         let mut sender = self.sender.lock().await;
 
         let message = if is_binary_att {
@@ -77,7 +73,7 @@ impl AsyncWebsocketGeneralTransport {
         Ok(())
     }
 
-    async fn poll(&self) -> Result<Bytes> {
+    pub(crate) async fn poll(&self) -> Result<Bytes> {
         let mut receiver = self.receiver.lock().await;
 
         let message = receiver.next().await.ok_or(Error::IncompletePacket())??;

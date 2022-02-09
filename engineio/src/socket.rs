@@ -90,7 +90,7 @@ impl Socket {
     pub fn emit(&self, packet: Packet) -> Result<()> {
         if !self.connected.load(Ordering::Acquire) {
             let error = Error::IllegalActionBeforeOpen();
-            self.call_error_callback(format!("{}", error))?;
+            self.call_error_callback(format!("{}", error));
             return Err(error);
         }
 
@@ -105,7 +105,7 @@ impl Socket {
         };
 
         if let Err(error) = self.transport.as_transport().emit(data, is_binary) {
-            self.call_error_callback(error.to_string())?;
+            self.call_error_callback(error.to_string());
             return Err(error);
         }
 
@@ -148,11 +148,10 @@ impl Socket {
 
     /// Calls the error callback with a given message.
     #[inline]
-    fn call_error_callback(&self, text: String) -> Result<()> {
+    fn call_error_callback(&self, text: String) {
         if let Some(function) = self.on_error.as_ref() {
             spawn_scoped!(function(text));
         }
-        Ok(())
     }
 
     // Check if the underlying transport client is connected.
@@ -165,27 +164,24 @@ impl Socket {
         Ok(())
     }
 
-    pub(crate) fn handle_packet(&self, packet: Packet) -> Result<()> {
+    pub(crate) fn handle_packet(&self, packet: Packet) {
         if let Some(on_packet) = self.on_packet.as_ref() {
             spawn_scoped!(on_packet(packet));
         }
-        Ok(())
     }
 
-    pub(crate) fn handle_data(&self, data: Bytes) -> Result<()> {
+    pub(crate) fn handle_data(&self, data: Bytes) {
         if let Some(on_data) = self.on_data.as_ref() {
             spawn_scoped!(on_data(data));
         }
-        Ok(())
     }
 
-    pub(crate) fn handle_close(&self) -> Result<()> {
+    pub(crate) fn handle_close(&self) {
         if let Some(on_close) = self.on_close.as_ref() {
             spawn_scoped!(on_close(()));
         }
 
         self.connected.store(false, Ordering::Release);
-        Ok(())
     }
 }
 

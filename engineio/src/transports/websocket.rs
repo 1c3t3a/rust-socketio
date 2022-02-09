@@ -1,5 +1,7 @@
 use crate::{
-    async_transports::{transport::AsyncTransport, websocket::AsyncWebsocketTransport},
+    asynchronous::{
+        async_transports::WebsocketTransport as AsyncWebsocketTransport, transport::AsyncTransport,
+    },
     error::Result,
     transport::Transport,
 };
@@ -22,17 +24,7 @@ impl WebsocketTransport {
             .enable_all()
             .build()?;
 
-        let mut url = base_url;
-        url.query_pairs_mut().append_pair("transport", "websocket");
-        url.set_scheme("ws").unwrap();
-
-        let mut req = http::Request::builder().uri(url.clone().as_str());
-        if let Some(map) = headers {
-            // SAFETY: this unwrap never panics as the underlying request is just initialized and in proper state
-            req.headers_mut().unwrap().extend(map);
-        }
-
-        let inner = runtime.block_on(AsyncWebsocketTransport::new(req.body(())?, url))?;
+        let inner = runtime.block_on(AsyncWebsocketTransport::new(base_url, headers))?;
 
         Ok(WebsocketTransport {
             runtime: Arc::new(runtime),

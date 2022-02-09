@@ -30,8 +30,17 @@ url = "2.2.2"
 
 [dev-dependencies]
 cargo-tarpaulin = "0.18.5"
-criterion = "0.3"
+criterion = { version = "0.3.4", features = ["async_tokio"] }
+lazy_static = "1.4.0"
+
+[dev-dependencies.tokio]
+# we need the `#[tokio::test]` macro
+features = ["macros"]
 
 [[bench]]
 name = "engineio"
 harness = false
+
+[features]
+default = ["async"]
+async = []
