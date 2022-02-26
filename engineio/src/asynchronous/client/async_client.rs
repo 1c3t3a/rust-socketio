@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin};
+use std::pin::Pin;
 
 use crate::{
     asynchronous::async_socket::Socket as InnerSocket, error::Result, Error, Packet, PacketId,
@@ -33,12 +33,8 @@ impl Client {
     }
 
     #[doc(hidden)]
-    pub async fn stream(
-        &self,
-    ) -> Result<Pin<Box<dyn Stream<Item = impl Future<Output = Result<Option<Packet>>> + '_> + '_>>>
-    {
-        // TODO: is map the right thing? We basically want the sideffects of each packet..
-        let stream = self.socket.stream().await?.map(|item| async {
+    pub async fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Option<Packet>>> + '_>>> {
+        let stream = self.socket.stream().await?.then(|item| async {
             let packet = item?;
 
             if let Some(packet) = packet {
@@ -61,7 +57,6 @@ impl Client {
                         // this is already checked during the handshake, so just do nothing here
                     }
                     PacketId::Ping => {
-                        // TODO: because of these to lines we need to return a "Future<Output = Stream....>"...
                         self.socket.pinged().await;
                         self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
                     }
@@ -108,7 +103,7 @@ mod test {
 
         sut.connect().await?;
 
-        assert!(sut.stream().await?.next().await.unwrap().await.is_ok());
+        assert!(sut.stream().await?.next().await.unwrap().is_ok());
 
         assert!(builder(Url::parse("fake://fake.fake").unwrap())
             .build_websocket()
@@ -159,7 +154,7 @@ mod test {
         socket.connect().await.unwrap();
 
         assert_eq!(
-            socket.stream().await?.next().await.unwrap().await?,
+            socket.stream().await?.next().await.unwrap()?,
             Some(Packet::new(PacketId::Message, "hello client"))
         );
 
@@ -168,7 +163,7 @@ mod test {
             .await?;
 
         assert_eq!(
-            socket.stream().await?.next().await.unwrap().await?,
+            socket.stream().await?.next().await.unwrap()?,
             Some(Packet::new(PacketId::Message, "Roger Roger"))
         );
 
@@ -185,7 +180,7 @@ mod test {
 
         // hello client
         assert!(matches!(
-            socket.stream().await?.next().await.unwrap().await?,
+            socket.stream().await?.next().await.unwrap()?,
             Some(Packet {
                 packet_id: PacketId::Message,
                 ..
@@ -193,7 +188,7 @@ mod test {
         ));
         // Ping
         assert!(matches!(
-            socket.stream().await?.next().await.unwrap().await?,
+            socket.stream().await?.next().await.unwrap()?,
             Some(Packet {
                 packet_id: PacketId::Ping,
                 ..
