@@ -5,8 +5,10 @@ use crate::{
     },
     error::Result,
     transport::Transport,
+    Error,
 };
 use bytes::Bytes;
+use futures_util::StreamExt;
 use http::HeaderMap;
 use native_tls::TlsConnector;
 use std::sync::Arc;
@@ -53,7 +55,14 @@ impl Transport for WebsocketSecureTransport {
     }
 
     fn poll(&self) -> Result<Bytes> {
-        self.runtime.block_on(self.inner.poll())
+        self.runtime.block_on(async {
+            self.inner
+                .stream()
+                .await?
+                .next()
+                .await
+                .ok_or(Error::IncompletePacket())?
+        })
     }
 
     fn base_url(&self) -> Result<url::Url> {

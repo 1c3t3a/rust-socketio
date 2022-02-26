@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::asynchronous::transport::AsyncTransport;
@@ -6,6 +7,7 @@ use crate::error::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::stream::StreamExt;
+use futures_util::Stream;
 use http::HeaderMap;
 use tokio::sync::RwLock;
 use tokio_tungstenite::connect_async;
@@ -57,8 +59,8 @@ impl AsyncTransport for WebsocketTransport {
         self.inner.emit(data, is_binary_att).await
     }
 
-    async fn poll(&self) -> Result<Bytes> {
-        self.inner.poll().await
+    async fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>> {
+        Ok(Box::pin(self.inner.stream()))
     }
 
     async fn base_url(&self) -> Result<Url> {
@@ -148,8 +150,8 @@ mod test {
                 transport.base_url().await?.to_string()
             )
         );
-        println!("{:?}", transport.poll().await.unwrap());
-        println!("{:?}", transport.poll().await.unwrap());
+        println!("{:?}", transport.stream().await?.next().await.unwrap());
+        println!("{:?}", transport.stream().await?.next().await.unwrap());
         Ok(())
     }
 }

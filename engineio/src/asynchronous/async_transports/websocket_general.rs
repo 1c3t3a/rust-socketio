@@ -1,10 +1,11 @@
-use std::{borrow::Cow, str::from_utf8, sync::Arc};
+use std::{borrow::Cow, future::Future, pin::Pin, str::from_utf8, sync::Arc, task::Poll};
 
 use crate::{error::Result, Error, Packet, PacketId};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{
+    ready,
     stream::{SplitSink, SplitStream},
-    SinkExt, StreamExt,
+    SinkExt, Stream, StreamExt,
 };
 use tokio::{net::TcpStream, sync::Mutex};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -16,6 +17,12 @@ use tungstenite::Message;
 pub(crate) struct AsyncWebsocketGeneralTransport {
     sender: Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>,
     receiver: Arc<Mutex<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>>,
+}
+
+/// A convenience type that implements stream and shadows the lifetime
+/// of `AsyncWebsocketGeneralTransport`.
+pub(crate) struct WsStream<'a> {
+    inner: &'a AsyncWebsocketGeneralTransport,
 }
 
 impl AsyncWebsocketGeneralTransport {
@@ -73,6 +80,10 @@ impl AsyncWebsocketGeneralTransport {
         Ok(())
     }
 
+    pub(crate) fn stream(&self) -> WsStream<'_> {
+        WsStream { inner: self }
+    }
+
     pub(crate) async fn poll(&self) -> Result<Bytes> {
         let mut receiver = self.receiver.lock().await;
 
@@ -86,6 +97,20 @@ impl AsyncWebsocketGeneralTransport {
             Ok(msg.freeze())
         } else {
             Ok(Bytes::from(message.into_data()))
+        }
+    }
+}
+
+impl Stream for WsStream<'_> {
+    type Item = Result<Bytes>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match ready!(Pin::new(&mut Box::pin(self.inner.poll())).poll(cx)) {
+            Ok(val) => Poll::Ready(Some(Ok(val))),
+            Err(err) => Poll::Ready(Some(Err(err))),
         }
     }
 }
