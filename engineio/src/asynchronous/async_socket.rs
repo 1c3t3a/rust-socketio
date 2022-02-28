@@ -23,7 +23,7 @@ use crate::{
 
 #[derive(Clone)]
 pub struct Socket {
-    pub(super) handle: Handle,
+    handle: Handle,
     transport: Arc<AsyncTransportType>,
     on_close: OptionalCallback<()>,
     on_data: OptionalCallback<Bytes>,
