@@ -1,11 +1,10 @@
-use std::{borrow::Cow, future::Future, pin::Pin, str::from_utf8, sync::Arc, task::Poll};
+use std::{borrow::Cow, str::from_utf8, sync::Arc};
 
 use crate::{error::Result, Error, Packet, PacketId};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{
-    ready,
     stream::{SplitSink, SplitStream},
-    SinkExt, Stream, StreamExt,
+    FutureExt, SinkExt, Stream, StreamExt,
 };
 use tokio::{net::TcpStream, sync::Mutex};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -17,12 +16,6 @@ use tungstenite::Message;
 pub(crate) struct AsyncWebsocketGeneralTransport {
     sender: Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>,
     receiver: Arc<Mutex<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>>,
-}
-
-/// A convenience type that implements stream and shadows the lifetime
-/// of `AsyncWebsocketGeneralTransport`.
-pub(crate) struct WsStream<'a> {
-    inner: &'a AsyncWebsocketGeneralTransport,
 }
 
 impl AsyncWebsocketGeneralTransport {
@@ -80,37 +73,22 @@ impl AsyncWebsocketGeneralTransport {
         Ok(())
     }
 
-    pub(crate) fn stream(&self) -> WsStream<'_> {
-        WsStream { inner: self }
-    }
+    pub(crate) fn stream(&self) -> impl Stream<Item = Result<Bytes>> + '_ {
+        self.receiver
+            .lock()
+            .into_stream()
+            .then(|mut rec| async move {
+                let msg = rec.next().await.ok_or(Error::IncompletePacket())??;
+                if msg.is_binary() {
+                    let data = msg.into_data();
+                    let mut msg = BytesMut::with_capacity(data.len() + 1);
+                    msg.put_u8(PacketId::Message as u8);
+                    msg.put(data.as_ref());
 
-    pub(crate) async fn poll(&self) -> Result<Bytes> {
-        let mut receiver = self.receiver.lock().await;
-
-        let message = receiver.next().await.ok_or(Error::IncompletePacket())??;
-        if message.is_binary() {
-            let data = message.into_data();
-            let mut msg = BytesMut::with_capacity(data.len() + 1);
-            msg.put_u8(PacketId::Message as u8);
-            msg.put(data.as_ref());
-
-            Ok(msg.freeze())
-        } else {
-            Ok(Bytes::from(message.into_data()))
-        }
-    }
-}
-
-impl Stream for WsStream<'_> {
-    type Item = Result<Bytes>;
-
-    fn poll_next(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match ready!(Pin::new(&mut Box::pin(self.inner.poll())).poll(cx)) {
-            Ok(val) => Poll::Ready(Some(Ok(val))),
-            Err(err) => Poll::Ready(Some(Err(err))),
-        }
+                    Ok(msg.freeze())
+                } else {
+                    Ok(Bytes::from(msg.into_data()))
+                }
+            })
     }
 }

@@ -49,8 +49,7 @@ impl Transport for WebsocketTransport {
     fn poll(&self) -> Result<Bytes> {
         self.runtime.block_on(async {
             self.inner
-                .stream()
-                .await?
+                .stream()?
                 .next()
                 .await
                 .ok_or(Error::IncompletePacket())?

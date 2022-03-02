@@ -72,7 +72,7 @@ impl AsyncTransport for WebsocketSecureTransport {
         self.inner.emit(data, is_binary_att).await
     }
 
-    async fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>> {
+    fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>> {
         Ok(Box::pin(self.inner.stream()))
     }
 

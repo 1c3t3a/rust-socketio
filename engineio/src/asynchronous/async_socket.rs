@@ -1,6 +1,5 @@
 use std::{
     fmt::Debug,
-    pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -83,39 +82,32 @@ impl Socket {
 
     /// Creates a stream over the incoming packets, uses the streams provided by the
     /// underlying transport types.
-    pub(crate) async fn stream(
-        &self,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<Option<Packet>>> + '_>>> {
+    pub(crate) fn stream(&self) -> Result<impl Stream<Item = Result<Option<Packet>>> + '_> {
         if !self.connected.load(Ordering::Acquire) {
             return Err(Error::IllegalActionBeforeOpen());
         }
 
         // map the byte stream of the underlying transport
         // to a packet stream
-        let stream = self
-            .transport
-            .as_transport()
-            .stream()
-            .await?
-            .map(move |payload| {
-                // this generator is needed as Rust only allows one right_stream call per closure
-                let error_gen = |err| once(async { Err(err) }).right_stream();
+        let stream = self.transport.as_transport().stream()?.map(move |payload| {
+            // this generator is needed as Rust only allows one right_stream call per closure
+            let error_gen = |err| once(async { Err(err) }).right_stream();
 
-                if let Err(err) = payload {
-                    return error_gen(err);
-                }
+            if let Err(err) = payload {
+                return error_gen(err);
+            }
 
-                // SAFETY: checked is some above
-                let payload = Payload::try_from(payload.unwrap());
-                if let Err(err) = payload {
-                    return error_gen(err);
-                }
+            // SAFETY: checked is some above
+            let payload = Payload::try_from(payload.unwrap());
+            if let Err(err) = payload {
+                return error_gen(err);
+            }
 
-                // SAFETY: checked is some above
-                stream::iter(payload.unwrap().into_iter())
-                    .map(|val| Ok(Some(val)))
-                    .left_stream()
-            });
+            // SAFETY: checked is some above
+            stream::iter(payload.unwrap().into_iter())
+                .map(|val| Ok(Some(val)))
+                .left_stream()
+        });
 
         // Flatten stream of streams into stream
         let stream = stream.flatten();

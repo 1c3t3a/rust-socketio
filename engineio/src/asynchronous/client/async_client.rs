@@ -1,5 +1,3 @@
-use std::pin::Pin;
-
 use crate::{
     asynchronous::async_socket::Socket as InnerSocket, error::Result, Error, Packet, PacketId,
 };
@@ -33,8 +31,8 @@ impl Client {
     }
 
     #[doc(hidden)]
-    pub async fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Option<Packet>>> + '_>>> {
-        let stream = self.socket.stream().await?.then(|item| async {
+    pub fn stream(&self) -> Result<impl Stream<Item = Result<Option<Packet>>> + '_> {
+        let stream = self.socket.stream()?.then(|item| async {
             let packet = item?;
 
             if let Some(packet) = packet {
@@ -103,7 +101,7 @@ mod test {
 
         sut.connect().await?;
 
-        assert!(sut.stream().await?.next().await.unwrap().is_ok());
+        assert!(sut.stream()?.next().await.unwrap().is_ok());
 
         assert!(builder(Url::parse("fake://fake.fake").unwrap())
             .build_websocket()
@@ -154,7 +152,7 @@ mod test {
         socket.connect().await.unwrap();
 
         assert_eq!(
-            socket.stream().await?.next().await.unwrap()?,
+            socket.stream()?.next().await.unwrap()?,
             Some(Packet::new(PacketId::Message, "hello client"))
         );
 
@@ -163,7 +161,7 @@ mod test {
             .await?;
 
         assert_eq!(
-            socket.stream().await?.next().await.unwrap()?,
+            socket.stream()?.next().await.unwrap()?,
             Some(Packet::new(PacketId::Message, "Roger Roger"))
         );
 
@@ -180,7 +178,7 @@ mod test {
 
         // hello client
         assert!(matches!(
-            socket.stream().await?.next().await.unwrap()?,
+            socket.stream()?.next().await.unwrap()?,
             Some(Packet {
                 packet_id: PacketId::Message,
                 ..
@@ -188,7 +186,7 @@ mod test {
         ));
         // Ping
         assert!(matches!(
-            socket.stream().await?.next().await.unwrap()?,
+            socket.stream()?.next().await.unwrap()?,
             Some(Packet {
                 packet_id: PacketId::Ping,
                 ..

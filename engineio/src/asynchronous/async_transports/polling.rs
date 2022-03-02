@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
-use futures_util::{stream::once, FutureExt, Stream, StreamExt, TryStreamExt};
+use futures_util::{stream::once, FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use http::HeaderMap;
 use native_tls::TlsConnector;
 use reqwest::{Client, ClientBuilder};
@@ -81,19 +81,29 @@ impl AsyncTransport for PollingTransport {
         Ok(())
     }
 
-    async fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>> {
-        let address = self.address().await?;
-        let response = self.client.get(address).send();
-
-        let stream = response.into_stream().map(|resp| match resp {
-            Ok(val) => val.bytes_stream().left_stream(),
-            Err(err) => once(async { Err(err) }).right_stream(),
-        });
-
-        // Flatten stream of streams into one stream and map the error type
-        let stream = stream
-            .flatten()
-            .map_err(Error::IncompleteResponseFromReqwest);
+    fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>> {
+        let stream = self
+            .address()
+            .into_stream()
+            .map(|address| match address {
+                Ok(addr) => self
+                    .client
+                    .get(addr)
+                    .send()
+                    .map_err(Error::IncompleteResponseFromReqwest)
+                    .left_future(),
+                Err(err) => async { Err(err) }.right_future(),
+            })
+            .then(|resp| async {
+                match resp.await {
+                    Ok(val) => val
+                        .bytes_stream()
+                        .map_err(Error::IncompleteResponseFromReqwest)
+                        .left_stream(),
+                    Err(err) => once(async { Err(err) }).right_stream(),
+                }
+            })
+            .flatten();
 
         Ok(Box::pin(stream))
     }

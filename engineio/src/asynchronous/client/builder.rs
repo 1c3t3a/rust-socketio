@@ -121,8 +121,7 @@ impl ClientBuilder {
 
         let handshake: HandshakePacket = Packet::try_from(
             transport
-                .stream()
-                .await?
+                .stream()?
                 .next()
                 .await
                 .ok_or(Error::IncompletePacket())??,
