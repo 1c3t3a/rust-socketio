@@ -15,7 +15,7 @@ rust_engineio = { version = "0.3.0-alpha.3", path = "../engineio" }
 base64 = "0.13.0"
 bytes = "1"
 rand = "0.8.5"
-crossbeam-utils = "0.8.6"
+crossbeam-utils = "0.8.7"
 adler32 = "1.2.0"
 serde_json = "1.0"
 regex = "1.4.2"
