@@ -4,7 +4,7 @@ use crate::{error::Result, Error, Packet, PacketId};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{
     stream::{SplitSink, SplitStream},
-    SinkExt, StreamExt,
+    FutureExt, SinkExt, Stream, StreamExt,
 };
 use tokio::{net::TcpStream, sync::Mutex};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -73,19 +73,22 @@ impl AsyncWebsocketGeneralTransport {
         Ok(())
     }
 
-    pub(crate) async fn poll(&self) -> Result<Bytes> {
-        let mut receiver = self.receiver.lock().await;
+    pub(crate) fn stream(&self) -> impl Stream<Item = Result<Bytes>> + '_ {
+        self.receiver
+            .lock()
+            .into_stream()
+            .then(|mut rec| async move {
+                let msg = rec.next().await.ok_or(Error::IncompletePacket())??;
+                if msg.is_binary() {
+                    let data = msg.into_data();
+                    let mut msg = BytesMut::with_capacity(data.len() + 1);
+                    msg.put_u8(PacketId::Message as u8);
+                    msg.put(data.as_ref());
 
-        let message = receiver.next().await.ok_or(Error::IncompletePacket())??;
-        if message.is_binary() {
-            let data = message.into_data();
-            let mut msg = BytesMut::with_capacity(data.len() + 1);
-            msg.put_u8(PacketId::Message as u8);
-            msg.put(data.as_ref());
-
-            Ok(msg.freeze())
-        } else {
-            Ok(Bytes::from(message.into_data()))
-        }
+                    Ok(msg.freeze())
+                } else {
+                    Ok(Bytes::from(msg.into_data()))
+                }
+            })
     }
 }

@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
+use futures_util::{stream::once, FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use http::HeaderMap;
 use native_tls::TlsConnector;
 use reqwest::{Client, ClientBuilder};
-use std::sync::Arc;
+use std::{pin::Pin, sync::Arc};
 use tokio::sync::RwLock;
 use url::Url;
 
@@ -80,14 +81,31 @@ impl AsyncTransport for PollingTransport {
         Ok(())
     }
 
-    async fn poll(&self) -> Result<Bytes> {
-        Ok(self
-            .client
-            .get(self.address().await?)
-            .send()
-            .await?
-            .bytes()
-            .await?)
+    fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>> {
+        let stream = self
+            .address()
+            .into_stream()
+            .map(|address| match address {
+                Ok(addr) => self
+                    .client
+                    .get(addr)
+                    .send()
+                    .map_err(Error::IncompleteResponseFromReqwest)
+                    .left_future(),
+                Err(err) => async { Err(err) }.right_future(),
+            })
+            .then(|resp| async {
+                match resp.await {
+                    Ok(val) => val
+                        .bytes_stream()
+                        .map_err(Error::IncompleteResponseFromReqwest)
+                        .left_stream(),
+                    Err(err) => once(async { Err(err) }).right_stream(),
+                }
+            })
+            .flatten();
+
+        Ok(Box::pin(stream))
     }
 
     async fn base_url(&self) -> Result<Url> {

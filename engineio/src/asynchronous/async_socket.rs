@@ -7,11 +7,11 @@ use std::{
 };
 
 use bytes::Bytes;
-use tokio::{
-    runtime::Handle,
-    sync::{Mutex, RwLock},
-    time::Instant,
+use futures_util::{
+    stream::{self, once},
+    Stream, StreamExt,
 };
+use tokio::{runtime::Handle, sync::Mutex, time::Instant};
 
 use crate::{
     asynchronous::{callback::OptionalCallback, transport::AsyncTransportType},
@@ -33,8 +33,6 @@ pub struct Socket {
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     connection_data: Arc<HandshakePacket>,
-    /// Since we get packets in payloads it's possible to have a state where only some of the packets have been consumed.
-    remaining_packets: Arc<RwLock<Option<crate::packet::IntoIter>>>,
 }
 
 impl Socket {
@@ -59,7 +57,6 @@ impl Socket {
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
             connection_data: Arc::new(handshake),
-            remaining_packets: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -83,37 +80,38 @@ impl Socket {
         Ok(())
     }
 
-    /// Polls for next payload
-    pub(crate) async fn poll(&self) -> Result<Option<Packet>> {
-        loop {
-            if self.connected.load(Ordering::Acquire) {
-                if self.remaining_packets.read().await.is_some() {
-                    // SAFETY: checked is some above
-                    let mut iter = self.remaining_packets.write().await;
-                    let iter = iter.as_mut().unwrap();
-                    if let Some(packet) = iter.next() {
-                        return Ok(Some(packet));
-                    }
-                }
-
-                // Iterator has run out of packets, get a new payload
-                let data = self.transport.as_transport().poll().await?;
-
-                if data.is_empty() {
-                    continue;
-                }
-
-                let payload = Payload::try_from(data)?;
-                let mut iter = payload.into_iter();
-
-                if let Some(packet) = iter.next() {
-                    *self.remaining_packets.write().await = Some(iter);
-                    return Ok(Some(packet));
-                }
-            } else {
-                return Ok(None);
-            }
+    /// Creates a stream over the incoming packets, uses the streams provided by the
+    /// underlying transport types.
+    pub(crate) fn stream(&self) -> Result<impl Stream<Item = Result<Option<Packet>>> + '_> {
+        if !self.connected.load(Ordering::Acquire) {
+            return Err(Error::IllegalActionBeforeOpen());
         }
+
+        // map the byte stream of the underlying transport
+        // to a packet stream
+        let stream = self.transport.as_transport().stream()?.map(move |payload| {
+            // this generator is needed as Rust only allows one right_stream call per closure
+            let error_gen = |err| once(async { Err(err) }).right_stream();
+
+            if let Err(err) = payload {
+                return error_gen(err);
+            }
+
+            // SAFETY: checked is some above
+            let payload = Payload::try_from(payload.unwrap());
+            if let Err(err) = payload {
+                return error_gen(err);
+            }
+
+            // SAFETY: checked is some above
+            stream::iter(payload.unwrap().into_iter())
+                .map(|val| Ok(Some(val)))
+                .left_stream()
+        });
+
+        // Flatten stream of streams into stream
+        let stream = stream.flatten();
+        Ok(Box::pin(stream))
     }
 
     pub async fn disconnect(&self) -> Result<()> {
@@ -174,21 +172,21 @@ impl Socket {
         *self.last_ping.lock().await = Instant::now();
     }
 
-    pub(crate) async fn handle_packet(&self, packet: Packet) {
+    pub(crate) fn handle_packet(&self, packet: Packet) {
         if let Some(on_packet) = self.on_packet.as_ref() {
             let on_packet = on_packet.clone();
             self.handle.spawn(async move { on_packet(packet).await });
         }
     }
 
-    pub(crate) async fn handle_data(&self, data: Bytes) {
+    pub(crate) fn handle_data(&self, data: Bytes) {
         if let Some(on_data) = self.on_data.as_ref() {
             let on_data = on_data.clone();
             self.handle.spawn(async move { on_data(data).await });
         }
     }
 
-    pub(crate) async fn handle_close(&self) {
+    pub(crate) fn handle_close(&self) {
         if let Some(on_close) = self.on_close.as_ref() {
             let on_close = on_close.clone();
             self.handle.spawn(async move { on_close(()).await });
@@ -212,7 +210,6 @@ impl Debug for Socket {
             .field("last_ping", &self.last_ping)
             .field("last_pong", &self.last_pong)
             .field("connection_data", &self.connection_data)
-            .field("remaining_packets", &self.remaining_packets)
             .finish()
     }
 }

@@ -2,7 +2,8 @@ use crate::error::Result;
 use adler32::adler32;
 use async_trait::async_trait;
 use bytes::Bytes;
-use std::time::SystemTime;
+use futures_util::Stream;
+use std::{pin::Pin, time::SystemTime};
 use url::Url;
 
 use super::async_transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
@@ -13,10 +14,9 @@ pub trait AsyncTransport {
     /// socketio binary attachment via the boolean attribute `is_binary_att`.
     async fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()>;
 
-    /// Performs the server long polling procedure as long as the client is
-    /// connected. This should run separately at all time to ensure proper
-    /// response handling from the server.
-    async fn poll(&self) -> Result<Bytes>;
+    /// Returns a stream over the underlying incoming bytes.
+    /// Can't use
+    fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>>;
 
     /// Returns start of the url. ex. http://localhost:2998/engine.io/?EIO=4&transport=polling
     /// Must have EIO and transport already set.

@@ -91,7 +91,7 @@ impl ClientBuilder {
         self
     }
 
-    /// Registers a new callback for a certain [`socketio::event::Event`]. The event could either be
+    /// Registers a new callback for a certain [`crate::event::Event`]. The event could either be
     /// one of the common events like `message`, `error`, `connect`, `close` or a custom
     /// event defined by a string, e.g. `onPayment` or `foo`.
     ///

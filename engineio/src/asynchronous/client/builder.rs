@@ -11,7 +11,7 @@ use crate::{
     Error, Packet, ENGINE_IO_VERSION,
 };
 use bytes::Bytes;
-use futures_util::future::BoxFuture;
+use futures_util::{future::BoxFuture, StreamExt};
 use native_tls::TlsConnector;
 use url::Url;
 
@@ -119,7 +119,14 @@ impl ClientBuilder {
 
         let mut url = self.url.clone();
 
-        let handshake: HandshakePacket = Packet::try_from(transport.poll().await?)?.try_into()?;
+        let handshake: HandshakePacket = Packet::try_from(
+            transport
+                .stream()?
+                .next()
+                .await
+                .ok_or(Error::IncompletePacket())??,
+        )?
+        .try_into()?;
 
         // update the base_url with the new sid
         url.query_pairs_mut().append_pair("sid", &handshake.sid[..]);

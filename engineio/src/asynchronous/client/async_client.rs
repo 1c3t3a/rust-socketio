@@ -2,6 +2,7 @@ use crate::{
     asynchronous::async_socket::Socket as InnerSocket, error::Result, Error, Packet, PacketId,
 };
 use bytes::Bytes;
+use futures_util::{Stream, StreamExt};
 
 #[derive(Clone, Debug)]
 pub struct Client {
@@ -29,44 +30,48 @@ impl Client {
         self.socket.emit(packet).await
     }
 
-    /// Polls for next payload
     #[doc(hidden)]
-    pub async fn poll(&self) -> Result<Option<Packet>> {
-        let packet = self.socket.poll().await?;
-        if let Some(packet) = packet {
-            // check for the appropriate action or callback
-            self.socket.handle_packet(packet.clone()).await;
-            match packet.packet_id {
-                PacketId::MessageBinary => {
-                    self.socket.handle_data(packet.data.clone()).await;
+    pub fn stream(&self) -> Result<impl Stream<Item = Result<Option<Packet>>> + '_> {
+        let stream = self.socket.stream()?.then(|item| async {
+            let packet = item?;
+
+            if let Some(packet) = packet {
+                // check for the appropriate action or callback
+                self.socket.handle_packet(packet.clone());
+                match packet.packet_id {
+                    PacketId::MessageBinary => {
+                        self.socket.handle_data(packet.data.clone());
+                    }
+                    PacketId::Message => {
+                        self.socket.handle_data(packet.data.clone());
+                    }
+                    PacketId::Close => {
+                        self.socket.handle_close();
+                    }
+                    PacketId::Open => {
+                        unreachable!("Won't happen as we open the connection beforehand");
+                    }
+                    PacketId::Upgrade => {
+                        // this is already checked during the handshake, so just do nothing here
+                    }
+                    PacketId::Ping => {
+                        self.socket.pinged().await;
+                        self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
+                    }
+                    PacketId::Pong => {
+                        // this will never happen as the pong packet is
+                        // only sent by the client
+                        return Err(Error::InvalidPacket());
+                    }
+                    PacketId::Noop => (),
                 }
-                PacketId::Message => {
-                    self.socket.handle_data(packet.data.clone()).await;
-                }
-                PacketId::Close => {
-                    self.socket.handle_close().await;
-                }
-                PacketId::Open => {
-                    unreachable!("Won't happen as we open the connection beforehand");
-                }
-                PacketId::Upgrade => {
-                    // this is already checked during the handshake, so just do nothing here
-                }
-                PacketId::Ping => {
-                    self.socket.pinged().await;
-                    self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
-                }
-                PacketId::Pong => {
-                    // this will never happen as the pong packet is
-                    // only sent by the client
-                    return Err(Error::InvalidPacket());
-                }
-                PacketId::Noop => (),
+                Ok(Some(packet))
+            } else {
+                Ok(None)
             }
-            Ok(Some(packet))
-        } else {
-            Ok(None)
-        }
+        });
+
+        Ok(Box::pin(stream))
     }
 
     /// Check if the underlying transport client is connected.
@@ -80,6 +85,7 @@ mod test {
 
     use super::*;
     use crate::{asynchronous::ClientBuilder, header::HeaderMap, packet::PacketId, Error};
+    use futures_util::StreamExt;
     use native_tls::TlsConnector;
     use url::Url;
 
@@ -95,7 +101,7 @@ mod test {
 
         sut.connect().await?;
 
-        assert!(sut.poll().await.is_ok());
+        assert!(sut.stream()?.next().await.unwrap().is_ok());
 
         assert!(builder(Url::parse("fake://fake.fake").unwrap())
             .build_websocket()
@@ -146,7 +152,7 @@ mod test {
         socket.connect().await.unwrap();
 
         assert_eq!(
-            socket.poll().await?,
+            socket.stream()?.next().await.unwrap()?,
             Some(Packet::new(PacketId::Message, "hello client"))
         );
 
@@ -155,7 +161,7 @@ mod test {
             .await?;
 
         assert_eq!(
-            socket.poll().await?,
+            socket.stream()?.next().await.unwrap()?,
             Some(Packet::new(PacketId::Message, "Roger Roger"))
         );
 
@@ -172,7 +178,7 @@ mod test {
 
         // hello client
         assert!(matches!(
-            socket.poll().await?,
+            socket.stream()?.next().await.unwrap()?,
             Some(Packet {
                 packet_id: PacketId::Message,
                 ..
@@ -180,7 +186,7 @@ mod test {
         ));
         // Ping
         assert!(matches!(
-            socket.poll().await?,
+            socket.stream()?.next().await.unwrap()?,
             Some(Packet {
                 packet_id: PacketId::Ping,
                 ..
