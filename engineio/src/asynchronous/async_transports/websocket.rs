@@ -11,6 +11,7 @@ use futures_util::Stream;
 use http::HeaderMap;
 use tokio::sync::RwLock;
 use tokio_tungstenite::connect_async;
+use tungstenite::client::IntoClientRequest;
 use url::Url;
 
 use super::websocket_general::AsyncWebsocketGeneralTransport;
@@ -30,13 +31,13 @@ impl WebsocketTransport {
         url.query_pairs_mut().append_pair("transport", "websocket");
         url.set_scheme("ws").unwrap();
 
-        let mut req = http::Request::builder().uri(url.clone().as_str());
+        let mut req = url.clone().into_client_request()?;
         if let Some(map) = headers {
             // SAFETY: this unwrap never panics as the underlying request is just initialized and in proper state
-            req.headers_mut().unwrap().extend(map);
+            req.headers_mut().extend(map);
         }
 
-        let (ws_stream, _) = connect_async(req.body(())?).await?;
+        let (ws_stream, _) = connect_async(req).await?;
         let (sen, rec) = ws_stream.split();
 
         let inner = AsyncWebsocketGeneralTransport::new(sen, rec).await;

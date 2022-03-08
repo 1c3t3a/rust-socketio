@@ -13,6 +13,7 @@ use native_tls::TlsConnector;
 use tokio::sync::RwLock;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::Connector;
+use tungstenite::client::IntoClientRequest;
 use url::Url;
 
 use super::websocket_general::AsyncWebsocketGeneralTransport;
@@ -37,18 +38,14 @@ impl WebsocketSecureTransport {
         url.query_pairs_mut().append_pair("transport", "websocket");
         url.set_scheme("wss").unwrap();
 
-        let mut req = http::Request::builder().uri(url.clone().as_str());
+        let mut req = url.clone().into_client_request()?;
         if let Some(map) = headers {
             // SAFETY: this unwrap never panics as the underlying request is just initialized and in proper state
-            req.headers_mut().unwrap().extend(map);
+            req.headers_mut().extend(map);
         }
 
-        let (ws_stream, _) = connect_async_tls_with_config(
-            req.body(())?,
-            None,
-            tls_config.map(Connector::NativeTls),
-        )
-        .await?;
+        let (ws_stream, _) =
+            connect_async_tls_with_config(req, None, tls_config.map(Connector::NativeTls)).await?;
 
         let (sen, rec) = ws_stream.split();
         let inner = AsyncWebsocketGeneralTransport::new(sen, rec).await;
