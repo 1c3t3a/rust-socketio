@@ -36,7 +36,7 @@ pub struct Client {
     // namespace, for multiplexing messages
     nsp: String,
     // Data sent in opening header
-    auth: Option<String>,
+    auth: Option<serde_json::Value>,
 }
 
 impl Client {
@@ -48,7 +48,7 @@ impl Client {
         socket: InnerSocket,
         namespace: T,
         on: HashMap<Event, Callback>,
-        auth: Option<String>,
+        auth: Option<serde_json::Value>,
     ) -> Result<Self> {
         Ok(Client {
             socket,
@@ -66,15 +66,15 @@ impl Client {
         // Connect the underlying socket
         self.socket.connect()?;
 
+        let auth = match &self.auth {
+            None => None,
+            Some(data) => Some(data.to_string()),
+        };
+
+        println!("{:?}", auth);
+
         // construct the opening packet
-        let open_packet = Packet::new(
-            PacketId::Connect,
-            self.nsp.clone(),
-            self.auth.clone(),
-            None,
-            0,
-            None,
-        );
+        let open_packet = Packet::new(PacketId::Connect, self.nsp.clone(), auth, None, 0, None);
 
         self.socket.send(open_packet)?;
 
@@ -540,7 +540,7 @@ mod test {
         let url = crate::test::socket_io_auth_server();
         let socket = ClientBuilder::new(url)
             .namespace("/admin")
-            .auth(json!({ "password": "123" }).to_string())
+            .auth(json!({ "password": "123" }))
             .connect()?;
 
         let (tx, rx) = mpsc::sync_channel(0);
@@ -552,13 +552,10 @@ mod test {
                 Duration::from_secs(1),
                 move |payload, _| {
                     println!("Got ack");
-                    tx.send(Payload::String(json!(["456"]).to_string()) == payload)
-                        .unwrap();
+                    tx.send(Payload::from(json!(["456"])) == payload).unwrap();
                 }
             )
             .is_ok());
-
-        sleep(Duration::from_secs(2));
 
         let received = rx.recv();
         assert!(received.is_ok() && received.unwrap());

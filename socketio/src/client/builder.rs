@@ -36,7 +36,7 @@ pub struct ClientBuilder {
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
-    auth: Option<String>,
+    auth: Option<serde_json::Value>,
 }
 
 impl ClientBuilder {
@@ -182,14 +182,16 @@ impl ClientBuilder {
     ///
     /// let socket = ClientBuilder::new("http://localhost:4204/")
     ///     .namespace("/admin")
-    ///     .auth(json!({ "password": "1337" }).to_string())
+    ///     .auth(json!({ "password": "1337" }))
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
     ///     .connect();
     ///
     /// ```
-    pub fn auth<T: Into<String>>(mut self, auth: T) -> Self {
-        self.auth = Some(auth.into());
-
+    pub fn auth<T: TryInto<serde_json::Value>>(mut self, auth: T) -> Self {
+        self.auth = match auth.try_into() {
+            Ok(value) => Some(value),
+            Err(_) => None,
+        };
         self
     }
 
