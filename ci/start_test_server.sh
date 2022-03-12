@@ -23,6 +23,14 @@ if [ $status -ne 0 ]; then
 fi
 echo "Successfully started socket.io instance"
 
+DEBUG=* node socket-io-auth.js &
+status=$?
+if [ $status -ne 0 ]; then
+  echo "Failed to start socket.io auth: $status"
+  exit $status
+fi
+echo "Successfully started socket.io auth instance"
+
 DEBUG=* node engine-io-secure.js &
 status=$?
 if [ $status -ne 0 ]; then

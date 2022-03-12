@@ -400,7 +400,7 @@ impl<'a> Iterator for Iter<'a> {
 
 #[cfg(test)]
 mod test {
-
+    use std::sync::mpsc;
     use std::thread::sleep;
 
     use super::*;
@@ -533,6 +533,37 @@ mod test {
             .is_ok());
 
         test_socketio_socket(socket, "/admin".to_owned())
+    }
+
+    #[test]
+    fn socket_io_auth_builder_integration() -> Result<()> {
+        let url = crate::test::socket_io_auth_server();
+        let socket = ClientBuilder::new(url)
+            .namespace("/admin")
+            .auth(json!({ "password": "123" }).to_string())
+            .connect()?;
+
+        let (tx, rx) = mpsc::sync_channel(0);
+
+        assert!(socket
+            .emit_with_ack(
+                "test",
+                json!({ "msg": "1" }),
+                Duration::from_secs(1),
+                move |payload, _| {
+                    println!("Got ack");
+                    tx.send(Payload::String(json!(["456"]).to_string()) == payload)
+                        .unwrap();
+                }
+            )
+            .is_ok());
+
+        sleep(Duration::from_secs(2));
+
+        let received = rx.recv();
+        assert!(received.is_ok() && received.unwrap());
+
+        Ok(())
     }
 
     #[test]
