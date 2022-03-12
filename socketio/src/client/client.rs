@@ -545,6 +545,8 @@ mod test {
 
         let (tx, rx) = mpsc::sync_channel(0);
 
+        sleep(Duration::from_secs(1));
+
         assert!(socket
             .emit_with_ack(
                 "test",
