@@ -14,5 +14,5 @@ var callback = client => {
 };
 io.on('connection', callback);
 io.of('/admin').on('connection', callback);
-// the socket.io client runs on port 4201
+// the socket.io client runs on port 4204
 server.listen(4204);
