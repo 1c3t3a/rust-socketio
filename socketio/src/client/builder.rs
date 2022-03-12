@@ -36,6 +36,7 @@ pub struct ClientBuilder {
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
+    auth: Option<String>,
 }
 
 impl ClientBuilder {
@@ -77,6 +78,7 @@ impl ClientBuilder {
             tls_config: None,
             opening_headers: None,
             transport_type: TransportType::Any,
+            auth: None,
         }
     }
 
@@ -172,6 +174,13 @@ impl ClientBuilder {
         self
     }
 
+    //TODO: add documentation
+    pub fn auth<T: Into<String>>(mut self, auth: T) -> Self {
+        self.auth = Some(auth.into());
+
+        self
+    }
+
     /// Specifies which EngineIO [`TransportType`] to use.
     /// # Example
     /// ```rust
@@ -261,7 +270,7 @@ impl ClientBuilder {
 
         let inner_socket = InnerSocket::new(engine_client)?;
 
-        let socket = Client::new(inner_socket, &self.namespace, self.on)?;
+        let socket = Client::new(inner_socket, &self.namespace, self.on, self.auth)?;
         socket.connect()?;
 
         Ok(socket)

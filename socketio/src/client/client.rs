@@ -35,6 +35,8 @@ pub struct Client {
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
     // namespace, for multiplexing messages
     nsp: String,
+    // Data sent in opening header
+    auth: Option<String>,
 }
 
 impl Client {
@@ -46,12 +48,14 @@ impl Client {
         socket: InnerSocket,
         namespace: T,
         on: HashMap<Event, Callback>,
+        auth: Option<String>,
     ) -> Result<Self> {
         Ok(Client {
             socket,
             nsp: namespace.into(),
             on: Arc::new(RwLock::new(on)),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
+            auth,
         })
     }
 
@@ -63,7 +67,14 @@ impl Client {
         self.socket.connect()?;
 
         // construct the opening packet
-        let open_packet = Packet::new(PacketId::Connect, self.nsp.clone(), None, None, 0, None);
+        let open_packet = Packet::new(
+            PacketId::Connect,
+            self.nsp.clone(),
+            self.auth.clone(),
+            None,
+            0,
+            None,
+        );
 
         self.socket.send(open_packet)?;
 
