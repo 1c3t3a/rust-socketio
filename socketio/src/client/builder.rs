@@ -174,7 +174,19 @@ impl ClientBuilder {
         self
     }
 
-    //TODO: add documentation
+    /// Sets data sent in the opening request.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{ClientBuilder};
+    /// use serde_json::json;
+    ///
+    /// let socket = ClientBuilder::new("http://localhost:4204/")
+    ///     .namespace("/admin")
+    ///     .auth(json!({ "password": "1337" }).to_string())
+    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    ///     .connect();
+    ///
+    /// ```
     pub fn auth<T: Into<String>>(mut self, auth: T) -> Self {
         self.auth = Some(auth.into());
 
