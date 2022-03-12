@@ -66,10 +66,7 @@ impl Client {
         // Connect the underlying socket
         self.socket.connect()?;
 
-        let auth = match &self.auth {
-            None => None,
-            Some(data) => Some(data.to_string()),
-        };
+        let auth = self.auth.as_ref().map(|data| data.to_string());
 
         println!("{:?}", auth);
 

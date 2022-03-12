@@ -184,14 +184,13 @@ impl ClientBuilder {
     ///     .namespace("/admin")
     ///     .auth(json!({ "password": "1337" }))
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
-    ///     .connect();
+    ///     .connect()
+    ///     .expect("Connection error");
     ///
     /// ```
-    pub fn auth<T: TryInto<serde_json::Value>>(mut self, auth: T) -> Self {
-        self.auth = match auth.try_into() {
-            Ok(value) => Some(value),
-            Err(_) => None,
-        };
+    pub fn auth<T: Into<serde_json::Value>>(mut self, auth: T) -> Self {
+        self.auth = Some(auth.into());
+
         self
     }
 
