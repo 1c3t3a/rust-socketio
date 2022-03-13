@@ -68,8 +68,6 @@ impl Client {
 
         let auth = self.auth.as_ref().map(|data| data.to_string());
 
-        println!("{:?}", auth);
-
         // construct the opening packet
         let open_packet = Packet::new(PacketId::Connect, self.nsp.clone(), auth, None, 0, None);
 
@@ -542,6 +540,7 @@ mod test {
 
         let (tx, rx) = mpsc::sync_channel(0);
 
+        // Send emit with ack after 1s, so socketio server has enough time to register it's listeners
         sleep(Duration::from_secs(1));
 
         assert!(socket
