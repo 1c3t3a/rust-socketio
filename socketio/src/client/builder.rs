@@ -36,6 +36,7 @@ pub struct ClientBuilder {
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
+    auth: Option<serde_json::Value>,
 }
 
 impl ClientBuilder {
@@ -77,6 +78,7 @@ impl ClientBuilder {
             tls_config: None,
             opening_headers: None,
             transport_type: TransportType::Any,
+            auth: None,
         }
     }
 
@@ -172,6 +174,26 @@ impl ClientBuilder {
         self
     }
 
+    /// Sets data sent in the opening request.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{ClientBuilder};
+    /// use serde_json::json;
+    ///
+    /// let socket = ClientBuilder::new("http://localhost:4204/")
+    ///     .namespace("/admin")
+    ///     .auth(json!({ "password": "1337" }))
+    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    ///     .connect()
+    ///     .expect("Connection error");
+    ///
+    /// ```
+    pub fn auth<T: Into<serde_json::Value>>(mut self, auth: T) -> Self {
+        self.auth = Some(auth.into());
+
+        self
+    }
+
     /// Specifies which EngineIO [`TransportType`] to use.
     /// # Example
     /// ```rust
@@ -261,7 +283,7 @@ impl ClientBuilder {
 
         let inner_socket = InnerSocket::new(engine_client)?;
 
-        let socket = Client::new(inner_socket, &self.namespace, self.on)?;
+        let socket = Client::new(inner_socket, &self.namespace, self.on, self.auth)?;
         socket.connect()?;
 
         Ok(socket)

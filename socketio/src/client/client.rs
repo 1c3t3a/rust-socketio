@@ -35,6 +35,8 @@ pub struct Client {
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
     // namespace, for multiplexing messages
     nsp: String,
+    // Data sent in opening header
+    auth: Option<serde_json::Value>,
 }
 
 impl Client {
@@ -46,12 +48,14 @@ impl Client {
         socket: InnerSocket,
         namespace: T,
         on: HashMap<Event, Callback>,
+        auth: Option<serde_json::Value>,
     ) -> Result<Self> {
         Ok(Client {
             socket,
             nsp: namespace.into(),
             on: Arc::new(RwLock::new(on)),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
+            auth,
         })
     }
 
@@ -62,8 +66,10 @@ impl Client {
         // Connect the underlying socket
         self.socket.connect()?;
 
+        let auth = self.auth.as_ref().map(|data| data.to_string());
+
         // construct the opening packet
-        let open_packet = Packet::new(PacketId::Connect, self.nsp.clone(), None, None, 0, None);
+        let open_packet = Packet::new(PacketId::Connect, self.nsp.clone(), auth, None, 0, None);
 
         self.socket.send(open_packet)?;
 
@@ -389,7 +395,7 @@ impl<'a> Iterator for Iter<'a> {
 
 #[cfg(test)]
 mod test {
-
+    use std::sync::mpsc;
     use std::thread::sleep;
 
     use super::*;
@@ -522,6 +528,37 @@ mod test {
             .is_ok());
 
         test_socketio_socket(socket, "/admin".to_owned())
+    }
+
+    #[test]
+    fn socket_io_auth_builder_integration() -> Result<()> {
+        let url = crate::test::socket_io_auth_server();
+        let socket = ClientBuilder::new(url)
+            .namespace("/admin")
+            .auth(json!({ "password": "123" }))
+            .connect()?;
+
+        let (tx, rx) = mpsc::sync_channel(0);
+
+        // Send emit with ack after 1s, so socketio server has enough time to register it's listeners
+        sleep(Duration::from_secs(1));
+
+        assert!(socket
+            .emit_with_ack(
+                "test",
+                json!({ "msg": "1" }),
+                Duration::from_secs(1),
+                move |payload, _| {
+                    println!("Got ack");
+                    tx.send(Payload::from(json!(["456"])) == payload).unwrap();
+                }
+            )
+            .is_ok());
+
+        let received = rx.recv();
+        assert!(received.is_ok() && received.unwrap());
+
+        Ok(())
     }
 
     #[test]
