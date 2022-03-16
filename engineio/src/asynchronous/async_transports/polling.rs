@@ -1,9 +1,10 @@
+use async_stream::try_stream;
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
-use futures_util::{stream::once, FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures_util::Stream;
 use http::HeaderMap;
 use native_tls::TlsConnector;
-use reqwest::{Client, ClientBuilder};
+use reqwest::{Client, ClientBuilder, Response};
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::RwLock;
 use url::Url;
@@ -46,6 +47,17 @@ impl PollingTransport {
             base_url: Arc::new(RwLock::new(url)),
         }
     }
+
+    fn send_request(&self) -> impl Stream<Item = Result<Response>> + '_ {
+        try_stream! {
+            let address = self.address().await;
+
+            yield self
+                .client
+                .get(address?)
+                .send().await?
+        }
+    }
 }
 
 #[async_trait]
@@ -81,31 +93,29 @@ impl AsyncTransport for PollingTransport {
         Ok(())
     }
 
-    fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>> {
-        let stream = self
-            .address()
-            .into_stream()
-            .map(|address| match address {
-                Ok(addr) => self
-                    .client
-                    .get(addr)
-                    .send()
-                    .map_err(Error::IncompleteResponseFromReqwest)
-                    .left_future(),
-                Err(err) => async { Err(err) }.right_future(),
-            })
-            .then(|resp| async {
-                match resp.await {
-                    Ok(val) => val
-                        .bytes_stream()
-                        .map_err(Error::IncompleteResponseFromReqwest)
-                        .left_stream(),
-                    Err(err) => once(async { Err(err) }).right_stream(),
-                }
-            })
-            .flatten();
+    fn stream(&self) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>> {
+        Box::pin(try_stream! {
+            // always send the long polling request until the transport is shut down
 
-        Ok(Box::pin(stream))
+            // TODO: Investigate a way to stop this. From my understanding this generator
+            // lives on the heap (as it's boxed) and always sends long polling
+            // requests. In the current version of the crate it is possible to create a stream
+            // using an `&self` of client, which would mean that we potentially end up with multiple
+            // of these generators on the heap. That is not what we want.
+            // A potential solution would be to wrap the client (also helpful for websockets) and make
+            // sure to call the "poll" request only on the same object over and over again. In that
+            // case the underlying object would have information about whether the connection is shut down
+            // or not.
+            // This stream never returns `None` and hence never indicates an end.
+            loop {
+                for await elem in self.send_request() {
+                    for await bytes in elem?.bytes_stream() {
+                        yield bytes?;
+                    }
+                }
+
+            }
+        })
     }
 
     async fn base_url(&self) -> Result<Url> {

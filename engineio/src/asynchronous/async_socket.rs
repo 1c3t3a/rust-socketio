@@ -6,11 +6,9 @@ use std::{
     },
 };
 
+use async_stream::try_stream;
 use bytes::Bytes;
-use futures_util::{
-    stream::{self, once},
-    Stream, StreamExt,
-};
+use futures_util::Stream;
 use tokio::{runtime::Handle, sync::Mutex, time::Instant};
 
 use crate::{
@@ -80,38 +78,33 @@ impl Socket {
         Ok(())
     }
 
+    /// Helper method that parses bytes and returns an iterator over the elements.
+    fn parse_payload(bytes: Bytes) -> impl Stream<Item = Result<Packet>> {
+        try_stream! {
+            let payload = Payload::try_from(bytes);
+
+            for elem in payload?.into_iter() {
+                yield elem;
+            }
+        }
+    }
+
     /// Creates a stream over the incoming packets, uses the streams provided by the
     /// underlying transport types.
-    pub(crate) fn stream(&self) -> Result<impl Stream<Item = Result<Option<Packet>>> + '_> {
+    pub(crate) fn stream(&self) -> Result<impl Stream<Item = Result<Packet>> + '_> {
         if !self.connected.load(Ordering::Acquire) {
             return Err(Error::IllegalActionBeforeOpen());
         }
 
         // map the byte stream of the underlying transport
         // to a packet stream
-        let stream = self.transport.as_transport().stream()?.map(move |payload| {
-            // this generator is needed as Rust only allows one right_stream call per closure
-            let error_gen = |err| once(async { Err(err) }).right_stream();
-
-            if let Err(err) = payload {
-                return error_gen(err);
+        Ok(Box::pin(try_stream! {
+            for await payload in self.transport.as_transport().stream() {
+                for await packet in Self::parse_payload(payload?) {
+                    yield packet?;
+                }
             }
-
-            // SAFETY: checked is some above
-            let payload = Payload::try_from(payload.unwrap());
-            if let Err(err) = payload {
-                return error_gen(err);
-            }
-
-            // SAFETY: checked is some above
-            stream::iter(payload.unwrap().into_iter())
-                .map(|val| Ok(Some(val)))
-                .left_stream()
-        });
-
-        // Flatten stream of streams into stream
-        let stream = stream.flatten();
-        Ok(Box::pin(stream))
+        }))
     }
 
     pub async fn disconnect(&self) -> Result<()> {

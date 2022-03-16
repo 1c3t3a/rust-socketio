@@ -16,7 +16,7 @@ pub trait AsyncTransport {
 
     /// Returns a stream over the underlying incoming bytes.
     /// Can't use
-    fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>>;
+    fn stream(&self) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>;
 
     /// Returns start of the url. ex. http://localhost:2998/engine.io/?EIO=4&transport=polling
     /// Must have EIO and transport already set.
