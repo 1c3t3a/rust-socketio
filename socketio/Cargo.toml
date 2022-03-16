@@ -23,6 +23,17 @@ byte = "0.2.4"
 thiserror = "1.0"
 native-tls = "0.2.10"
 url = "2.2.2"
+tokio = { version = "1.16.1", optional = true }
+futures-util = { version = "0.3", default-features = false, features = ["sink"], optional = true }
+async-stream = { version = "0.3.3", optional = true }
 
 [dev-dependencies]
 cargo-tarpaulin = "0.18.5"
+
+[dev-dependencies.tokio]
+# we need the `#[tokio::test]` macro
+features = ["macros"]
+
+[features]
+default = ["async"]
+async = ["rust_engineio/async", "tokio", "futures-util", "async-stream"]

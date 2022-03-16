@@ -1399,17 +1399,20 @@ name = "rust_socketio"
 version = "0.3.1"
 dependencies = [
  "adler32",
+ "async-stream",
  "base64",
  "byte",
  "bytes",
  "cargo-tarpaulin",
  "crossbeam-utils",
+ "futures-util",
  "native-tls",
  "rand",
  "regex",
  "rust_engineio",
  "serde_json",
  "thiserror",
+ "tokio",
  "url",
 ]
 

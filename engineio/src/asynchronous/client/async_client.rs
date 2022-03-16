@@ -56,7 +56,7 @@ impl Client {
     }
 
     /// Check if the underlying transport client is connected.
-    pub fn is_connected(&self) -> Result<bool> {
+    pub fn is_connected(&self) -> bool {
         self.socket.is_connected()
     }
 }
@@ -200,7 +200,7 @@ mod test {
 
         socket.disconnect().await?;
 
-        assert!(!socket.is_connected()?);
+        assert!(!socket.is_connected());
 
         Ok(())
     }
