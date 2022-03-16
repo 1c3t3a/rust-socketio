@@ -97,6 +97,12 @@ pub(self) mod socket;
 /// crate.
 pub mod error;
 
+#[cfg(feature = "async")]
+/// Asynchronous version of the socket.io client. This module contains the async
+/// [`crate::asynchronous::Client`] as well as a builder
+/// ([`crate::asynchronous::ClientBuilder`]) that allows for configuring a client.
+pub mod asynchronous;
+
 pub use error::Error;
 
 pub use {event::Event, payload::Payload};
