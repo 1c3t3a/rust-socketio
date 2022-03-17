@@ -570,6 +570,7 @@ mod test {
             })
             .connect()?;
 
+        // Sleep to give server enough time to send 2 events
         sleep(Duration::from_secs(2));
 
         let event = rx.recv().unwrap();
