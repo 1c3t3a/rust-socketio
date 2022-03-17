@@ -251,8 +251,13 @@ impl Client {
         if let Some(callback) = lock.get_mut(event) {
             callback(payload.clone(), self.clone());
         }
-        if let Some(callback) = on_any_lock {
-            callback(event.clone(), payload, self.clone())
+        match event.clone() {
+            Event::Message | Event::Custom(_) => {
+                if let Some(callback) = on_any_lock {
+                    callback(event.clone(), payload, self.clone())
+                }
+            }
+            _ => {}
         }
         drop(on);
         Ok(())
