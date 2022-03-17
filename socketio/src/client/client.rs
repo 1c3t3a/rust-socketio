@@ -260,6 +260,7 @@ impl Client {
             _ => {}
         }
         drop(on);
+        drop(on_any);
         Ok(())
     }
 
@@ -412,6 +413,7 @@ impl<'a> Iterator for Iter<'a> {
 
 #[cfg(test)]
 mod test {
+    use std::sync::mpsc;
     use std::thread::sleep;
 
     use super::*;
@@ -549,22 +551,31 @@ mod test {
     #[test]
     fn socket_io_on_any_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
+
+        let (tx, rx) = mpsc::sync_channel(1);
+
         let _socket = ClientBuilder::new(url)
             .namespace("/")
             .auth(json!({ "password": "123" }))
             .on("auth", |payload, _client| {
                 if let Payload::String(msg) = payload {
-                    println!("{}", msg)
+                    println!("{}", msg);
                 }
             })
-            .on_any(|event, payload, _client| {
+            .on_any(move |event, payload, _client| {
                 if let Payload::String(str) = payload {
-                    println!("{} {}", String::from(event), str);
+                    println!("{} {}", String::from(event.clone()), str);
                 }
+                tx.send(String::from(event)).unwrap();
             })
             .connect()?;
 
-        sleep(Duration::from_secs(10));
+        sleep(Duration::from_secs(2));
+
+        let event = rx.recv().unwrap();
+        assert_eq!(event, "message");
+        let event = rx.recv().unwrap();
+        assert_eq!(event, "test");
 
         Ok(())
     }
