@@ -395,7 +395,6 @@ impl<'a> Iterator for Iter<'a> {
 
 #[cfg(test)]
 mod test {
-    use std::sync::mpsc;
     use std::thread::sleep;
 
     use super::*;
@@ -533,30 +532,33 @@ mod test {
     #[test]
     fn socket_io_auth_builder_integration() -> Result<()> {
         let url = crate::test::socket_io_auth_server();
+        let nsp = String::from("/admin");
         let socket = ClientBuilder::new(url)
-            .namespace("/admin")
+            .namespace(nsp.clone())
             .auth(json!({ "password": "123" }))
-            .connect()?;
+            .connect_manual()?;
 
-        let (tx, rx) = mpsc::sync_channel(0);
+        let mut iter = socket
+            .iter()
+            .map(|packet| packet.unwrap())
+            .filter(|packet| packet.packet_type != PacketId::Connect);
 
-        // Send emit with ack after 1s, so socketio server has enough time to register it's listeners
-        sleep(Duration::from_secs(1));
+        let packet: Option<Packet> = iter.next();
+        assert!(packet.is_some());
 
-        assert!(socket
-            .emit_with_ack(
-                "test",
-                json!({ "msg": "1" }),
-                Duration::from_secs(1),
-                move |payload, _| {
-                    println!("Got ack");
-                    tx.send(Payload::from(json!(["456"])) == payload).unwrap();
-                }
+        let packet = packet.unwrap();
+
+        assert_eq!(
+            packet,
+            Packet::new(
+                PacketId::Event,
+                nsp.clone(),
+                Some("[\"auth\",\"success\"]".to_owned()),
+                None,
+                0,
+                None
             )
-            .is_ok());
-
-        let received = rx.recv();
-        assert!(received.is_ok() && received.unwrap());
+        );
 
         Ok(())
     }
