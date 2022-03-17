@@ -125,6 +125,22 @@ impl ClientBuilder {
         self
     }
 
+    /// Registers a Callback for all [`crate::event::Event::Custom`] and [`crate::event::Event::Message`].
+    ///
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{ClientBuilder, Payload};
+    ///
+    /// let client = ClientBuilder::new("http://localhost:4200/")
+    ///     .namespace("/admin")
+    ///     .on_any(|event, payload, _client| {
+    ///         if let Payload::String(str) = payload {
+    ///           println!("{} {}", String::from(event), str);
+    ///         }
+    ///     })
+    ///     .connect();
+    ///
+    /// ```
     pub fn on_any<F>(mut self, callback: F) -> Self
     where
         F: for<'a> FnMut(Event, Payload, Client) + 'static + Sync + Send,
