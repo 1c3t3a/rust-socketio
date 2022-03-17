@@ -6,6 +6,7 @@ use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
 use rust_engineio::header::{HeaderMap, HeaderValue};
 use url::Url;
 
+use crate::client::callback::{SocketAnyCallback, SocketCallback};
 use crate::error::{Error, Result};
 use std::collections::HashMap;
 use std::thread;
@@ -31,7 +32,8 @@ pub enum TransportType {
 /// acts the `build` method and returns a connected [`Client`].
 pub struct ClientBuilder {
     address: String,
-    on: HashMap<Event, Callback>,
+    on: HashMap<Event, Callback<SocketCallback>>,
+    on_any: Option<Callback<SocketAnyCallback>>,
     namespace: String,
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
@@ -74,6 +76,7 @@ impl ClientBuilder {
         Self {
             address: address.into(),
             on: HashMap::new(),
+            on_any: None,
             namespace: "/".to_owned(),
             tls_config: None,
             opening_headers: None,
@@ -117,7 +120,16 @@ impl ClientBuilder {
     where
         F: for<'a> FnMut(Payload, Client) + 'static + Sync + Send,
     {
-        self.on.insert(event.into(), Callback::new(callback));
+        self.on
+            .insert(event.into(), Callback::<SocketCallback>::new(callback));
+        self
+    }
+
+    pub fn on_any<F>(mut self, callback: F) -> Self
+    where
+        F: for<'a> FnMut(Event, Payload, Client) + 'static + Sync + Send,
+    {
+        self.on_any = Some(Callback::<SocketAnyCallback>::new(callback));
         self
     }
 
@@ -283,7 +295,13 @@ impl ClientBuilder {
 
         let inner_socket = InnerSocket::new(engine_client)?;
 
-        let socket = Client::new(inner_socket, &self.namespace, self.on, self.auth)?;
+        let socket = Client::new(
+            inner_socket,
+            &self.namespace,
+            self.on,
+            self.on_any,
+            self.auth,
+        )?;
         socket.connect()?;
 
         Ok(socket)

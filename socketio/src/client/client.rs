@@ -3,6 +3,7 @@ use super::callback::Callback;
 use crate::packet::{Packet, PacketId};
 use rand::{thread_rng, Rng};
 
+use crate::client::callback::{SocketAnyCallback, SocketCallback};
 use crate::error::Result;
 use std::collections::HashMap;
 use std::ops::DerefMut;
@@ -21,7 +22,7 @@ pub struct Ack {
     pub id: i32,
     timeout: Duration,
     time_started: Instant,
-    callback: Callback,
+    callback: Callback<SocketCallback>,
 }
 
 /// A socket which handles communication with the server. It's initialized with
@@ -31,7 +32,8 @@ pub struct Ack {
 pub struct Client {
     /// The inner socket client to delegate the methods to.
     socket: InnerSocket,
-    on: Arc<RwLock<HashMap<Event, Callback>>>,
+    on: Arc<RwLock<HashMap<Event, Callback<SocketCallback>>>>,
+    on_any: Arc<RwLock<Option<Callback<SocketAnyCallback>>>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
     // namespace, for multiplexing messages
     nsp: String,
@@ -47,13 +49,15 @@ impl Client {
     pub(crate) fn new<T: Into<String>>(
         socket: InnerSocket,
         namespace: T,
-        on: HashMap<Event, Callback>,
+        on: HashMap<Event, Callback<SocketCallback>>,
+        on_any: Option<Callback<SocketAnyCallback>>,
         auth: Option<serde_json::Value>,
     ) -> Result<Self> {
         Ok(Client {
             socket,
             nsp: namespace.into(),
             on: Arc::new(RwLock::new(on)),
+            on_any: Arc::new(RwLock::new(on_any)),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
             auth,
         })
@@ -202,7 +206,7 @@ impl Client {
             id,
             time_started: Instant::now(),
             timeout,
-            callback: Callback::new(callback),
+            callback: Callback::<SocketCallback>::new(callback),
         };
 
         // add the ack to the tuple of outstanding acks
@@ -238,9 +242,17 @@ impl Client {
 
     fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {
         let mut on = self.on.write()?;
+        let mut on_any = self.on_any.write()?;
         let lock = on.deref_mut();
+        let on_any_lock = on_any.deref_mut();
+
+        let payload = payload.into();
+
         if let Some(callback) = lock.get_mut(event) {
-            callback(payload.into(), self.clone());
+            callback(payload.clone(), self.clone());
+        }
+        if let Some(callback) = on_any_lock {
+            callback(event.clone(), payload, self.clone())
         }
         drop(on);
         Ok(())
@@ -527,6 +539,29 @@ mod test {
             .is_ok());
 
         test_socketio_socket(socket, "/admin".to_owned())
+    }
+
+    #[test]
+    fn socket_io_on_any_test() -> Result<()> {
+        let url = crate::test::socket_io_server();
+        let _socket = ClientBuilder::new(url)
+            .namespace("/")
+            .auth(json!({ "password": "123" }))
+            .on("auth", |payload, _client| {
+                if let Payload::String(msg) = payload {
+                    println!("{}", msg)
+                }
+            })
+            .on_any(|event, payload, _client| {
+                if let Payload::String(str) = payload {
+                    println!("{} {}", String::from(event), str);
+                }
+            })
+            .connect()?;
+
+        sleep(Duration::from_secs(10));
+
+        Ok(())
     }
 
     #[test]

@@ -4,21 +4,25 @@ use std::{
 };
 
 use super::Client;
-use crate::Payload;
+use crate::{Event, Payload};
 
-type InnerCallback = Box<dyn for<'a> FnMut(Payload, Client) + 'static + Sync + Send>;
+pub(crate) type SocketCallback = Box<dyn for<'a> FnMut(Payload, Client) + 'static + Sync + Send>;
+pub(crate) type SocketAnyCallback =
+    Box<dyn for<'a> FnMut(Event, Payload, Client) + 'static + Sync + Send>;
 
-pub(crate) struct Callback {
-    inner: InnerCallback,
+pub(crate) struct Callback<T> {
+    inner: T,
 }
 
-impl Debug for Callback {
+// SocketCallback implementations
+
+impl Debug for Callback<SocketCallback> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Callback")
     }
 }
 
-impl Deref for Callback {
+impl Deref for Callback<SocketCallback> {
     type Target = dyn for<'a> FnMut(Payload, Client) + 'static + Sync + Send;
 
     fn deref(&self) -> &Self::Target {
@@ -26,16 +30,49 @@ impl Deref for Callback {
     }
 }
 
-impl DerefMut for Callback {
+impl DerefMut for Callback<SocketCallback> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner.as_mut()
     }
 }
 
-impl Callback {
+impl Callback<SocketCallback> {
     pub(crate) fn new<T>(callback: T) -> Self
     where
         T: for<'a> FnMut(Payload, Client) + 'static + Sync + Send,
+    {
+        Callback {
+            inner: Box::new(callback),
+        }
+    }
+}
+
+// SocketAnyCallback implementations
+
+impl Debug for Callback<SocketAnyCallback> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Callback")
+    }
+}
+
+impl Deref for Callback<SocketAnyCallback> {
+    type Target = dyn for<'a> FnMut(Event, Payload, Client) + 'static + Sync + Send;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_ref()
+    }
+}
+
+impl DerefMut for Callback<SocketAnyCallback> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner.as_mut()
+    }
+}
+
+impl Callback<SocketAnyCallback> {
+    pub(crate) fn new<T>(callback: T) -> Self
+    where
+        T: for<'a> FnMut(Event, Payload, Client) + 'static + Sync + Send,
     {
         Callback {
             inner: Box::new(callback),
