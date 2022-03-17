@@ -547,7 +547,7 @@ mod test {
     }
 
     #[test]
-    fn socket_io_on_any_test() -> Result<()> {
+    fn socket_io_on_any_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
         let _socket = ClientBuilder::new(url)
             .namespace("/")
