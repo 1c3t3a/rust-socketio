@@ -3,6 +3,7 @@ use super::callback::Callback;
 use crate::packet::{Packet, PacketId};
 use rand::{thread_rng, Rng};
 
+use crate::client::callback::{SocketAnyCallback, SocketCallback};
 use crate::error::Result;
 use std::collections::HashMap;
 use std::ops::DerefMut;
@@ -21,7 +22,7 @@ pub struct Ack {
     pub id: i32,
     timeout: Duration,
     time_started: Instant,
-    callback: Callback,
+    callback: Callback<SocketCallback>,
 }
 
 /// A socket which handles communication with the server. It's initialized with
@@ -31,7 +32,8 @@ pub struct Ack {
 pub struct Client {
     /// The inner socket client to delegate the methods to.
     socket: InnerSocket,
-    on: Arc<RwLock<HashMap<Event, Callback>>>,
+    on: Arc<RwLock<HashMap<Event, Callback<SocketCallback>>>>,
+    on_any: Arc<RwLock<Option<Callback<SocketAnyCallback>>>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
     // namespace, for multiplexing messages
     nsp: String,
@@ -47,13 +49,15 @@ impl Client {
     pub(crate) fn new<T: Into<String>>(
         socket: InnerSocket,
         namespace: T,
-        on: HashMap<Event, Callback>,
+        on: HashMap<Event, Callback<SocketCallback>>,
+        on_any: Option<Callback<SocketAnyCallback>>,
         auth: Option<serde_json::Value>,
     ) -> Result<Self> {
         Ok(Client {
             socket,
             nsp: namespace.into(),
             on: Arc::new(RwLock::new(on)),
+            on_any: Arc::new(RwLock::new(on_any)),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
             auth,
         })
@@ -202,7 +206,7 @@ impl Client {
             id,
             time_started: Instant::now(),
             timeout,
-            callback: Callback::new(callback),
+            callback: Callback::<SocketCallback>::new(callback),
         };
 
         // add the ack to the tuple of outstanding acks
@@ -238,11 +242,25 @@ impl Client {
 
     fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {
         let mut on = self.on.write()?;
+        let mut on_any = self.on_any.write()?;
         let lock = on.deref_mut();
+        let on_any_lock = on_any.deref_mut();
+
+        let payload = payload.into();
+
         if let Some(callback) = lock.get_mut(event) {
-            callback(payload.into(), self.clone());
+            callback(payload.clone(), self.clone());
+        }
+        match event.clone() {
+            Event::Message | Event::Custom(_) => {
+                if let Some(callback) = on_any_lock {
+                    callback(event.clone(), payload, self.clone())
+                }
+            }
+            _ => {}
         }
         drop(on);
+        drop(on_any);
         Ok(())
     }
 
@@ -531,32 +549,68 @@ mod test {
     }
 
     #[test]
-    fn socket_io_auth_builder_integration() -> Result<()> {
-        let url = crate::test::socket_io_auth_server();
-        let socket = ClientBuilder::new(url)
-            .namespace("/admin")
+    fn socket_io_on_any_integration() -> Result<()> {
+        let url = crate::test::socket_io_server();
+
+        let (tx, rx) = mpsc::sync_channel(1);
+
+        let _socket = ClientBuilder::new(url)
+            .namespace("/")
             .auth(json!({ "password": "123" }))
+            .on("auth", |payload, _client| {
+                if let Payload::String(msg) = payload {
+                    println!("{}", msg);
+                }
+            })
+            .on_any(move |event, payload, _client| {
+                if let Payload::String(str) = payload {
+                    println!("{} {}", String::from(event.clone()), str);
+                }
+                tx.send(String::from(event)).unwrap();
+            })
             .connect()?;
 
-        let (tx, rx) = mpsc::sync_channel(0);
+        // Sleep to give server enough time to send 2 events
+        sleep(Duration::from_secs(2));
 
-        // Send emit with ack after 1s, so socketio server has enough time to register it's listeners
-        sleep(Duration::from_secs(1));
+        let event = rx.recv().unwrap();
+        assert_eq!(event, "message");
+        let event = rx.recv().unwrap();
+        assert_eq!(event, "test");
 
-        assert!(socket
-            .emit_with_ack(
-                "test",
-                json!({ "msg": "1" }),
-                Duration::from_secs(1),
-                move |payload, _| {
-                    println!("Got ack");
-                    tx.send(Payload::from(json!(["456"])) == payload).unwrap();
-                }
+        Ok(())
+    }
+
+    #[test]
+    fn socket_io_auth_builder_integration() -> Result<()> {
+        let url = crate::test::socket_io_auth_server();
+        let nsp = String::from("/admin");
+        let socket = ClientBuilder::new(url)
+            .namespace(nsp.clone())
+            .auth(json!({ "password": "123" }))
+            .connect_manual()?;
+
+        let mut iter = socket
+            .iter()
+            .map(|packet| packet.unwrap())
+            .filter(|packet| packet.packet_type != PacketId::Connect);
+
+        let packet: Option<Packet> = iter.next();
+        assert!(packet.is_some());
+
+        let packet = packet.unwrap();
+
+        assert_eq!(
+            packet,
+            Packet::new(
+                PacketId::Event,
+                nsp.clone(),
+                Some("[\"auth\",\"success\"]".to_owned()),
+                None,
+                0,
+                None
             )
-            .is_ok());
-
-        let received = rx.recv();
-        assert!(received.is_ok() && received.unwrap());
+        );
 
         Ok(())
     }
