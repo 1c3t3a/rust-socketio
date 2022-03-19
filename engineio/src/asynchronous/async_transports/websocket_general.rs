@@ -78,16 +78,19 @@ impl AsyncWebsocketGeneralTransport {
             .lock()
             .into_stream()
             .then(|mut rec| async move {
-                let msg = rec.next().await.ok_or(Error::IncompletePacket())??;
-                if msg.is_binary() {
-                    let data = msg.into_data();
-                    let mut msg = BytesMut::with_capacity(data.len() + 1);
-                    msg.put_u8(PacketId::Message as u8);
-                    msg.put(data.as_ref());
+                loop {
+                    let msg = rec.next().await.ok_or(Error::IncompletePacket())??;
+                    // only propagate binary and text messages
+                    if msg.is_binary() {
+                        let data = msg.into_data();
+                        let mut msg = BytesMut::with_capacity(data.len() + 1);
+                        msg.put_u8(PacketId::Message as u8);
+                        msg.put(data.as_ref());
 
-                    Ok(msg.freeze())
-                } else {
-                    Ok(Bytes::from(msg.into_data()))
+                        return Ok(msg.freeze());
+                    } else if msg.is_text() {
+                        return Ok(Bytes::from(msg.into_data()));
+                    }
                 }
             })
     }
