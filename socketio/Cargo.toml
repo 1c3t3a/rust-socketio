@@ -1,6 +1,6 @@
 [package]
 name = "rust_socketio"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Bastian Kersting <bastian@cmbt.de>"]
 edition = "2021"
 description = "An implementation of a socketio client written in rust."
@@ -11,7 +11,7 @@ categories = ["network-programming", "web-programming", "web-programming::websoc
 license = "MIT"
 
 [dependencies]
-rust_engineio = { version = "0.3.0-alpha.3", path = "../engineio" }
+rust_engineio = { version = "0.3.1", path = "../engineio" }
 base64 = "0.13.0"
 bytes = "1"
 rand = "0.8.5"

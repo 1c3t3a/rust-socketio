@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.3.1`](#031) - _2022.03.19_
 * [`0.3.0`](#030) - _2021.12.16_
 * [`0.3.0-alpha.2`](#030a3) - _2021.12.04_
 * [`0.3.0-alpha.2`](#030a2) - _2021.10.14_
@@ -27,6 +28,13 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## _[Unreleased]_
 
 _nothing new to show for… yet!_
+
+## <a name="031">[0.3.1] - _Bugfix_ </a>
+
+_2022.03.19_
+
+### Changes
+- Fixes regarding [#166(https://github.com/1c3t3a/rust-socketio/issues/166).
 
 ## <a name="030">[0.3.0] - _Stabilize alpha version_ </a>
 
