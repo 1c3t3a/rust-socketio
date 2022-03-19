@@ -304,7 +304,7 @@ impl Client {
     #[inline]
     fn handle_binary_event(&self, packet: &Packet) -> Result<()> {
         let event = if let Some(string_data) = &packet.data {
-            string_data.replace("\"", "").into()
+            string_data.replace('\"', " ").into()
         } else {
             Event::Message
         };

@@ -1,11 +1,11 @@
 use std::{borrow::Cow, str::from_utf8, sync::Arc};
 
 use crate::{error::Result, Error, Packet, PacketId};
-use async_stream::try_stream;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{
+    ready,
     stream::{SplitSink, SplitStream},
-    SinkExt, Stream, StreamExt,
+    FutureExt, SinkExt, Stream, StreamExt,
 };
 use tokio::{net::TcpStream, sync::Mutex};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -13,7 +13,9 @@ use tungstenite::Message;
 
 /// A general purpose asynchronous websocket transport type. Holds
 /// the sender and receiver stream of a websocket connection
-/// and implements the common methods `update`, `poll` and `emit`.
+/// and implements the common methods `update` and `emit`. This also
+/// implements `Stream`.
+#[derive(Clone)]
 pub(crate) struct AsyncWebsocketGeneralTransport {
     sender: Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>,
     receiver: Arc<Mutex<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>>,
@@ -73,30 +75,41 @@ impl AsyncWebsocketGeneralTransport {
 
         Ok(())
     }
+}
 
-    fn receive_message(&self) -> impl Stream<Item = Result<Message>> + '_ {
-        try_stream! {
-            for await item in &mut *self.receiver.lock().await {
-                yield item?;
-            }
-        }
-    }
+impl Stream for AsyncWebsocketGeneralTransport {
+    type Item = Result<Bytes>;
 
-    pub(crate) fn stream(&self) -> impl Stream<Item = Result<Bytes>> + '_ {
-        try_stream! {
-            for await msg in self.receive_message() {
-                let msg = msg?;
-                if msg.is_binary() {
-                    let data = msg.into_data();
-                    let mut msg = BytesMut::with_capacity(data.len() + 1);
-                    msg.put_u8(PacketId::Message as u8);
-                    msg.put(data.as_ref());
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let mut lock = ready!(Box::pin(self.receiver.lock()).poll_unpin(cx));
 
-                    yield msg.freeze();
-                } else {
-                    yield Bytes::from(msg.into_data());
-                }
-            }
-        }
+        // poll on the underlying transport and map the result to the required type
+        lock.poll_next_unpin(cx)
+            .map(|option| {
+                option.map(|result| {
+                    result.map(|msg|
+                        if msg.is_binary() {
+                            let data = msg.into_data();
+                            let mut msg = BytesMut::with_capacity(data.len() + 1);
+                            msg.put_u8(PacketId::Message as u8);
+                            msg.put(data.as_ref());
+
+                            msg.freeze()
+                        } else if msg.is_text() {
+                            Bytes::from(msg.into_data())
+                        } else {
+                            // in the edge case of a packet with a type other than text
+                            // or binary map it to an empty packet.
+                            // this always needs to get filtered out 
+                            // by the user of the stream
+                            Bytes::new()
+                        }
+                    )
+                })
+            })
+            .map_err(Error::WebsocketError)
     }
 }

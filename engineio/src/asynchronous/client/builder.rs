@@ -111,7 +111,10 @@ impl ClientBuilder {
     }
 
     /// Performs the handshake
-    async fn handshake_with_transport<T: AsyncTransport>(&mut self, transport: &T) -> Result<()> {
+    async fn handshake_with_transport<T: AsyncTransport + Unpin>(
+        &mut self,
+        transport: &mut T,
+    ) -> Result<()> {
         // No need to handshake twice
         if self.handshake.is_some() {
             return Ok(());
@@ -119,14 +122,9 @@ impl ClientBuilder {
 
         let mut url = self.url.clone();
 
-        let handshake: HandshakePacket = Packet::try_from(
-            transport
-                .stream()
-                .next()
-                .await
-                .ok_or(Error::IncompletePacket())??,
-        )?
-        .try_into()?;
+        let handshake: HandshakePacket =
+            Packet::try_from(transport.next().await.ok_or(Error::IncompletePacket())??)?
+                .try_into()?;
 
         // update the base_url with the new sid
         url.query_pairs_mut().append_pair("sid", &handshake.sid[..]);
@@ -150,9 +148,10 @@ impl ClientBuilder {
         };
 
         // Start with polling transport
-        let transport = PollingTransport::new(self.url.clone(), self.tls_config.clone(), headers);
+        let mut transport =
+            PollingTransport::new(self.url.clone(), self.tls_config.clone(), headers);
 
-        self.handshake_with_transport(&transport).await
+        self.handshake_with_transport(&mut transport).await
     }
 
     /// Build websocket if allowed, if not fall back to polling
@@ -178,17 +177,15 @@ impl ClientBuilder {
         );
 
         // SAFETY: handshake function called previously.
-        Ok(Client {
-            socket: InnerSocket::new(
-                transport.into(),
-                self.handshake.unwrap(),
-                self.on_close,
-                self.on_data,
-                self.on_error,
-                self.on_open,
-                self.on_packet,
-            ),
-        })
+        Ok(Client::new(InnerSocket::new(
+            transport.into(),
+            self.handshake.unwrap(),
+            self.on_close,
+            self.on_data,
+            self.on_error,
+            self.on_open,
+            self.on_packet,
+        )))
     }
 
     /// Build socket with a polling transport then upgrade to websocket transport
@@ -212,29 +209,27 @@ impl ClientBuilder {
 
         match self.url.scheme() {
             "http" | "ws" => {
-                let transport = WebsocketTransport::new(self.url.clone(), headers).await?;
+                let mut transport = WebsocketTransport::new(self.url.clone(), headers).await?;
 
                 if self.handshake.is_some() {
                     transport.upgrade().await?;
                 } else {
-                    self.handshake_with_transport(&transport).await?;
+                    self.handshake_with_transport(&mut transport).await?;
                 }
                 // NOTE: Although self.url contains the sid, it does not propagate to the transport
                 // SAFETY: handshake function called previously.
-                Ok(Client {
-                    socket: InnerSocket::new(
-                        transport.into(),
-                        self.handshake.unwrap(),
-                        self.on_close,
-                        self.on_data,
-                        self.on_error,
-                        self.on_open,
-                        self.on_packet,
-                    ),
-                })
+                Ok(Client::new(InnerSocket::new(
+                    transport.into(),
+                    self.handshake.unwrap(),
+                    self.on_close,
+                    self.on_data,
+                    self.on_error,
+                    self.on_open,
+                    self.on_packet,
+                )))
             }
             "https" | "wss" => {
-                let transport = WebsocketSecureTransport::new(
+                let mut transport = WebsocketSecureTransport::new(
                     self.url.clone(),
                     self.tls_config.clone(),
                     headers,
@@ -244,21 +239,19 @@ impl ClientBuilder {
                 if self.handshake.is_some() {
                     transport.upgrade().await?;
                 } else {
-                    self.handshake_with_transport(&transport).await?;
+                    self.handshake_with_transport(&mut transport).await?;
                 }
                 // NOTE: Although self.url contains the sid, it does not propagate to the transport
                 // SAFETY: handshake function called previously.
-                Ok(Client {
-                    socket: InnerSocket::new(
-                        transport.into(),
-                        self.handshake.unwrap(),
-                        self.on_close,
-                        self.on_data,
-                        self.on_error,
-                        self.on_open,
-                        self.on_packet,
-                    ),
-                })
+                Ok(Client::new(InnerSocket::new(
+                    transport.into(),
+                    self.handshake.unwrap(),
+                    self.on_close,
+                    self.on_data,
+                    self.on_error,
+                    self.on_open,
+                    self.on_packet,
+                )))
             }
             _ => Err(Error::InvalidUrlScheme(self.url.scheme().to_string())),
         }

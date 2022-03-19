@@ -1,19 +1,28 @@
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc};
 
 use crate::{
-    asynchronous::async_socket::Socket as InnerSocket, error::Error, error::Result, Packet,
-    PacketId,
+    asynchronous::{async_socket::Socket as InnerSocket, generator::Generator},
+    error::Result,
+    Packet,
 };
 use async_stream::try_stream;
-use bytes::Bytes;
-use futures_util::Stream;
+use futures_util::{ready, FutureExt, Stream, StreamExt};
+use tokio::sync::Mutex;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Client {
     pub(super) socket: InnerSocket,
+    generator: Arc<Mutex<Generator<Result<Packet>>>>,
 }
 
 impl Client {
+    pub(super) fn new(socket: InnerSocket) -> Self {
+        Client {
+            socket: socket.clone(),
+            generator: Arc::new(Mutex::new(Self::stream(socket))),
+        }
+    }
+
     pub async fn close(&self) -> Result<()> {
         self.socket.disconnect().await
     }
@@ -34,46 +43,12 @@ impl Client {
         self.socket.emit(packet).await
     }
 
-    /// A helper method that distributes
-    async fn handle_inconming_packet(&self, packet: Packet) -> Result<()> {
-        // check for the appropriate action or callback
-        self.socket.handle_packet(packet.clone());
-        match packet.packet_id {
-            PacketId::MessageBinary => {
-                self.socket.handle_data(packet.data.clone());
-            }
-            PacketId::Message => {
-                self.socket.handle_data(packet.data.clone());
-            }
-            PacketId::Close => {
-                self.socket.handle_close();
-            }
-            PacketId::Open => {
-                unreachable!("Won't happen as we open the connection beforehand");
-            }
-            PacketId::Upgrade => {
-                // this is already checked during the handshake, so just do nothing here
-            }
-            PacketId::Ping => {
-                self.socket.pinged().await;
-                self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
-            }
-            PacketId::Pong => {
-                // this will never happen as the pong packet is
-                // only sent by the client
-                return Err(Error::InvalidPacket());
-            }
-            PacketId::Noop => (),
-        }
-        Ok(())
-    }
-
-    #[doc(hidden)]
-    pub fn stream(&self) -> Pin<Box<impl Stream<Item = Result<Packet>> + '_>> {
+    /// Static method that returns a generator for each element of the stream.
+    fn stream(socket: InnerSocket) -> Pin<Box<impl Stream<Item = Result<Packet>> + 'static>> {
         Box::pin(try_stream! {
-            for await item in self.socket.stream()? {
+            for await item in socket.clone() {
                 let packet = item?;
-                self.handle_inconming_packet(packet.clone()).await?;
+                socket.handle_inconming_packet(packet.clone()).await?;
                 yield packet;
             }
         })
@@ -82,6 +57,18 @@ impl Client {
     /// Check if the underlying transport client is connected.
     pub fn is_connected(&self) -> Result<bool> {
         self.socket.is_connected()
+    }
+}
+
+impl Stream for Client {
+    type Item = Result<Packet>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let mut lock = ready!(Box::pin(self.generator.lock()).poll_unpin(cx));
+        lock.poll_next_unpin(cx)
     }
 }
 
@@ -98,7 +85,7 @@ mod test {
     #[tokio::test]
     async fn test_illegal_actions() -> Result<()> {
         let url = crate::test::engine_io_server()?;
-        let sut = builder(url.clone()).build().await?;
+        let mut sut = builder(url.clone()).build().await?;
 
         assert!(sut
             .emit(Packet::new(PacketId::Close, Bytes::new()))
@@ -107,7 +94,7 @@ mod test {
 
         sut.connect().await?;
 
-        assert!(sut.stream().next().await.unwrap().is_ok());
+        assert!(sut.next().await.unwrap().is_ok());
 
         assert!(builder(Url::parse("fake://fake.fake").unwrap())
             .build_websocket()
@@ -153,51 +140,27 @@ mod test {
     }
 
     async fn test_connection(socket: Client) -> Result<()> {
-        let socket = socket;
+        let mut socket = socket;
 
         socket.connect().await.unwrap();
 
         assert_eq!(
-            socket.stream().next().await.unwrap()?,
+            socket.next().await.unwrap()?,
             Packet::new(PacketId::Message, "hello client")
         );
+        println!("received msg, abut to send");
 
         socket
             .emit(Packet::new(PacketId::Message, "respond"))
             .await?;
 
+        println!("send msg");
+
         assert_eq!(
-            socket.stream().next().await.unwrap()?,
+            socket.next().await.unwrap()?,
             Packet::new(PacketId::Message, "Roger Roger")
         );
-
-        socket.close().await
-    }
-
-    // This test assures that there is no difference in behaviour between taking
-    // a single stream of incoming messages and taking multiple streams of incoming
-    // messages. This is currently assured as all `try_stream!` macro calls in the
-    // transport implementation work like a generator of messages where it is safe
-    // to hook in at arbitrary points in time.
-    async fn test_connection_one_stream(socket: Client) -> Result<()> {
-        let socket = socket;
-
-        socket.connect().await.unwrap();
-        let mut stream = socket.stream();
-
-        assert_eq!(
-            stream.next().await.unwrap()?,
-            Packet::new(PacketId::Message, "hello client")
-        );
-
-        socket
-            .emit(Packet::new(PacketId::Message, "respond"))
-            .await?;
-
-        assert_eq!(
-            stream.next().await.unwrap()?,
-            Packet::new(PacketId::Message, "Roger Roger")
-        );
+        println!("received 2");
 
         socket.close().await
     }
@@ -206,14 +169,13 @@ mod test {
     async fn test_connection_long() -> Result<()> {
         // Long lived socket to receive pings
         let url = crate::test::engine_io_server()?;
-        let socket = builder(url).build().await?;
+        let mut socket = builder(url).build().await?;
 
         socket.connect().await?;
 
-        let mut stream = socket.stream();
         // hello client
         assert!(matches!(
-            stream.next().await.unwrap()?,
+            socket.next().await.unwrap()?,
             Packet {
                 packet_id: PacketId::Message,
                 ..
@@ -221,7 +183,7 @@ mod test {
         ));
         // Ping
         assert!(matches!(
-            stream.next().await.unwrap()?,
+            socket.next().await.unwrap()?,
             Packet {
                 packet_id: PacketId::Ping,
                 ..
@@ -241,17 +203,9 @@ mod test {
         let socket = builder(url).build().await?;
         test_connection(socket).await?;
 
-        let url = crate::test::engine_io_server()?;
-        let socket = builder(url).build().await?;
-        test_connection_one_stream(socket).await?;
-
         let url = crate::test::engine_io_polling_server()?;
         let socket = builder(url).build().await?;
-        test_connection(socket).await?;
-
-        let url = crate::test::engine_io_polling_server()?;
-        let socket = builder(url).build().await?;
-        test_connection_one_stream(socket).await
+        test_connection(socket).await
     }
 
     #[tokio::test]
@@ -260,17 +214,9 @@ mod test {
         let socket = builder(url).build_with_fallback().await?;
         test_connection(socket).await?;
 
-        let url = crate::test::engine_io_server()?;
-        let socket = builder(url).build_with_fallback().await?;
-        test_connection_one_stream(socket).await?;
-
         let url = crate::test::engine_io_polling_server()?;
         let socket = builder(url).build_with_fallback().await?;
-        test_connection(socket).await?;
-
-        let url = crate::test::engine_io_polling_server()?;
-        let socket = builder(url).build_with_fallback().await?;
-        test_connection_one_stream(socket).await
+        test_connection(socket).await
     }
 
     #[tokio::test]
@@ -279,24 +225,14 @@ mod test {
         let mut socket_builder = builder(url);
         socket_builder = socket_builder.tls_config(crate::test::tls_connector()?);
         let socket = socket_builder.build().await?;
-        test_connection(socket).await?;
-
-        let url = crate::test::engine_io_server_secure()?;
-        let mut socket_builder = builder(url);
-        socket_builder = socket_builder.tls_config(crate::test::tls_connector()?);
-        let socket = socket_builder.build().await?;
-        test_connection_one_stream(socket).await
+        test_connection(socket).await
     }
 
     #[tokio::test]
     async fn test_connection_polling() -> Result<()> {
         let url = crate::test::engine_io_server()?;
         let socket = builder(url).build_polling().await?;
-        test_connection(socket).await?;
-
-        let url = crate::test::engine_io_server()?;
-        let socket = builder(url).build_polling().await?;
-        test_connection_one_stream(socket).await
+        test_connection(socket).await
     }
 
     #[tokio::test]
@@ -337,43 +273,6 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_connection_wss_one_stream() -> Result<()> {
-        let url = crate::test::engine_io_polling_server()?;
-        assert!(builder(url).build_websocket_with_upgrade().await.is_err());
-
-        let host =
-            std::env::var("ENGINE_IO_SECURE_HOST").unwrap_or_else(|_| "localhost".to_owned());
-        let mut url = crate::test::engine_io_server_secure()?;
-
-        let mut headers = HeaderMap::default();
-        headers.insert(HOST, host);
-        let mut builder = builder(url.clone());
-
-        builder = builder.tls_config(crate::test::tls_connector()?);
-        builder = builder.headers(headers.clone());
-        let socket = builder.clone().build_websocket_with_upgrade().await?;
-
-        test_connection_one_stream(socket).await?;
-
-        let socket = builder.build_websocket().await?;
-
-        test_connection_one_stream(socket).await?;
-
-        url.set_scheme("wss").unwrap();
-
-        let builder = self::builder(url)
-            .tls_config(crate::test::tls_connector()?)
-            .headers(headers);
-        let socket = builder.clone().build_websocket().await?;
-
-        test_connection_one_stream(socket).await?;
-
-        assert!(builder.build_websocket_with_upgrade().await.is_err());
-
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_connection_ws() -> Result<()> {
         let url = crate::test::engine_io_polling_server()?;
         assert!(builder(url.clone()).build_websocket().await.is_err());
@@ -394,33 +293,6 @@ mod test {
         let socket = builder.clone().build_websocket().await?;
 
         test_connection(socket).await?;
-
-        assert!(builder.build_websocket_with_upgrade().await.is_err());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_connection_ws_one_stream() -> Result<()> {
-        let url = crate::test::engine_io_polling_server()?;
-        assert!(builder(url.clone()).build_websocket().await.is_err());
-        assert!(builder(url).build_websocket_with_upgrade().await.is_err());
-
-        let mut url = crate::test::engine_io_server()?;
-
-        let builder = builder(url.clone());
-        let socket = builder.clone().build_websocket().await?;
-        test_connection_one_stream(socket).await?;
-
-        let socket = builder.build_websocket_with_upgrade().await?;
-        test_connection_one_stream(socket).await?;
-
-        url.set_scheme("ws").unwrap();
-
-        let builder = self::builder(url);
-        let socket = builder.clone().build_websocket().await?;
-
-        test_connection_one_stream(socket).await?;
 
         assert!(builder.build_websocket_with_upgrade().await.is_err());
 

@@ -1,22 +1,27 @@
+use adler32::adler32;
 use async_stream::try_stream;
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
-use futures_util::Stream;
+use futures_util::{ready, FutureExt, Stream, StreamExt};
 use http::HeaderMap;
 use native_tls::TlsConnector;
 use reqwest::{Client, ClientBuilder, Response};
+use std::fmt::Debug;
+use std::time::SystemTime;
 use std::{pin::Pin, sync::Arc};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use url::Url;
 
+use crate::asynchronous::generator::SyncSendGenerator;
 use crate::{asynchronous::transport::AsyncTransport, error::Result, Error};
 
 /// An asynchronous polling type. Makes use of the nonblocking reqwest types and
 /// methods.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PollingTransport {
     client: Client,
     base_url: Arc<RwLock<Url>>,
+    generator: Arc<Mutex<SyncSendGenerator<Result<Bytes>>>>,
 }
 
 impl PollingTransport {
@@ -43,20 +48,54 @@ impl PollingTransport {
         url.query_pairs_mut().append_pair("transport", "polling");
 
         PollingTransport {
-            client,
-            base_url: Arc::new(RwLock::new(url)),
+            client: client.clone(),
+            base_url: Arc::new(RwLock::new(url.clone())),
+            generator: Arc::new(Mutex::new(Self::stream(url, client))),
         }
     }
 
-    fn send_request(&self) -> impl Stream<Item = Result<Response>> + '_ {
-        try_stream! {
-            let address = self.address().await;
+    fn address(mut url: Url) -> Result<Url> {
+        let reader = format!("{:#?}", SystemTime::now());
+        let hash = adler32(reader.as_bytes()).unwrap();
+        url.query_pairs_mut().append_pair("t", &hash.to_string());
+        Ok(url)
+    }
 
-            yield self
-                .client
+    fn send_request(url: Url, client: Client) -> impl Stream<Item = Result<Response>> {
+        try_stream! {
+            let address = Self::address(url);
+
+            yield client
                 .get(address?)
                 .send().await?
         }
+    }
+
+    fn stream(
+        url: Url,
+        client: Client,
+    ) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + 'static + Send + Sync>> {
+        Box::pin(try_stream! {
+            loop {
+                for await elem in Self::send_request(url.clone(), client.clone()) {
+                    for await bytes in elem?.bytes_stream() {
+                        yield bytes?;
+                    }
+                }
+            }
+        })
+    }
+}
+
+impl Stream for PollingTransport {
+    type Item = Result<Bytes>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let mut lock = ready!(Box::pin(self.generator.lock()).poll_unpin(cx));
+        lock.poll_next_unpin(cx)
     }
 }
 
@@ -93,31 +132,6 @@ impl AsyncTransport for PollingTransport {
         Ok(())
     }
 
-    fn stream(&self) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>> {
-        Box::pin(try_stream! {
-            // always send the long polling request until the transport is shut down
-
-            // TODO: Investigate a way to stop this. From my understanding this generator
-            // lives on the heap (as it's boxed) and always sends long polling
-            // requests. In the current version of the crate it is possible to create a stream
-            // using an `&self` of client, which would mean that we potentially end up with multiple
-            // of these generators on the heap. That is not what we want.
-            // A potential solution would be to wrap the client (also helpful for websockets) and make
-            // sure to call the "poll" request only on the same object over and over again. In that
-            // case the underlying object would have information about whether the connection is shut down
-            // or not.
-            // This stream never returns `None` and hence never indicates an end.
-            loop {
-                for await elem in self.send_request() {
-                    for await bytes in elem?.bytes_stream() {
-                        yield bytes?;
-                    }
-                }
-
-            }
-        })
-    }
-
     async fn base_url(&self) -> Result<Url> {
         Ok(self.base_url.read().await.clone())
     }
@@ -132,6 +146,16 @@ impl AsyncTransport for PollingTransport {
         }
         *self.base_url.write().await = url;
         Ok(())
+    }
+}
+
+impl Debug for PollingTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PollingTransport")
+            .field("client", &self.client)
+            .field("base_url", &self.base_url)
+            .field("generator", &"")
+            .finish()
     }
 }
 
