@@ -8,20 +8,23 @@ name: benchmark engine.io
 jobs:
    runBenchmark:
      name: run benchmark
-
      runs-on: ubuntu-latest
      steps:
-       - uses: khan/pull-request-comment-trigger@master
-         id: check
-         with:
-           trigger: '@benchmark'
-           reaction: rocket
-         env:
-           GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
-       - uses: actions/checkout@master
-       - uses: boa-dev/criterion-compare-action@v3.2.0
-         if: steps.check.outputs.triggered == 'true'
-         with:
-           cwd: "engineio"
-           branchName: ${{ github.base_ref }}
-           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract branch name
+        shell: bash
+        run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+        id: extract_branch
+      - uses: khan/pull-request-comment-trigger@master
+        id: check
+        with:
+          trigger: '/benchmark'
+          reaction: rocket
+        env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+      - uses: actions/checkout@master
+      - uses: boa-dev/criterion-compare-action@v3.2.0
+        if: steps.check.outputs.triggered == 'true'
+        with:
+          cwd: "engineio"
+          branchName: ${{ steps.extract_branch.outputs.branch }}
+          token: ${{ secrets.GITHUB_TOKEN }}
