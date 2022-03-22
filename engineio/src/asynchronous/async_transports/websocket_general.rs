@@ -90,7 +90,7 @@ impl Stream for AsyncWebsocketGeneralTransport {
         lock.poll_next_unpin(cx)
             .map(|option| {
                 option.map(|result| {
-                    result.map(|msg|
+                    result.map(|msg| {
                         if msg.is_binary() {
                             let data = msg.into_data();
                             let mut msg = BytesMut::with_capacity(data.len() + 1);
@@ -103,11 +103,11 @@ impl Stream for AsyncWebsocketGeneralTransport {
                         } else {
                             // in the edge case of a packet with a type other than text
                             // or binary map it to an empty packet.
-                            // this always needs to get filtered out 
+                            // this always needs to get filtered out
                             // by the user of the stream
                             Bytes::new()
                         }
-                    )
+                    })
                 })
             })
             .map_err(Error::WebsocketError)
