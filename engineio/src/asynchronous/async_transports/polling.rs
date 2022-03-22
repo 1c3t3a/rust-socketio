@@ -154,7 +154,6 @@ impl Debug for PollingTransport {
         f.debug_struct("PollingTransport")
             .field("client", &self.client)
             .field("base_url", &self.base_url)
-            .field("generator", &"")
             .finish()
     }
 }

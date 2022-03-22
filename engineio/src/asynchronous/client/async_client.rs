@@ -1,4 +1,4 @@
-use std::{pin::Pin, sync::Arc};
+use std::{fmt::Debug, pin::Pin, sync::Arc};
 
 use crate::{
     asynchronous::{async_socket::Socket as InnerSocket, generator::Generator},
@@ -69,6 +69,14 @@ impl Stream for Client {
     ) -> std::task::Poll<Option<Self::Item>> {
         let mut lock = ready!(Box::pin(self.generator.lock()).poll_unpin(cx));
         lock.poll_next_unpin(cx)
+    }
+}
+
+impl Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("socket", &self.socket)
+            .finish()
     }
 }
 
