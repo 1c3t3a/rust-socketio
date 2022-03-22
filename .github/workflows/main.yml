@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
-      - uses: boa-dev/criterion-compare-action@v3.0.0
+      - uses: boa-dev/criterion-compare-action@v3.2.0
         with:
           cwd: "engineio"
           branchName: ${{ github.base_ref }}
