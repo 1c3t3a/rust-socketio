@@ -6,11 +6,12 @@ name: benchmark engine.io
 jobs:
   runBenchmark:
     name: run benchmark
-    if: contains(github.event.comment.html_url, '/pull/') && contains(github.event.comment.body, '/benchmark')
+    if: contains(github.event.comment.html_url, '/pull/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
       - uses: boa-dev/criterion-compare-action@v3.2.0
+        if: contains(github.event.comment.body, '/benchmark')
         with:
           cwd: "engineio"
           branchName: ${{ github.base_ref }}
