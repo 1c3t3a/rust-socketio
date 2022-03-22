@@ -1,17 +1,27 @@
 on:
-  issue_comment:                                     
-    types: [created, edited, deleted]
+  pull_request:
+    types: [opened]
+  issue_comment:
+    types: [created]
 
 name: benchmark engine.io
 jobs:
+
   runBenchmark:
     name: run benchmark
-    if: contains(github.event.comment.html_url, '/pull/')
+    
     runs-on: ubuntu-latest
     steps:
+      - uses: khan/pull-request-comment-trigger@master
+        id: check
+        with:
+          trigger: '@benchmark'
+          reaction: rocket
+        env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
       - uses: actions/checkout@master
       - uses: boa-dev/criterion-compare-action@v3.2.0
-        if: contains(github.event.comment.body, '/benchmark')
+        if: steps.check.outputs.triggered == 'true'
         with:
           cwd: "engineio"
           branchName: ${{ github.base_ref }}
