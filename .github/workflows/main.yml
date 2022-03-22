@@ -1,9 +1,12 @@
-on: [pull_request]
+on:
+  issue_comment:                                     
+    types: [created, edited, deleted]
 
 name: benchmark engine.io
 jobs:
   runBenchmark:
     name: run benchmark
+    if: contains(github.event.comment.html_url, '/pull/') && contains(github.event.comment.body, '/benchmark')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
