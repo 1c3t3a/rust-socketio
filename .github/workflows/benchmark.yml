@@ -17,6 +17,9 @@ jobs:
           reaction: rocket
         env:
           GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+      - name: Checkout repository
+        if: steps.check.outputs.triggered == 'true'
+        uses: actions/checkout@v2
       - name: Setup rust environment 
         if: steps.check.outputs.triggered == 'true'
         uses: actions-rs/toolchain@v1
