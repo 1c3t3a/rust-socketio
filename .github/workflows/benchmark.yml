@@ -4,9 +4,9 @@ on:
    issue_comment:
      types: [created]
 
- name: benchmark engine.io
- jobs:
 
+name: benchmark engine.io
+jobs:
    runBenchmark:
      name: run benchmark
 
@@ -26,4 +26,3 @@ on:
            cwd: "engineio"
            branchName: ${{ github.base_ref }}
            token: ${{ secrets.GITHUB_TOKEN }}
-# comment to that tests the new benchmark action

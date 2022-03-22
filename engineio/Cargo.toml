@@ -41,6 +41,12 @@ features = ["macros"]
 name = "engineio"
 harness = false
 
+# needs to be present in order to support the benchmark
+# ci job
+# source: https://bheisler.github.io/criterion.rs/book/faq.html#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+[lib]
+bench = false
+
 [features]
 default = ["async"]
 async = []
