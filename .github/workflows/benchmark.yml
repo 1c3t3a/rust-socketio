@@ -4,9 +4,8 @@ on:
    issue_comment:
      types: [created]
 
- name: benchmark engine.io
- jobs:
-
+name: benchmark engine.io
+jobs:
    runBenchmark:
      name: run benchmark
 
