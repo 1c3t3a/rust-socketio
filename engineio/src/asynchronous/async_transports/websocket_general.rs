@@ -1,4 +1,4 @@
-use std::{borrow::Cow, str::from_utf8, sync::Arc};
+use std::{borrow::Cow, str::from_utf8, sync::Arc, task::Poll};
 
 use crate::{error::Result, Error, Packet, PacketId};
 use bytes::{BufMut, Bytes, BytesMut};
@@ -86,30 +86,25 @@ impl Stream for AsyncWebsocketGeneralTransport {
     ) -> std::task::Poll<Option<Self::Item>> {
         let mut lock = ready!(Box::pin(self.receiver.lock()).poll_unpin(cx));
 
-        // poll on the underlying transport and map the result to the required type
-        lock.poll_next_unpin(cx)
-            .map(|option| {
-                option.map(|result| {
-                    result.map(|msg| {
-                        if msg.is_binary() {
-                            let data = msg.into_data();
-                            let mut msg = BytesMut::with_capacity(data.len() + 1);
-                            msg.put_u8(PacketId::Message as u8);
-                            msg.put(data.as_ref());
+        loop {
+            let next = ready!(lock.poll_next_unpin(cx));
 
-                            msg.freeze()
-                        } else if msg.is_text() {
-                            Bytes::from(msg.into_data())
-                        } else {
-                            // in the edge case of a packet with a type other than text
-                            // or binary map it to an empty packet.
-                            // this always needs to get filtered out
-                            // by the user of the stream
-                            Bytes::new()
-                        }
-                    })
-                })
-            })
-            .map_err(Error::WebsocketError)
+            match next {
+                Some(Ok(msg)) => {
+                    if msg.is_binary() {
+                        let data = msg.into_data();
+                        let mut msg = BytesMut::with_capacity(data.len() + 1);
+                        msg.put_u8(PacketId::Message as u8);
+                        msg.put(data.as_ref());
+
+                        return Poll::Ready(Some(Ok(msg.freeze())));
+                    } else if msg.is_text() {
+                        return Poll::Ready(Some(Ok(Bytes::from(msg.into_data()))));
+                    }
+                }
+                Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
+                None => return Poll::Ready(None),
+            }
+        }
     }
 }

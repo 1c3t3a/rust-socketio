@@ -97,9 +97,6 @@ impl Socket {
             PacketId::Close => {
                 self.handle_close();
             }
-            PacketId::Open => {
-                unreachable!("Won't happen as we open the connection beforehand");
-            }
             PacketId::Upgrade => {
                 // this is already checked during the handshake, so just do nothing here
             }
@@ -107,9 +104,9 @@ impl Socket {
                 self.pinged().await;
                 self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
             }
-            PacketId::Pong => {
-                // this will never happen as the pong packet is
-                // only sent by the client
+            PacketId::Pong | PacketId::Open => {
+                // this will never happen as the pong and open
+                // packets are only sent by the client
                 return Err(Error::InvalidPacket());
             }
             PacketId::Noop => (),
