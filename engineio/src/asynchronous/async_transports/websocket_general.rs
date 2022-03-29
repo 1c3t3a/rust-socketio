@@ -84,24 +84,21 @@ impl Stream for AsyncWebsocketGeneralTransport {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        let mut lock = ready!(Box::pin(self.receiver.lock()).poll_unpin(cx));
-
         loop {
+            let mut lock = ready!(Box::pin(self.receiver.lock()).poll_unpin(cx));
             let next = ready!(lock.poll_next_unpin(cx));
 
             match next {
-                Some(Ok(msg)) => {
-                    if msg.is_binary() {
-                        let data = msg.into_data();
-                        let mut msg = BytesMut::with_capacity(data.len() + 1);
-                        msg.put_u8(PacketId::Message as u8);
-                        msg.put(data.as_ref());
+                Some(Ok(Message::Text(str))) => return Poll::Ready(Some(Ok(Bytes::from(str)))),
+                Some(Ok(Message::Binary(data))) => {
+                    let mut msg = BytesMut::with_capacity(data.len() + 1);
+                    msg.put_u8(PacketId::Message as u8);
+                    msg.put(data.as_ref());
 
-                        return Poll::Ready(Some(Ok(msg.freeze())));
-                    } else if msg.is_text() {
-                        return Poll::Ready(Some(Ok(Bytes::from(msg.into_data()))));
-                    }
+                    return Poll::Ready(Some(Ok(msg.freeze())));
                 }
+                // ignore packets other than text and binary
+                Some(Ok(_)) => (),
                 Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
                 None => return Poll::Ready(None),
             }
