@@ -12,7 +12,7 @@ use std::{pin::Pin, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
 use url::Url;
 
-use crate::asynchronous::generator::SyncSendGenerator;
+use crate::asynchronous::generator::Generator;
 use crate::{asynchronous::transport::AsyncTransport, error::Result, Error};
 
 /// An asynchronous polling type. Makes use of the nonblocking reqwest types and
@@ -21,7 +21,7 @@ use crate::{asynchronous::transport::AsyncTransport, error::Result, Error};
 pub struct PollingTransport {
     client: Client,
     base_url: Arc<RwLock<Url>>,
-    generator: Arc<Mutex<SyncSendGenerator<Result<Bytes>>>>,
+    generator: Arc<Mutex<Generator<Result<Bytes>>>>,
 }
 
 impl PollingTransport {
@@ -74,7 +74,7 @@ impl PollingTransport {
     fn stream(
         url: Url,
         client: Client,
-    ) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + 'static + Send + Sync>> {
+    ) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + 'static + Send>> {
         Box::pin(try_stream! {
             loop {
                 for await elem in Self::send_request(url.clone(), client.clone()) {

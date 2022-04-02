@@ -44,7 +44,9 @@ impl Client {
     }
 
     /// Static method that returns a generator for each element of the stream.
-    fn stream(socket: InnerSocket) -> Pin<Box<impl Stream<Item = Result<Packet>> + 'static>> {
+    fn stream(
+        socket: InnerSocket,
+    ) -> Pin<Box<impl Stream<Item = Result<Packet>> + 'static + Send>> {
         Box::pin(try_stream! {
             for await item in socket.clone() {
                 let packet = item?;

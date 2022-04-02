@@ -61,7 +61,7 @@ impl From<WebsocketSecureTransport> for AsyncTransportType {
 
 #[cfg(feature = "async")]
 impl AsyncTransportType {
-    pub fn as_transport(&self) -> &dyn AsyncTransport {
+    pub fn as_transport(&self) -> &(dyn AsyncTransport + Send) {
         match self {
             AsyncTransportType::Polling(transport) => transport,
             AsyncTransportType::Websocket(transport) => transport,
@@ -69,7 +69,7 @@ impl AsyncTransportType {
         }
     }
 
-    pub fn as_pin_box(&mut self) -> Pin<Box<&mut dyn AsyncTransport>> {
+    pub fn as_pin_box(&mut self) -> Pin<Box<&mut (dyn AsyncTransport + Send)>> {
         match self {
             AsyncTransportType::Polling(transport) => Box::pin(transport),
             AsyncTransportType::Websocket(transport) => Box::pin(transport),

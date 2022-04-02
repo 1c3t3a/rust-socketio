@@ -129,7 +129,7 @@ impl Socket {
     /// underlying transport types.
     fn stream(
         mut transport: AsyncTransportType,
-    ) -> Pin<Box<impl Stream<Item = Result<Packet>> + 'static>> {
+    ) -> Pin<Box<impl Stream<Item = Result<Packet>> + 'static + Send>> {
         // map the byte stream of the underlying transport
         // to a packet stream
         Box::pin(try_stream! {
@@ -182,14 +182,10 @@ impl Socket {
             packet.into()
         };
 
-        if let Err(error) = self
-            .transport
-            .lock()
-            .await
-            .as_transport()
-            .emit(data, is_binary)
-            .await
-        {
+        let lock = self.transport.lock().await;
+        let fut = lock.as_transport().emit(data, is_binary);
+
+        if let Err(error) = fut.await {
             self.call_error_callback(error.to_string());
             return Err(error);
         }
