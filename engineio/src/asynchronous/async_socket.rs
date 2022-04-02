@@ -1,16 +1,15 @@
 use std::{
     fmt::Debug,
+    pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
 };
 
+use async_stream::try_stream;
 use bytes::Bytes;
-use futures_util::{
-    stream::{self, once},
-    Stream, StreamExt,
-};
+use futures_util::{ready, FutureExt, Stream, StreamExt};
 use tokio::{runtime::Handle, sync::Mutex, time::Instant};
 
 use crate::{
@@ -20,10 +19,12 @@ use crate::{
     Error, Packet, PacketId,
 };
 
+use super::generator::Generator;
+
 #[derive(Clone)]
 pub struct Socket {
     handle: Handle,
-    transport: Arc<AsyncTransportType>,
+    transport: Arc<Mutex<AsyncTransportType>>,
     on_close: OptionalCallback<()>,
     on_data: OptionalCallback<Bytes>,
     on_error: OptionalCallback<String>,
@@ -33,6 +34,7 @@ pub struct Socket {
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     connection_data: Arc<HandshakePacket>,
+    generator: Arc<Mutex<Generator<Result<Packet>>>>,
 }
 
 impl Socket {
@@ -52,11 +54,12 @@ impl Socket {
             on_error,
             on_open,
             on_packet,
-            transport: Arc::new(transport),
+            transport: Arc::new(Mutex::new(transport.clone())),
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
             connection_data: Arc::new(handshake),
+            generator: Arc::new(Mutex::new(Self::stream(transport))),
         }
     }
 
@@ -80,38 +83,71 @@ impl Socket {
         Ok(())
     }
 
+    /// A helper method that distributes
+    pub(super) async fn handle_inconming_packet(&self, packet: Packet) -> Result<()> {
+        // check for the appropriate action or callback
+        self.handle_packet(packet.clone());
+        match packet.packet_id {
+            PacketId::MessageBinary => {
+                self.handle_data(packet.data.clone());
+            }
+            PacketId::Message => {
+                self.handle_data(packet.data.clone());
+            }
+            PacketId::Close => {
+                self.handle_close();
+            }
+            PacketId::Upgrade => {
+                // this is already checked during the handshake, so just do nothing here
+            }
+            PacketId::Ping => {
+                self.pinged().await;
+                self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
+            }
+            PacketId::Pong | PacketId::Open => {
+                // this will never happen as the pong and open
+                // packets are only sent by the client
+                return Err(Error::InvalidPacket());
+            }
+            PacketId::Noop => (),
+        }
+        Ok(())
+    }
+
+    /// Helper method that parses bytes and returns an iterator over the elements.
+    fn parse_payload(bytes: Bytes) -> impl Stream<Item = Result<Packet>> {
+        try_stream! {
+            let payload = Payload::try_from(bytes);
+
+            for elem in payload?.into_iter() {
+                yield elem;
+            }
+        }
+    }
+
     /// Creates a stream over the incoming packets, uses the streams provided by the
     /// underlying transport types.
-    pub(crate) fn stream(&self) -> Result<impl Stream<Item = Result<Option<Packet>>> + '_> {
-        if !self.connected.load(Ordering::Acquire) {
-            return Err(Error::IllegalActionBeforeOpen());
-        }
-
+    fn stream(
+        mut transport: AsyncTransportType,
+    ) -> Pin<Box<impl Stream<Item = Result<Packet>> + 'static + Send>> {
         // map the byte stream of the underlying transport
         // to a packet stream
-        let stream = self.transport.as_transport().stream()?.map(move |payload| {
-            // this generator is needed as Rust only allows one right_stream call per closure
-            let error_gen = |err| once(async { Err(err) }).right_stream();
+        Box::pin(try_stream! {
+            for await payload in transport.as_pin_box() {
+                let payload = payload?;
+                // ignore the packet in case it has no content
+                // this could happen if the underliying websocket
+                // receives a packet with a type other than
+                // text or binary
+                if payload.len() == 0 {
+                    continue;
+                }
 
-            if let Err(err) = payload {
-                return error_gen(err);
+                for await packet in Self::parse_payload(payload) {
+                    yield packet?;
+                }
             }
-
-            // SAFETY: checked is some above
-            let payload = Payload::try_from(payload.unwrap());
-            if let Err(err) = payload {
-                return error_gen(err);
-            }
-
-            // SAFETY: checked is some above
-            stream::iter(payload.unwrap().into_iter())
-                .map(|val| Ok(Some(val)))
-                .left_stream()
-        });
-
-        // Flatten stream of streams into stream
-        let stream = stream.flatten();
-        Ok(Box::pin(stream))
+        })
     }
 
     pub async fn disconnect(&self) -> Result<()> {
@@ -146,7 +182,10 @@ impl Socket {
             packet.into()
         };
 
-        if let Err(error) = self.transport.as_transport().emit(data, is_binary).await {
+        let lock = self.transport.lock().await;
+        let fut = lock.as_transport().emit(data, is_binary);
+
+        if let Err(error) = fut.await {
             self.call_error_callback(error.to_string());
             return Err(error);
         }
@@ -193,6 +232,19 @@ impl Socket {
         }
 
         self.connected.store(false, Ordering::Release);
+    }
+}
+
+impl Stream for Socket {
+    type Item = Result<Packet>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let mut lock = ready!(Box::pin(self.generator.lock()).poll_unpin(cx));
+
+        lock.poll_next_unpin(cx)
     }
 }
 

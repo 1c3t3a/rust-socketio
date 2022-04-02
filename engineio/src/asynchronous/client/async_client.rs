@@ -1,15 +1,28 @@
-use crate::{
-    asynchronous::async_socket::Socket as InnerSocket, error::Result, Error, Packet, PacketId,
-};
-use bytes::Bytes;
-use futures_util::{Stream, StreamExt};
+use std::{fmt::Debug, pin::Pin, sync::Arc};
 
-#[derive(Clone, Debug)]
+use crate::{
+    asynchronous::{async_socket::Socket as InnerSocket, generator::Generator},
+    error::Result,
+    Packet,
+};
+use async_stream::try_stream;
+use futures_util::{ready, FutureExt, Stream, StreamExt};
+use tokio::sync::Mutex;
+
+#[derive(Clone)]
 pub struct Client {
     pub(super) socket: InnerSocket,
+    generator: Arc<Mutex<Generator<Result<Packet>>>>,
 }
 
 impl Client {
+    pub(super) fn new(socket: InnerSocket) -> Self {
+        Client {
+            socket: socket.clone(),
+            generator: Arc::new(Mutex::new(Self::stream(socket))),
+        }
+    }
+
     pub async fn close(&self) -> Result<()> {
         self.socket.disconnect().await
     }
@@ -30,48 +43,17 @@ impl Client {
         self.socket.emit(packet).await
     }
 
-    #[doc(hidden)]
-    pub fn stream(&self) -> Result<impl Stream<Item = Result<Option<Packet>>> + '_> {
-        let stream = self.socket.stream()?.then(|item| async {
-            let packet = item?;
-
-            if let Some(packet) = packet {
-                // check for the appropriate action or callback
-                self.socket.handle_packet(packet.clone());
-                match packet.packet_id {
-                    PacketId::MessageBinary => {
-                        self.socket.handle_data(packet.data.clone());
-                    }
-                    PacketId::Message => {
-                        self.socket.handle_data(packet.data.clone());
-                    }
-                    PacketId::Close => {
-                        self.socket.handle_close();
-                    }
-                    PacketId::Open => {
-                        unreachable!("Won't happen as we open the connection beforehand");
-                    }
-                    PacketId::Upgrade => {
-                        // this is already checked during the handshake, so just do nothing here
-                    }
-                    PacketId::Ping => {
-                        self.socket.pinged().await;
-                        self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
-                    }
-                    PacketId::Pong => {
-                        // this will never happen as the pong packet is
-                        // only sent by the client
-                        return Err(Error::InvalidPacket());
-                    }
-                    PacketId::Noop => (),
-                }
-                Ok(Some(packet))
-            } else {
-                Ok(None)
+    /// Static method that returns a generator for each element of the stream.
+    fn stream(
+        socket: InnerSocket,
+    ) -> Pin<Box<impl Stream<Item = Result<Packet>> + 'static + Send>> {
+        Box::pin(try_stream! {
+            for await item in socket.clone() {
+                let packet = item?;
+                socket.handle_inconming_packet(packet.clone()).await?;
+                yield packet;
             }
-        });
-
-        Ok(Box::pin(stream))
+        })
     }
 
     /// Check if the underlying transport client is connected.
@@ -80,11 +62,32 @@ impl Client {
     }
 }
 
+impl Stream for Client {
+    type Item = Result<Packet>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let mut lock = ready!(Box::pin(self.generator.lock()).poll_unpin(cx));
+        lock.poll_next_unpin(cx)
+    }
+}
+
+impl Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("socket", &self.socket)
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod test {
 
     use super::*;
     use crate::{asynchronous::ClientBuilder, header::HeaderMap, packet::PacketId, Error};
+    use bytes::Bytes;
     use futures_util::StreamExt;
     use native_tls::TlsConnector;
     use url::Url;
@@ -92,7 +95,7 @@ mod test {
     #[tokio::test]
     async fn test_illegal_actions() -> Result<()> {
         let url = crate::test::engine_io_server()?;
-        let sut = builder(url.clone()).build().await?;
+        let mut sut = builder(url.clone()).build().await?;
 
         assert!(sut
             .emit(Packet::new(PacketId::Close, Bytes::new()))
@@ -101,7 +104,7 @@ mod test {
 
         sut.connect().await?;
 
-        assert!(sut.stream()?.next().await.unwrap().is_ok());
+        assert!(sut.next().await.unwrap().is_ok());
 
         assert!(builder(Url::parse("fake://fake.fake").unwrap())
             .build_websocket()
@@ -147,23 +150,27 @@ mod test {
     }
 
     async fn test_connection(socket: Client) -> Result<()> {
-        let socket = socket;
+        let mut socket = socket;
 
         socket.connect().await.unwrap();
 
         assert_eq!(
-            socket.stream()?.next().await.unwrap()?,
-            Some(Packet::new(PacketId::Message, "hello client"))
+            socket.next().await.unwrap()?,
+            Packet::new(PacketId::Message, "hello client")
         );
+        println!("received msg, abut to send");
 
         socket
             .emit(Packet::new(PacketId::Message, "respond"))
             .await?;
 
+        println!("send msg");
+
         assert_eq!(
-            socket.stream()?.next().await.unwrap()?,
-            Some(Packet::new(PacketId::Message, "Roger Roger"))
+            socket.next().await.unwrap()?,
+            Packet::new(PacketId::Message, "Roger Roger")
         );
+        println!("received 2");
 
         socket.close().await
     }
@@ -172,25 +179,25 @@ mod test {
     async fn test_connection_long() -> Result<()> {
         // Long lived socket to receive pings
         let url = crate::test::engine_io_server()?;
-        let socket = builder(url).build().await?;
+        let mut socket = builder(url).build().await?;
 
         socket.connect().await?;
 
         // hello client
         assert!(matches!(
-            socket.stream()?.next().await.unwrap()?,
-            Some(Packet {
+            socket.next().await.unwrap()?,
+            Packet {
                 packet_id: PacketId::Message,
                 ..
-            })
+            }
         ));
         // Ping
         assert!(matches!(
-            socket.stream()?.next().await.unwrap()?,
-            Some(Packet {
+            socket.next().await.unwrap()?,
+            Packet {
                 packet_id: PacketId::Ping,
                 ..
-            })
+            }
         ));
 
         socket.disconnect().await?;
@@ -225,9 +232,9 @@ mod test {
     #[tokio::test]
     async fn test_connection_dynamic_secure() -> Result<()> {
         let url = crate::test::engine_io_server_secure()?;
-        let mut builder = builder(url);
-        builder = builder.tls_config(crate::test::tls_connector()?);
-        let socket = builder.build().await?;
+        let mut socket_builder = builder(url);
+        socket_builder = socket_builder.tls_config(crate::test::tls_connector()?);
+        let socket = socket_builder.build().await?;
         test_connection(socket).await
     }
 

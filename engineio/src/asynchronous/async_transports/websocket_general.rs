@@ -1,8 +1,9 @@
-use std::{borrow::Cow, str::from_utf8, sync::Arc};
+use std::{borrow::Cow, str::from_utf8, sync::Arc, task::Poll};
 
 use crate::{error::Result, Error, Packet, PacketId};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{
+    ready,
     stream::{SplitSink, SplitStream},
     FutureExt, SinkExt, Stream, StreamExt,
 };
@@ -12,7 +13,9 @@ use tungstenite::Message;
 
 /// A general purpose asynchronous websocket transport type. Holds
 /// the sender and receiver stream of a websocket connection
-/// and implements the common methods `update`, `poll` and `emit`.
+/// and implements the common methods `update` and `emit`. This also
+/// implements `Stream`.
+#[derive(Clone)]
 pub(crate) struct AsyncWebsocketGeneralTransport {
     sender: Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>,
     receiver: Arc<Mutex<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>>,
@@ -72,26 +75,33 @@ impl AsyncWebsocketGeneralTransport {
 
         Ok(())
     }
+}
 
-    pub(crate) fn stream(&self) -> impl Stream<Item = Result<Bytes>> + '_ {
-        self.receiver
-            .lock()
-            .into_stream()
-            .then(|mut rec| async move {
-                loop {
-                    let msg = rec.next().await.ok_or(Error::IncompletePacket())??;
-                    // only propagate binary and text messages
-                    if msg.is_binary() {
-                        let data = msg.into_data();
-                        let mut msg = BytesMut::with_capacity(data.len() + 1);
-                        msg.put_u8(PacketId::Message as u8);
-                        msg.put(data.as_ref());
+impl Stream for AsyncWebsocketGeneralTransport {
+    type Item = Result<Bytes>;
 
-                        return Ok(msg.freeze());
-                    } else if msg.is_text() {
-                        return Ok(Bytes::from(msg.into_data()));
-                    }
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        loop {
+            let mut lock = ready!(Box::pin(self.receiver.lock()).poll_unpin(cx));
+            let next = ready!(lock.poll_next_unpin(cx));
+
+            match next {
+                Some(Ok(Message::Text(str))) => return Poll::Ready(Some(Ok(Bytes::from(str)))),
+                Some(Ok(Message::Binary(data))) => {
+                    let mut msg = BytesMut::with_capacity(data.len() + 1);
+                    msg.put_u8(PacketId::Message as u8);
+                    msg.put(data.as_ref());
+
+                    return Poll::Ready(Some(Ok(msg.freeze())));
                 }
-            })
+                // ignore packets other than text and binary
+                Some(Ok(_)) => (),
+                Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
+                None => return Poll::Ready(None),
+            }
+        }
     }
 }

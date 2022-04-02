@@ -1,21 +1,27 @@
+use adler32::adler32;
+use async_stream::try_stream;
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
-use futures_util::{stream::once, FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures_util::{ready, FutureExt, Stream, StreamExt};
 use http::HeaderMap;
 use native_tls::TlsConnector;
-use reqwest::{Client, ClientBuilder};
+use reqwest::{Client, ClientBuilder, Response};
+use std::fmt::Debug;
+use std::time::SystemTime;
 use std::{pin::Pin, sync::Arc};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use url::Url;
 
+use crate::asynchronous::generator::Generator;
 use crate::{asynchronous::transport::AsyncTransport, error::Result, Error};
 
 /// An asynchronous polling type. Makes use of the nonblocking reqwest types and
 /// methods.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PollingTransport {
     client: Client,
     base_url: Arc<RwLock<Url>>,
+    generator: Arc<Mutex<Generator<Result<Bytes>>>>,
 }
 
 impl PollingTransport {
@@ -42,9 +48,54 @@ impl PollingTransport {
         url.query_pairs_mut().append_pair("transport", "polling");
 
         PollingTransport {
-            client,
-            base_url: Arc::new(RwLock::new(url)),
+            client: client.clone(),
+            base_url: Arc::new(RwLock::new(url.clone())),
+            generator: Arc::new(Mutex::new(Self::stream(url, client))),
         }
+    }
+
+    fn address(mut url: Url) -> Result<Url> {
+        let reader = format!("{:#?}", SystemTime::now());
+        let hash = adler32(reader.as_bytes()).unwrap();
+        url.query_pairs_mut().append_pair("t", &hash.to_string());
+        Ok(url)
+    }
+
+    fn send_request(url: Url, client: Client) -> impl Stream<Item = Result<Response>> {
+        try_stream! {
+            let address = Self::address(url);
+
+            yield client
+                .get(address?)
+                .send().await?
+        }
+    }
+
+    fn stream(
+        url: Url,
+        client: Client,
+    ) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + 'static + Send>> {
+        Box::pin(try_stream! {
+            loop {
+                for await elem in Self::send_request(url.clone(), client.clone()) {
+                    for await bytes in elem?.bytes_stream() {
+                        yield bytes?;
+                    }
+                }
+            }
+        })
+    }
+}
+
+impl Stream for PollingTransport {
+    type Item = Result<Bytes>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let mut lock = ready!(Box::pin(self.generator.lock()).poll_unpin(cx));
+        lock.poll_next_unpin(cx)
     }
 }
 
@@ -81,33 +132,6 @@ impl AsyncTransport for PollingTransport {
         Ok(())
     }
 
-    fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>> {
-        let stream = self
-            .address()
-            .into_stream()
-            .map(|address| match address {
-                Ok(addr) => self
-                    .client
-                    .get(addr)
-                    .send()
-                    .map_err(Error::IncompleteResponseFromReqwest)
-                    .left_future(),
-                Err(err) => async { Err(err) }.right_future(),
-            })
-            .then(|resp| async {
-                match resp.await {
-                    Ok(val) => val
-                        .bytes_stream()
-                        .map_err(Error::IncompleteResponseFromReqwest)
-                        .left_stream(),
-                    Err(err) => once(async { Err(err) }).right_stream(),
-                }
-            })
-            .flatten();
-
-        Ok(Box::pin(stream))
-    }
-
     async fn base_url(&self) -> Result<Url> {
         Ok(self.base_url.read().await.clone())
     }
@@ -122,6 +146,15 @@ impl AsyncTransport for PollingTransport {
         }
         *self.base_url.write().await = url;
         Ok(())
+    }
+}
+
+impl Debug for PollingTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PollingTransport")
+            .field("client", &self.client)
+            .field("base_url", &self.base_url)
+            .finish()
     }
 }
 

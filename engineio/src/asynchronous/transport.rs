@@ -9,14 +9,10 @@ use url::Url;
 use super::async_transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
 
 #[async_trait]
-pub trait AsyncTransport {
+pub trait AsyncTransport: Stream<Item = Result<Bytes>> + Unpin {
     /// Sends a packet to the server. This optionally handles sending of a
     /// socketio binary attachment via the boolean attribute `is_binary_att`.
     async fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()>;
-
-    /// Returns a stream over the underlying incoming bytes.
-    /// Can't use
-    fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>>;
 
     /// Returns start of the url. ex. http://localhost:2998/engine.io/?EIO=4&transport=polling
     /// Must have EIO and transport already set.
@@ -38,7 +34,7 @@ pub trait AsyncTransport {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AsyncTransportType {
     Polling(PollingTransport),
     Websocket(WebsocketTransport),
@@ -65,11 +61,19 @@ impl From<WebsocketSecureTransport> for AsyncTransportType {
 
 #[cfg(feature = "async")]
 impl AsyncTransportType {
-    pub fn as_transport(&self) -> &dyn AsyncTransport {
+    pub fn as_transport(&self) -> &(dyn AsyncTransport + Send) {
         match self {
             AsyncTransportType::Polling(transport) => transport,
             AsyncTransportType::Websocket(transport) => transport,
             AsyncTransportType::WebsocketSecure(transport) => transport,
+        }
+    }
+
+    pub fn as_pin_box(&mut self) -> Pin<Box<&mut (dyn AsyncTransport + Send)>> {
+        match self {
+            AsyncTransportType::Polling(transport) => Box::pin(transport),
+            AsyncTransportType::Websocket(transport) => Box::pin(transport),
+            AsyncTransportType::WebsocketSecure(transport) => Box::pin(transport),
         }
     }
 }

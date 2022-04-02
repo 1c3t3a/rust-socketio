@@ -19,6 +19,7 @@ use super::websocket_general::AsyncWebsocketGeneralTransport;
 /// An asynchronous websocket transport type.
 /// This type only allows for plain websocket
 /// connections ("ws://").
+#[derive(Clone)]
 pub struct WebsocketTransport {
     inner: AsyncWebsocketGeneralTransport,
     base_url: Arc<RwLock<Url>>,
@@ -60,10 +61,6 @@ impl AsyncTransport for WebsocketTransport {
         self.inner.emit(data, is_binary_att).await
     }
 
-    fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>> {
-        Ok(Box::pin(self.inner.stream()))
-    }
-
     async fn base_url(&self) -> Result<Url> {
         Ok(self.base_url.read().await.clone())
     }
@@ -79,6 +76,17 @@ impl AsyncTransport for WebsocketTransport {
         url.set_scheme("ws").unwrap();
         *self.base_url.write().await = url;
         Ok(())
+    }
+}
+
+impl Stream for WebsocketTransport {
+    type Item = Result<Bytes>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.inner.poll_next_unpin(cx)
     }
 }
 
@@ -143,7 +151,7 @@ mod test {
 
     #[tokio::test]
     async fn websocket_secure_debug() -> Result<()> {
-        let transport = new().await?;
+        let mut transport = new().await?;
         assert_eq!(
             format!("{:?}", transport),
             format!(
@@ -151,8 +159,8 @@ mod test {
                 transport.base_url().await?.to_string()
             )
         );
-        println!("{:?}", transport.stream()?.next().await.unwrap());
-        println!("{:?}", transport.stream()?.next().await.unwrap());
+        println!("{:?}", transport.next().await.unwrap());
+        println!("{:?}", transport.next().await.unwrap());
         Ok(())
     }
 }

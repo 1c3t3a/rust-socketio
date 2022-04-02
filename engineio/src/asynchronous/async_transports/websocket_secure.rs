@@ -21,6 +21,7 @@ use super::websocket_general::AsyncWebsocketGeneralTransport;
 /// An asynchronous websocket transport type.
 /// This type only allows for secure websocket
 /// connections ("wss://").
+#[derive(Clone)]
 pub struct WebsocketSecureTransport {
     inner: AsyncWebsocketGeneralTransport,
     base_url: Arc<RwLock<Url>>,
@@ -63,14 +64,21 @@ impl WebsocketSecureTransport {
     }
 }
 
+impl Stream for WebsocketSecureTransport {
+    type Item = Result<Bytes>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.inner.poll_next_unpin(cx)
+    }
+}
+
 #[async_trait]
 impl AsyncTransport for WebsocketSecureTransport {
     async fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()> {
         self.inner.emit(data, is_binary_att).await
-    }
-
-    fn stream(&self) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes>> + '_>>> {
-        Ok(Box::pin(self.inner.stream()))
     }
 
     async fn base_url(&self) -> Result<Url> {
