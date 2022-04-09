@@ -1,25 +1,24 @@
-use std::{fmt::Debug, pin::Pin, sync::Arc};
+use std::{fmt::Debug, pin::Pin};
 
 use crate::{
-    asynchronous::{async_socket::Socket as InnerSocket, generator::Generator},
+    asynchronous::{async_socket::Socket as InnerSocket, generator::StreamGenerator},
     error::Result,
     Packet,
 };
 use async_stream::try_stream;
-use futures_util::{ready, FutureExt, Stream, StreamExt};
-use tokio::sync::Mutex;
+use futures_util::{Stream, StreamExt};
 
 #[derive(Clone)]
 pub struct Client {
     pub(super) socket: InnerSocket,
-    generator: Arc<Mutex<Generator<Result<Packet>>>>,
+    generator: StreamGenerator<Packet>,
 }
 
 impl Client {
     pub(super) fn new(socket: InnerSocket) -> Self {
         Client {
             socket: socket.clone(),
-            generator: Arc::new(Mutex::new(Self::stream(socket))),
+            generator: StreamGenerator::new(Self::stream(socket)),
         }
     }
 
@@ -66,11 +65,10 @@ impl Stream for Client {
     type Item = Result<Packet>;
 
     fn poll_next(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        let mut lock = ready!(Box::pin(self.generator.lock()).poll_unpin(cx));
-        lock.poll_next_unpin(cx)
+        self.generator.poll_next_unpin(cx)
     }
 }
 

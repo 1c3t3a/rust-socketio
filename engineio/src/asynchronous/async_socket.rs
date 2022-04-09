@@ -9,7 +9,7 @@ use std::{
 
 use async_stream::try_stream;
 use bytes::Bytes;
-use futures_util::{ready, FutureExt, Stream, StreamExt};
+use futures_util::{Stream, StreamExt};
 use tokio::{runtime::Handle, sync::Mutex, time::Instant};
 
 use crate::{
@@ -19,7 +19,7 @@ use crate::{
     Error, Packet, PacketId,
 };
 
-use super::generator::Generator;
+use super::generator::StreamGenerator;
 
 #[derive(Clone)]
 pub struct Socket {
@@ -34,7 +34,7 @@ pub struct Socket {
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     connection_data: Arc<HandshakePacket>,
-    generator: Arc<Mutex<Generator<Result<Packet>>>>,
+    generator: StreamGenerator<Packet>,
 }
 
 impl Socket {
@@ -59,7 +59,7 @@ impl Socket {
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
             connection_data: Arc::new(handshake),
-            generator: Arc::new(Mutex::new(Self::stream(transport))),
+            generator: StreamGenerator::new(Self::stream(transport)),
         }
     }
 
@@ -239,12 +239,10 @@ impl Stream for Socket {
     type Item = Result<Packet>;
 
     fn poll_next(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        let mut lock = ready!(Box::pin(self.generator.lock()).poll_unpin(cx));
-
-        lock.poll_next_unpin(cx)
+        self.generator.poll_next_unpin(cx)
     }
 }
 
