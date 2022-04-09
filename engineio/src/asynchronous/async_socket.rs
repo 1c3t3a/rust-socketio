@@ -134,16 +134,7 @@ impl Socket {
         // to a packet stream
         Box::pin(try_stream! {
             for await payload in transport.as_pin_box() {
-                let payload = payload?;
-                // ignore the packet in case it has no content
-                // this could happen if the underliying websocket
-                // receives a packet with a type other than
-                // text or binary
-                if payload.len() == 0 {
-                    continue;
-                }
-
-                for await packet in Self::parse_payload(payload) {
+                for await packet in Self::parse_payload(payload?) {
                     yield packet?;
                 }
             }
