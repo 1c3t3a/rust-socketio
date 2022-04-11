@@ -2,17 +2,17 @@ use adler32::adler32;
 use async_stream::try_stream;
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
-use futures_util::{ready, FutureExt, Stream, StreamExt};
+use futures_util::{Stream, StreamExt};
 use http::HeaderMap;
 use native_tls::TlsConnector;
 use reqwest::{Client, ClientBuilder, Response};
 use std::fmt::Debug;
 use std::time::SystemTime;
 use std::{pin::Pin, sync::Arc};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use url::Url;
 
-use crate::asynchronous::generator::Generator;
+use crate::asynchronous::generator::StreamGenerator;
 use crate::{asynchronous::transport::AsyncTransport, error::Result, Error};
 
 /// An asynchronous polling type. Makes use of the nonblocking reqwest types and
@@ -21,7 +21,7 @@ use crate::{asynchronous::transport::AsyncTransport, error::Result, Error};
 pub struct PollingTransport {
     client: Client,
     base_url: Arc<RwLock<Url>>,
-    generator: Arc<Mutex<Generator<Result<Bytes>>>>,
+    generator: StreamGenerator<Bytes>,
 }
 
 impl PollingTransport {
@@ -50,7 +50,7 @@ impl PollingTransport {
         PollingTransport {
             client: client.clone(),
             base_url: Arc::new(RwLock::new(url.clone())),
-            generator: Arc::new(Mutex::new(Self::stream(url, client))),
+            generator: StreamGenerator::new(Self::stream(url, client)),
         }
     }
 
@@ -91,11 +91,10 @@ impl Stream for PollingTransport {
     type Item = Result<Bytes>;
 
     fn poll_next(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        let mut lock = ready!(Box::pin(self.generator.lock()).poll_unpin(cx));
-        lock.poll_next_unpin(cx)
+        self.generator.poll_next_unpin(cx)
     }
 }
 
