@@ -33,29 +33,36 @@ impl ClientBuilder {
     /// will be used.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{ClientBuilder, Payload, Client};
+    /// use rust_socketio::{Payload, asynchronous::{ClientBuilder, Client}};
     /// use serde_json::json;
+    /// use futures_util::future::FutureExt;
     ///
     ///
-    /// let callback = |payload: Payload, socket: Client| {
-    ///            match payload {
-    ///                Payload::String(str) => println!("Received: {}", str),
-    ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
-    ///            }
-    /// };
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let callback = |payload: Payload, socket: Client| {
+    ///         async move {
+    ///             match payload {
+    ///                 Payload::String(str) => println!("Received: {}", str),
+    ///                 Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///             }
+    ///         }.boxed()
+    ///     };
     ///
-    /// let mut socket = ClientBuilder::new("http://localhost:4200")
-    ///     .namespace("/admin")
-    ///     .on("test", callback)
-    ///     .connect()
-    ///     .expect("error while connecting");
+    ///     let mut socket = ClientBuilder::new("http://localhost:4200")
+    ///         .namespace("/admin")
+    ///         .on("test", callback)
+    ///         .connect()
+    ///         .await
+    ///         .expect("error while connecting");
     ///
-    /// // use the socket
-    /// let json_payload = json!({"token": 123});
+    ///     // use the socket
+    ///     let json_payload = json!({"token": 123});
     ///
-    /// let result = socket.emit("foo", json_payload);
+    ///     let result = socket.emit("foo", json_payload).await;
     ///
-    /// assert!(result.is_ok());
+    ///     assert!(result.is_ok());
+    /// }
     /// ```
     pub fn new<T: Into<String>>(address: T) -> Self {
         Self {
@@ -85,20 +92,65 @@ impl ClientBuilder {
     ///
     /// # Example
     /// ```rust
-    /// use rust_socketio::{ClientBuilder, Payload};
+    /// use rust_socketio::{asynchronous::ClientBuilder, Payload};
+    /// use futures_util::FutureExt;
     ///
-    /// let socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .namespace("/admin")
-    ///     .on("test", |payload: Payload, _| {
-    ///            match payload {
-    ///                Payload::String(str) => println!("Received: {}", str),
-    ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
-    ///            }
-    ///     })
-    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
-    ///     .connect();
-    ///
+    ///  #[tokio::main]
+    /// async fn main() {
+    ///     let socket = ClientBuilder::new("http://localhost:4200/")
+    ///         .namespace("/admin")
+    ///         .on("test", |payload: Payload, _| {
+    ///             async move {
+    ///                 match payload {
+    ///                        Payload::String(str) => println!("Received: {}", str),
+    ///                       Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///                 }
+    ///             }
+    ///             .boxed()
+    ///         })
+    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .connect()
+    ///         .await;
+    /// }
     /// ```
+    ///
+    /// # Issues with type inference for the callback method
+    ///
+    /// Currently stable Rust does not contain types like `AsyncFnMut`.
+    /// That is why this library uses the type `FnMut(..) -> BoxFuture<_>`,
+    /// which basically represents a closure or function that returns a
+    /// boxed future that can be executed in an async executor.
+    /// The complicated constraints for the callback function
+    /// bring the Rust compiler to it's limits, resulting in confusing error
+    /// messages when passing in a variable that holds a closure (to the `on` method).
+    /// In order to make sure type inference goes well, the [`futures_util::FutureExt::boxed`]
+    /// method can be used on an async block (the future) to make sure the return type
+    /// is conform with the generic requirements. An example can be found here:
+    ///
+    /// ```rust
+    /// use rust_socketio::{asynchronous::ClientBuilder, Payload};
+    /// use futures_util::FutureExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let callback = |payload: Payload, _| {
+    ///             async move {
+    ///                 match payload {
+    ///                        Payload::String(str) => println!("Received: {}", str),
+    ///                       Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///                 }
+    ///             }
+    ///             .boxed() // <-- this makes sure we end up with a `BoxFuture<_>`
+    ///         };
+    ///
+    ///     let socket = ClientBuilder::new("http://localhost:4200/")
+    ///         .namespace("/admin")
+    ///         .on("test", callback)
+    ///         .connect()
+    ///         .await;
+    /// }
+    /// ```
+    ///
     pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
         F: for<'a> std::ops::FnMut(Payload, Client) -> BoxFuture<'static, ()>
@@ -114,20 +166,24 @@ impl ClientBuilder {
     /// both the `polling` as well as the `websocket` transport type.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{ClientBuilder, Payload};
+    /// use rust_socketio::{asynchronous::ClientBuilder, Payload};
     /// use native_tls::TlsConnector;
+    /// use futures_util::future::FutureExt;
     ///
-    /// let tls_connector =  TlsConnector::builder()
-    ///            .use_sni(true)
-    ///            .build()
-    ///            .expect("Found illegal configuration");
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let tls_connector =  TlsConnector::builder()
+    ///                .use_sni(true)
+    ///                .build()
+    ///             .expect("Found illegal configuration");
     ///
-    /// let socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .namespace("/admin")
-    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
-    ///     .tls_config(tls_connector)
-    ///     .connect();
-    ///
+    ///     let socket = ClientBuilder::new("http://localhost:4200/")
+    ///         .namespace("/admin")
+    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .tls_config(tls_connector)
+    ///         .connect()
+    ///         .await;
+    /// }
     /// ```
     pub fn tls_config(mut self, tls_config: TlsConnector) -> Self {
         self.tls_config = Some(tls_config);
@@ -139,15 +195,18 @@ impl ClientBuilder {
     /// via the transport layer.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{ClientBuilder, Payload};
+    /// use rust_socketio::{asynchronous::ClientBuilder, Payload};
+    /// use futures_util::future::FutureExt;
     ///
-    ///
-    /// let socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .namespace("/admin")
-    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
-    ///     .opening_header("accept-encoding", "application/json")
-    ///     .connect();
-    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let socket = ClientBuilder::new("http://localhost:4200/")
+    ///         .namespace("/admin")
+    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .opening_header("accept-encoding", "application/json")
+    ///         .connect()
+    ///         .await;
+    /// }
     /// ```
     pub fn opening_header<T: Into<HeaderValue>, K: Into<String>>(mut self, key: K, val: T) -> Self {
         match self.opening_headers {
@@ -164,17 +223,21 @@ impl ClientBuilder {
     }
 
     /// Specifies which EngineIO [`TransportType`] to use.
+    ///
     /// # Example
     /// ```rust
-    /// use rust_socketio::{ClientBuilder, TransportType};
+    /// use rust_socketio::{asynchronous::ClientBuilder, TransportType};
     ///
-    /// let socket = ClientBuilder::new("http://localhost:4200/")
-    ///     // Use websockets to handshake and connect.
-    ///     .transport_type(TransportType::Websocket)
-    ///     .connect()
-    ///     .expect("connection failed");
-    ///
-    /// // use the socket
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let socket = ClientBuilder::new("http://localhost:4200/")
+    ///         // Use websockets to handshake and connect.
+    ///         .transport_type(TransportType::Websocket)
+    ///         .connect()
+    ///         .await
+    ///         .expect("connection failed");
+    /// }
+    /// ```
     pub fn transport_type(mut self, transport_type: TransportType) -> Self {
         self.transport_type = transport_type;
 
@@ -187,22 +250,26 @@ impl ClientBuilder {
     /// thread to start polling for packets. Used with callbacks.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{ClientBuilder, Payload};
+    /// use rust_socketio::{asynchronous::ClientBuilder, Payload};
     /// use serde_json::json;
+    /// use futures_util::future::FutureExt;
     ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///         .namespace("/admin")
+    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .connect()
+    ///         .await
+    ///         .expect("connection failed");
     ///
-    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .namespace("/admin")
-    ///     .on("error", |err, _| eprintln!("Client error!: {:#?}", err))
-    ///     .connect()
-    ///     .expect("connection failed");
+    ///     // use the socket
+    ///     let json_payload = json!({"token": 123});
     ///
-    /// // use the socket
-    /// let json_payload = json!({"token": 123});
+    ///     let result = socket.emit("foo", json_payload).await;
     ///
-    /// let result = socket.emit("foo", json_payload);
-    ///
-    /// assert!(result.is_ok());
+    ///     assert!(result.is_ok());
+    /// }
     /// ```
     pub async fn connect(self) -> Result<Client> {
         let socket = self.connect_manual().await?;
