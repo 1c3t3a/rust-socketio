@@ -420,7 +420,7 @@ mod test {
     use std::time::Duration;
 
     use bytes::Bytes;
-    use futures_util::{future::BoxFuture, StreamExt};
+    use futures_util::{FutureExt, StreamExt};
     use native_tls::TlsConnector;
     use serde_json::json;
     use tokio::time::sleep;
@@ -438,12 +438,13 @@ mod test {
 
         let socket = ClientBuilder::new(url)
             .on("test", |msg, _| {
-                Box::pin(async {
+                async {
                     match msg {
                         Payload::String(str) => println!("Received string: {}", str),
                         Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
                     }
-                })
+                }
+                .boxed()
             })
             .connect()
             .await?;
@@ -461,7 +462,7 @@ mod test {
                 Payload::String(payload.to_string()),
                 Duration::from_secs(1),
                 |message: Payload, socket: Client| {
-                    Box::pin(async move {
+                    async move {
                         let result = socket
                             .emit(
                                 "test",
@@ -475,7 +476,8 @@ mod test {
                             println!("Received string Ack");
                             println!("Ack data: {}", str);
                         }
-                    })
+                    }
+                    .boxed()
                 },
             )
             .await;
@@ -505,10 +507,10 @@ mod test {
             .tls_config(tls_connector)
             .opening_header("accept-encoding", "application/json")
             .on("test", |str, _| {
-                Box::pin(async move { println!("Received: {:#?}", str) })
+                async move { println!("Received: {:#?}", str) }.boxed()
             })
             .on("message", |payload, _| {
-                Box::pin(async move { println!("{:#?}", payload) })
+                async move { println!("{:#?}", payload) }.boxed()
             })
             .connect()
             .await?;
@@ -525,10 +527,11 @@ mod test {
                 "binary",
                 json!("pls ack"),
                 Duration::from_secs(1),
-                |payload, _| Box::pin(async move {
+                |payload, _| async move {
                     println!("Yehaa the ack got acked");
                     println!("With data: {:#?}", payload);
-                })
+                }
+                .boxed()
             )
             .await
             .is_ok());
@@ -555,10 +558,10 @@ mod test {
             .tls_config(tls_connector)
             .opening_header("accept-encoding", "application/json")
             .on("test", |str, _| {
-                Box::pin(async move { println!("Received: {:#?}", str) })
+                async move { println!("Received: {:#?}", str) }.boxed()
             })
             .on("message", |payload, _| {
-                Box::pin(async move { println!("{:#?}", payload) })
+                async move { println!("{:#?}", payload) }.boxed()
             })
             .connect_manual()
             .await?;
@@ -575,10 +578,11 @@ mod test {
                 "binary",
                 json!("pls ack"),
                 Duration::from_secs(1),
-                |payload, _| Box::pin(async move {
+                |payload, _| async move {
                     println!("Yehaa the ack got acked");
                     println!("With data: {:#?}", payload);
-                })
+                }
+                .boxed()
             )
             .await
             .is_ok());
@@ -702,13 +706,14 @@ mod test {
         );
 
         let cb = |message: Payload, _| {
-            Box::pin(async {
+            async {
                 println!("Yehaa! My ack got acked?");
                 if let Payload::String(str) = message {
                     println!("Received string ack");
                     println!("Ack data: {}", str);
                 }
-            }) as BoxFuture<_>
+            }
+            .boxed()
         };
 
         assert!(socket
