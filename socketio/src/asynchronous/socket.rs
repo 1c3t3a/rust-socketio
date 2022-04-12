@@ -1,3 +1,4 @@
+use super::generator::StreamGenerator;
 use crate::{
     error::Result,
     packet::{Packet, PacketId},
@@ -5,7 +6,7 @@ use crate::{
 };
 use async_stream::try_stream;
 use bytes::Bytes;
-use futures_util::{ready, FutureExt, Stream, StreamExt};
+use futures_util::{Stream, StreamExt};
 use rust_engineio::{
     asynchronous::Client as EngineClient, Packet as EnginePacket, PacketId as EnginePacketId,
 };
@@ -17,16 +18,13 @@ use std::{
         Arc,
     },
 };
-use tokio::sync::Mutex;
-
-use super::generator::Generator;
 
 #[derive(Clone)]
 pub(crate) struct Socket {
     //TODO: 0.4.0 refactor this
     engine_client: Arc<EngineClient>,
     connected: Arc<AtomicBool>,
-    generator: Arc<Mutex<Generator<Result<Packet>>>>,
+    generator: StreamGenerator<Packet>,
 }
 
 impl Socket {
@@ -36,7 +34,7 @@ impl Socket {
         Ok(Socket {
             engine_client: Arc::new(engine_client.clone()),
             connected: connected.clone(),
-            generator: Arc::new(Mutex::new(Self::stream(engine_client, connected))),
+            generator: StreamGenerator::new(Self::stream(engine_client, connected)),
         })
     }
 
@@ -213,11 +211,10 @@ impl Stream for Socket {
     type Item = Result<Packet>;
 
     fn poll_next(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        let mut lock = ready!(Box::pin(self.generator.lock()).poll_unpin(cx));
-        lock.poll_next_unpin(cx)
+        self.generator.poll_next_unpin(cx)
     }
 }
 

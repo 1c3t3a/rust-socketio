@@ -29,7 +29,7 @@ pub struct Ack {
 
 /// A socket which handles communication with the server. It's initialized with
 /// a specific address as well as an optional namespace to connect to. If `None`
-/// is given the server will connect to the default namespace `"/"`.
+/// is given the client will connect to the default namespace `"/"`.
 #[derive(Clone)]
 pub struct Client {
     /// The inner socket client to delegate the methods to.
@@ -81,22 +81,29 @@ impl Client {
     ///
     /// # Example
     /// ```
-    /// use rust_socketio::{ClientBuilder, Client, Payload};
+    /// use rust_socketio::{asynchronous::{ClientBuilder, Client}, Payload};
     /// use serde_json::json;
+    /// use futures_util::FutureExt;
     ///
-    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, socket: Client| {
-    ///         println!("Received: {:#?}", payload);
-    ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
-    ///      })
-    ///     .connect()
-    ///     .expect("connection failed");
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///         .on("test", |payload: Payload, socket: Client| {
+    ///             async move {
+    ///                 println!("Received: {:#?}", payload);
+    ///                 socket.emit("test", json!({"hello": true})).await.expect("Server unreachable");
+    ///             }.boxed()
+    ///         })
+    ///         .connect()
+    ///         .await
+    ///         .expect("connection failed");
     ///
-    /// let json_payload = json!({"token": 123});
+    ///     let json_payload = json!({"token": 123});
     ///
-    /// let result = socket.emit("foo", json_payload);
+    ///     let result = socket.emit("foo", json_payload).await;
     ///
-    /// assert!(result.is_ok());
+    ///     assert!(result.is_ok());
+    /// }
     /// ```
     #[inline]
     pub async fn emit<E, D>(&self, event: E, data: D) -> Result<()>
@@ -111,26 +118,34 @@ impl Client {
     /// packet.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{ClientBuilder, Payload, Client};
+    /// use rust_socketio::{asynchronous::{ClientBuilder, Client}, Payload};
     /// use serde_json::json;
+    /// use futures_util::{FutureExt, future::BoxFuture};
     ///
-    /// fn handle_test(payload: Payload, socket: Client) {
-    ///     println!("Received: {:#?}", payload);
-    ///     socket.emit("test", json!({"hello": true})).expect("Server unreachable");
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     // apparently the syntax for functions is a bit verbose as rust currently doesn't
+    ///     // support an `AsyncFnMut` type that conform with async functions
+    ///     fn handle_test(payload: Payload, socket: Client) -> BoxFuture<'static, ()> {
+    ///         async move {
+    ///             println!("Received: {:#?}", payload);
+    ///             socket.emit("test", json!({"hello": true})).await.expect("Server unreachable");
+    ///         }.boxed()
+    ///     }
+    ///
+    ///     let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///         .on("test", handle_test)
+    ///         .connect()
+    ///         .await
+    ///         .expect("connection failed");
+    ///
+    ///     let json_payload = json!({"token": 123});
+    ///
+    ///     socket.emit("foo", json_payload).await;
+    ///
+    ///     // disconnect from the server
+    ///     socket.disconnect().await;
     /// }
-    ///
-    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .on("test", handle_test)
-    ///     .connect()
-    ///     .expect("connection failed");
-    ///
-    /// let json_payload = json!({"token": 123});
-    ///
-    /// socket.emit("foo", json_payload);
-    ///
-    /// // disconnect from the server
-    /// socket.disconnect();
-    ///
     /// ```
     pub async fn disconnect(&self) -> Result<()> {
         let disconnect_packet =
@@ -153,29 +168,39 @@ impl Client {
     /// called. The callback consumes a [`Payload`] which represents the data send
     /// by the server.
     ///
+    /// Please note that the requirements on the provided callbacks are similar to the ones
+    /// for [`crate::asynchronous::ClientBuilder::on`].
     /// # Example
     /// ```
-    /// use rust_socketio::{ClientBuilder, Payload, Client};
+    /// use rust_socketio::{asynchronous::{ClientBuilder, Client}, Payload};
     /// use serde_json::json;
     /// use std::time::Duration;
     /// use std::thread::sleep;
+    /// use futures_util::FutureExt;
     ///
-    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
-    ///     .connect()
-    ///     .expect("connection failed");
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///         .on("foo", |payload: Payload, _| async move { println!("Received: {:#?}", payload) }.boxed())
+    ///         .connect()
+    ///         .await
+    ///         .expect("connection failed");
     ///
-    /// let ack_callback = |message: Payload, socket: Client| {
-    ///     match message {
-    ///         Payload::String(str) => println!("{}", str),
-    ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
-    ///    }    
-    /// };
+    ///     let ack_callback = |message: Payload, socket: Client| {
+    ///         async move {
+    ///             match message {
+    ///                 Payload::String(str) => println!("{}", str),
+    ///                 Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
+    ///             }
+    ///         }.boxed()
+    ///     };    
     ///
-    /// let payload = json!({"token": 123});
-    /// socket.emit_with_ack("foo", payload, Duration::from_secs(2), ack_callback).unwrap();
     ///
-    /// sleep(Duration::from_secs(2));
+    ///     let payload = json!({"token": 123});
+    ///     socket.emit_with_ack("foo", payload, Duration::from_secs(2), ack_callback).await.unwrap();
+    ///
+    ///     sleep(Duration::from_secs(2));
+    /// }
     /// ```
     #[inline]
     pub async fn emit_with_ack<F, E, D>(
@@ -370,6 +395,7 @@ impl Stream for Client {
             if let Some(result) = next {
                 match result {
                     Err(err) => {
+                        // call the error callback
                         ready!(
                             Box::pin(self.callback(&Event::Error, err.to_string())).poll_unpin(cx)
                         )?;
@@ -394,7 +420,7 @@ mod test {
     use std::time::Duration;
 
     use bytes::Bytes;
-    use futures_util::StreamExt;
+    use futures_util::{future::BoxFuture, StreamExt};
     use native_tls::TlsConnector;
     use serde_json::json;
     use tokio::time::sleep;
@@ -675,18 +701,22 @@ mod test {
             )
         );
 
+        let cb = |message: Payload, _| {
+            Box::pin(async {
+                println!("Yehaa! My ack got acked?");
+                if let Payload::String(str) = message {
+                    println!("Received string ack");
+                    println!("Ack data: {}", str);
+                }
+            }) as BoxFuture<_>
+        };
+
         assert!(socket
             .emit_with_ack(
                 "test",
                 Payload::String("123".to_owned()),
                 Duration::from_secs(10),
-                |message: Payload, _| Box::pin(async {
-                    println!("Yehaa! My ack got acked?");
-                    if let Payload::String(str) = message {
-                        println!("Received string ack");
-                        println!("Ack data: {}", str);
-                    }
-                })
+                cb
             )
             .await
             .is_ok());
