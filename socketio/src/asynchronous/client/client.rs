@@ -1,6 +1,7 @@
 use std::{collections::HashMap, ops::DerefMut, pin::Pin, sync::Arc, task::Poll};
 
 use futures_util::{future::BoxFuture, ready, FutureExt, Stream, StreamExt};
+use log::trace;
 use rand::{thread_rng, Rng};
 use serde_json::{from_str, Value};
 use tokio::{
@@ -259,7 +260,7 @@ impl Client {
                             }
                         }
                     } else {
-                        // Do something with timed out acks?
+                        trace!("Received an Ack that is now timed out (elapsed time was longer than specified duration)");
                     }
                 }
             }

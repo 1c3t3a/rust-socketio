@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.4.0-alpha.1`](#040a1) - _tbd_
 * [`0.3.1`](#031) - _2022.03.19_
 * [`0.3.0`](#030) - _2021.12.16_
 * [`0.3.0-alpha.2`](#030a3) - _2021.12.04_
@@ -28,6 +29,9 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## _[Unreleased]_
 
 _nothing new to show for… yet!_
+
+## <a name="040a1">[0.4.0-alpha.1] - _Async socket.io version_ </a>
+- Remove deprecated compability import of Client as Socket in project root.
 
 ## <a name="031">[0.3.1] - _Bugfix_ </a>
 

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use futures_util::{future::BoxFuture, StreamExt};
+use log::trace;
 use native_tls::TlsConnector;
 use rust_engineio::{
     asynchronous::ClientBuilder as EngineIoClientBuilder,
@@ -77,10 +78,13 @@ impl ClientBuilder {
 
     /// Sets the target namespace of the client. The namespace should start
     /// with a leading `/`. Valid examples are e.g. `/admin`, `/foo`.
+    /// If the String provided doesn't start with a leading `/`, it is
+    /// added manually.
     pub fn namespace<T: Into<String>>(mut self, namespace: T) -> Self {
         let mut nsp = namespace.into();
         if !nsp.starts_with('/') {
             nsp = "/".to_owned() + &nsp;
+            trace!("Added `/` to the given namespace: {}", nsp);
         }
         self.namespace = nsp;
         self
@@ -279,13 +283,12 @@ impl ClientBuilder {
         tokio::runtime::Handle::current().spawn(async move {
             loop {
                 // tries to restart a poll cycle whenever a 'normal' error occurs,
-                // it just panics on network errors, in case the poll cycle returned
+                // it just logs on network errors, in case the poll cycle returned
                 // `Result::Ok`, the server receives a close frame so it's safe to
                 // terminate
                 for packet in socket_clone.next().await {
                     if let e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
-                        //TODO: 0.3.X handle errors
-                        panic!("{}", e.unwrap_err());
+                        trace!("Network error occured: {}", e.unwrap_err());
                     }
                 }
             }
