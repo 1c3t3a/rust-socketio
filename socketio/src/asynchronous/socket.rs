@@ -21,7 +21,6 @@ use std::{
 
 #[derive(Clone)]
 pub(crate) struct Socket {
-    //TODO: 0.4.0 refactor this
     engine_client: Arc<EngineClient>,
     connected: Arc<AtomicBool>,
     generator: StreamGenerator<Packet>,

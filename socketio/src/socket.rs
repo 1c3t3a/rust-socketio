@@ -78,7 +78,7 @@ impl Socket {
         self.send(socket_packet)
     }
 
-    /// Returns a packet for a payload, could be used for bot binary and non binary
+    /// Returns a packet for a payload, could be used for both binary and non binary
     /// events and acks. Convenance method.
     #[inline]
     pub(crate) fn build_packet_for_payload<'a>(
