@@ -1,6 +1,7 @@
 use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
 use crate::Client;
+use log::trace;
 use native_tls::TlsConnector;
 use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
 use rust_engineio::header::{HeaderMap, HeaderValue};
@@ -87,10 +88,13 @@ impl ClientBuilder {
 
     /// Sets the target namespace of the client. The namespace should start
     /// with a leading `/`. Valid examples are e.g. `/admin`, `/foo`.
+    /// If the String provided doesn't start with a leading `/`, it is
+    /// added manually.
     pub fn namespace<T: Into<String>>(mut self, namespace: T) -> Self {
         let mut nsp = namespace.into();
         if !nsp.starts_with('/') {
             nsp = "/".to_owned() + &nsp;
+            trace!("Added `/` to the given namespace: {}", nsp);
         }
         self.namespace = nsp;
         self
@@ -275,8 +279,7 @@ impl ClientBuilder {
             // terminate
             for packet in socket_clone.iter() {
                 if let e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
-                    //TODO: 0.3.X handle errors
-                    panic!("{}", e.unwrap_err())
+                    trace!("{}", e.unwrap_err())
                 }
             }
         });
