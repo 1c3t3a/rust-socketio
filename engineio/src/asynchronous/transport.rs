@@ -3,7 +3,7 @@ use adler32::adler32;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::Stream;
-use std::time::SystemTime;
+use std::{pin::Pin, time::SystemTime};
 use url::Url;
 
 use super::async_transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
@@ -69,7 +69,7 @@ impl AsyncTransportType {
         }
     }
 
-    pub fn as_pin_box(&mut self) -> std::pin::Pin<Box<&mut (dyn AsyncTransport + Send)>> {
+    pub fn as_pin_box(&mut self) -> Pin<Box<&mut (dyn AsyncTransport + Send)>> {
         match self {
             AsyncTransportType::Polling(transport) => Box::pin(transport),
             AsyncTransportType::Websocket(transport) => Box::pin(transport),

@@ -2,30 +2,19 @@ use std::{collections::HashMap, ops::DerefMut, pin::Pin, sync::Arc, task::Poll};
 
 use futures_util::{future::BoxFuture, ready, FutureExt, Stream, StreamExt};
 use rand::{thread_rng, Rng};
+use serde_json::{from_str, Value};
 use tokio::{
     sync::RwLock,
     time::{Duration, Instant},
 };
 
-use super::callback::Callback;
+use super::{ack::Ack, callback::Callback};
 use crate::{
     asynchronous::socket::Socket as InnerSocket,
     error::Result,
     packet::{Packet, PacketId},
     Event, Payload,
 };
-
-/// Represents an `Ack` as given back to the caller. Holds the internal `id` as
-/// well as the current ack'ed state. Holds data which will be accessible as
-/// soon as the ack'ed state is set to true. An `Ack` that didn't get ack'ed
-/// won't contain data.
-#[derive(Debug)]
-pub struct Ack {
-    pub id: i32,
-    timeout: Duration,
-    time_started: Instant,
-    callback: Callback,
-}
 
 /// A socket which handles communication with the server. It's initialized with
 /// a specific address as well as an optional namespace to connect to. If `None`
@@ -59,8 +48,7 @@ impl Client {
     }
 
     /// Connects the client to a server. Afterwards the `emit_*` methods can be
-    /// called to interact with the server. Attention: it's not allowed to add a
-    /// callback after a call to this method.
+    /// called to interact with the server.
     pub(crate) async fn connect(&self) -> Result<()> {
         // Connect the underlying socket
         self.socket.connect().await?;
@@ -300,38 +288,46 @@ impl Client {
         Ok(())
     }
 
-    /// A method for handling the Event Client Packets.
-    // this could only be called with an event
+    /// A method that parses a packet and eventually calls the corresponding
+    // callback with the supplied data.
     async fn handle_event(&self, packet: &Packet) -> Result<()> {
-        // unwrap the potential data
-        if let Some(data) = &packet.data {
-            // the string must be a valid json array with the event at index 0 and the
-            // payload at index 1. if no event is specified, the message callback is used
-            if let Ok(serde_json::Value::Array(contents)) =
-                serde_json::from_str::<serde_json::Value>(data)
-            {
-                let event: Event = if contents.len() > 1 {
-                    contents
-                        .get(0)
-                        .map(|value| match value {
-                            serde_json::Value::String(ev) => ev,
-                            _ => "message",
-                        })
-                        .unwrap_or("message")
-                        .into()
-                } else {
-                    Event::Message
-                };
-                self.callback(
-                    &event,
-                    contents
-                        .get(1)
-                        .unwrap_or_else(|| contents.get(0).unwrap())
-                        .to_string(),
-                )
-                .await?;
-            }
+        if packet.data.is_none() {
+            return Ok(());
         }
+        let data = packet.data.as_ref().unwrap();
+
+        // a socketio message always comes in one of the following two flavors (both JSON):
+        // 1: `["event", "msg"]`
+        // 2: `["msg"]`
+        // in case 2, the message is ment for the default message event, in case 1 the event
+        // is specified
+        if let Ok(Value::Array(contents)) = from_str::<Value>(data) {
+            let event = if contents.len() > 1 {
+                // case 1: parse event name
+                contents
+                    .get(0)
+                    .map(|value| match value {
+                        Value::String(ev) => ev,
+                        _ => "message",
+                    })
+                    .unwrap_or("message")
+                    .into()
+            } else {
+                // case 2: emit to message event
+                Event::Message
+            };
+
+            // call the correct callback
+            self.callback(
+                &event,
+                contents
+                    .get(1) // case 1: payload lives at index 1
+                    .unwrap_or_else(|| contents.get(0).unwrap()) // case 2: payload lives at index 0
+                    .to_string(),
+            )
+            .await?;
+        }
+
         Ok(())
     }
 
@@ -364,9 +360,10 @@ impl Client {
                         &Event::Error,
                         String::from("Received an ConnectError frame: ")
                             + &packet
-                                .clone()
                                 .data
-                                .unwrap_or_else(|| String::from("\"No error message provided\"")),
+                                .as_ref()
+                                .unwrap_or(&String::from("\"No error message provided\""))
+                                .to_owned(),
                     )
                     .await?;
                 }
@@ -392,21 +389,22 @@ impl Stream for Client {
             // poll for the next payload
             let next = ready!(self.socket.poll_next_unpin(cx));
 
-            if let Some(result) = next {
-                match result {
-                    Err(err) => {
-                        // call the error callback
-                        ready!(
-                            Box::pin(self.callback(&Event::Error, err.to_string())).poll_unpin(cx)
-                        )?;
-                        return Poll::Ready(Some(Err(err)));
-                    }
-                    Ok(packet) => {
-                        // if this packet is not meant for the current namespace, skip it an poll for the next one
-                        if packet.nsp == self.nsp {
-                            ready!(Box::pin(self.handle_socketio_packet(&packet)).poll_unpin(cx))?;
-                            return Poll::Ready(Some(Ok(packet)));
-                        }
+            // end the stream if the underlying one is closed
+            if next.is_none() {
+                return Poll::Ready(None);
+            }
+
+            match next.unwrap() {
+                Err(err) => {
+                    // call the error callback
+                    ready!(Box::pin(self.callback(&Event::Error, err.to_string())).poll_unpin(cx))?;
+                    return Poll::Ready(Some(Err(err)));
+                }
+                Ok(packet) => {
+                    // if this packet is not meant for the current namespace, skip it an poll for the next one
+                    if packet.nsp == self.nsp {
+                        ready!(Box::pin(self.handle_socketio_packet(&packet)).poll_unpin(cx))?;
+                        return Poll::Ready(Some(Ok(packet)));
                     }
                 }
             }
@@ -631,9 +629,9 @@ mod test {
     }
 
     async fn test_socketio_socket(mut socket: Client, nsp: String) -> Result<()> {
+        // open packet
         let _: Option<Packet> = Some(socket.next().await.unwrap()?);
 
-        println!("0");
         let packet: Option<Packet> = Some(socket.next().await.unwrap()?);
 
         assert!(packet.is_some());
@@ -651,7 +649,6 @@ mod test {
                 None,
             )
         );
-        println!("1");
 
         let packet: Option<Packet> = Some(socket.next().await.unwrap()?);
 
@@ -670,7 +667,6 @@ mod test {
                 None
             )
         );
-        println!("2");
         let packet: Option<Packet> = Some(socket.next().await.unwrap()?);
 
         assert!(packet.is_some());
@@ -728,6 +724,4 @@ mod test {
 
         Ok(())
     }
-
-    // TODO: 0.3.X add secure socketio server
 }

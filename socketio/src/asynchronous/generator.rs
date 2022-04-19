@@ -4,6 +4,8 @@ use crate::error::Result;
 use futures_util::{ready, FutureExt, Stream, StreamExt};
 use tokio::sync::Mutex;
 
+/// A handy type alias for a pinned + boxed Stream trait object that iterates
+/// over object of a certain type `T`.
 pub(crate) type Generator<T> = Pin<Box<dyn Stream<Item = T> + 'static + Send>>;
 
 /// An internal type that implements stream by repeatedly calling [`Stream::poll_next`] on an
