@@ -1,6 +1,7 @@
 pub use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
 use crate::packet::{Packet, PacketId};
+use log::trace;
 use rand::{thread_rng, Rng};
 
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
@@ -289,7 +290,7 @@ impl Client {
                             }
                         }
                     } else {
-                        // Do something with timed out acks?
+                        trace!("Received an Ack that is now timed out (elapsed time was longer than specified duration)");
                     }
                 }
             }
