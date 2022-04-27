@@ -286,10 +286,10 @@ impl ClientBuilder {
                 // it just logs on network errors, in case the poll cycle returned
                 // `Result::Ok`, the server receives a close frame so it's safe to
                 // terminate
-                for packet in socket_clone.next().await {
-                    if let e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
-                        trace!("Network error occured: {}", e.unwrap_err());
-                    }
+                if let Some(e @ Err(Error::IncompleteResponseFromEngineIo(_))) =
+                    socket_clone.next().await
+                {
+                    trace!("Network error occured: {}", e.unwrap_err());
                 }
             }
         });
