@@ -360,11 +360,10 @@ impl Client {
                     self.callback(
                         &Event::Error,
                         String::from("Received an ConnectError frame: ")
-                            + &packet
+                            + packet
                                 .data
                                 .as_ref()
-                                .unwrap_or(&String::from("\"No error message provided\""))
-                                .to_owned(),
+                                .unwrap_or(&String::from("\"No error message provided\"")),
                     )
                     .await?;
                 }
