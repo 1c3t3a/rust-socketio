@@ -11,5 +11,5 @@ mod generator;
 #[cfg(feature = "async")]
 pub use client::Client;
 
-#[cfg(all(feature = "async-callbacks", feature = "async"))]
+#[cfg(feature = "async")]
 pub use client::ClientBuilder;

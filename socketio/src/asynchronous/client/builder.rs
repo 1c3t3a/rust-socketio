@@ -155,6 +155,7 @@ impl ClientBuilder {
     /// }
     /// ```
     ///
+    #[cfg(feature = "async-callbacks")]
     pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
         F: for<'a> std::ops::FnMut(Payload, Client) -> BoxFuture<'static, ()>
