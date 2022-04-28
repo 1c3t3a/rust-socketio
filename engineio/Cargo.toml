@@ -53,4 +53,4 @@ bench = false
 [features]
 default = []
 async-callbacks = []
-async = ["async-callbacks"]
+async = []
