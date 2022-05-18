@@ -216,8 +216,8 @@ impl ClientBuilder {
     ///     .expect("Connection error");
     ///
     /// ```
-    pub fn auth<T: Into<serde_json::Value>>(mut self, auth: T) -> Self {
-        self.auth = Some(auth.into());
+    pub fn auth(mut self, auth: serde_json::Value) -> Self {
+        self.auth = Some(auth);
 
         self
     }
