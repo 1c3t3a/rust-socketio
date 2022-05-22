@@ -12,7 +12,7 @@ use tokio::{
 use super::{ack::Ack, callback::Callback};
 use crate::{
     asynchronous::socket::Socket as InnerSocket,
-    error::Result,
+    error::{Error, Result},
     packet::{Packet, PacketId},
     Event, Payload,
 };
@@ -303,30 +303,29 @@ impl Client {
         // in case 2, the message is ment for the default message event, in case 1 the event
         // is specified
         if let Ok(Value::Array(contents)) = from_str::<Value>(data) {
-            let event = if contents.len() > 1 {
-                // case 1: parse event name
-                contents
-                    .get(0)
-                    .map(|value| match value {
-                        Value::String(ev) => ev,
-                        _ => "message",
-                    })
-                    .unwrap_or("message")
-                    .into()
+            let (event, data) = if contents.len() > 1 {
+                // case 1
+                (
+                    contents
+                        .get(0)
+                        .map(|value| match value {
+                            Value::String(ev) => ev,
+                            _ => "message",
+                        })
+                        .unwrap_or("message")
+                        .into(),
+                    contents.get(1).ok_or(Error::IncompletePacket())?,
+                )
             } else {
-                // case 2: emit to message event
-                Event::Message
+                // case 2
+                (
+                    Event::Message,
+                    contents.get(0).ok_or(Error::IncompletePacket())?,
+                )
             };
 
             // call the correct callback
-            self.callback(
-                &event,
-                contents
-                    .get(1) // case 1: payload lives at index 1
-                    .unwrap_or_else(|| contents.get(0).unwrap()) // case 2: payload lives at index 0
-                    .to_string(),
-            )
-            .await?;
+            self.callback(&event, data.to_string()).await?;
         }
 
         Ok(())
