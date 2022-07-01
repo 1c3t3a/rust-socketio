@@ -13,7 +13,7 @@ license = "MIT"
 [dependencies]
 base64 = "0.13.0"
 bytes = "1"
-crossbeam-utils = "0.8.8"
+crossbeam-utils = "0.8.10"
 reqwest = { version = "0.11.10", features = ["blocking", "native-tls", "stream"] }
 adler32 = "1.2.0"
 serde = { version = "1.0", features = ["derive"] }
