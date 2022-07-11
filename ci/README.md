@@ -14,27 +14,67 @@ There are three different pipelines:
 
 # How to run the tests locally
 
-If you'd like to run the full test suite locally, you need to run the three server instances as well. You could do this manually by running them directly with node:
+To run the tests locally, simply use `cargo test`, or the various Make targets in the `Makefile`. For example
+`make pipeline` runs all tests, but also `clippy` and `rustfmt`.
+
+As some tests depend on a running engine.io/socket.io server, you will need to provide those locally, too. See the
+sections below for multiple options to do this.
+
+You will also need to create a self-signed certificate for the secure engine.io server. This can be done with the
+helper script `/ci/keygen.sh`. Please make sure to also import the generated ca and server certificates into your
+system (i.e. Keychain Access for MacOS, /usr/local/share/ca-certificates/ for linux) and make sure they are "always
+trusted".
+
+## Running server processes manually via nodejs
+
+If you'd like to run the full test suite locally, you need to run the five server instances as well (see files in `ci/`
+folder). You could do this manually by running them all with node:
 
 ```
-node engine-io.js / socket-io.js / engine-io-secure.js
-```
-or if you'd like to see debug log as well:
-```
-DEBUG=* node engine-io.js / socket-io.js / engine-io-secure.jss
+node engine-io.js 
+node engine-io-polling.js
+node engine-io-secure.js
+node socket-io.js
+node socket-io-auth.js 
 ```
 
-You need to have the two dependencies socket.io and engine.io installed, if this is not the case, fetch them via `npm install`.
-
-If you don't want to run the servers locally, you could also build and run the docker container via:
+If you'd like to see debug log as well, export this environment variable beforehand:
 
 ```
-docker build -t test_suite:latest .
-docker run -d --name test_suite -p 4200:4200 -p 4201:4201 -p 4202:4202 test_suite:latest
+export DEBUG=*
 ```
-The docker container runs a shell script that starts the two servers in the background and checks if the processes are still alive.
 
-As soon as the servers are running, you can start the test via `make pipeline`, which will execute every tests that's run in the whole pipeline.
+You will need to have the two node packages `socket.io` and `engine.io` installed, if this is not the case, fetch them
+via:
+
+```
+npm install socket.io engine.io
+```
+
+## Running server processes in a Docker container
+
+As running all the node scripts manually is pretty tedious, you can also use a prepared docker container, which can be
+built with the Dockerfile located in the `ci/` folder:
+
+```
+docker build -t test_suite:latest ci
+```
+
+Then you can run the container and forward all the needed ports with the following command:
+
+```
+docker run -d --name test_suite -p 4200:4200 -p 4201:4201 -p 4202:4202 -p 4203:4203 -p 4204:4204 test_suite:latest
+```
+
+The docker container runs a shell script that starts the two servers in the background and checks if the processes are
+still alive.
+
+## Using the Visual Studio Code devcontainer
+
+If you are using Visual Studio Code, the easiest method to get up and running would be to simply use the devcontainer
+prepared in the `.devcontainer/` directory. This will also launch the needed server processes and set up networking etc.
+Please refer to the vscode [documentation](https://code.visualstudio.com/docs/remote/containers) for more information
+on how to use devcontainers.
 
 # Polling vs. Websockets
 
