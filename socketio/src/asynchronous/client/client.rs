@@ -388,18 +388,17 @@ impl Stream for Client {
             // poll for the next payload
             let next = ready!(self.socket.poll_next_unpin(cx));
 
-            // end the stream if the underlying one is closed
-            if next.is_none() {
-                return Poll::Ready(None);
-            }
-
-            match next.unwrap() {
-                Err(err) => {
+            match next {
+                None => {
+                    // end the stream if the underlying one is closed
+                    return Poll::Ready(None);
+                }
+                Some(Err(err)) => {
                     // call the error callback
                     ready!(Box::pin(self.callback(&Event::Error, err.to_string())).poll_unpin(cx))?;
                     return Poll::Ready(Some(Err(err)));
                 }
-                Ok(packet) => {
+                Some(Ok(packet)) => {
                     // if this packet is not meant for the current namespace, skip it an poll for the next one
                     if packet.nsp == self.nsp {
                         ready!(Box::pin(self.handle_socketio_packet(&packet)).poll_unpin(cx))?;
