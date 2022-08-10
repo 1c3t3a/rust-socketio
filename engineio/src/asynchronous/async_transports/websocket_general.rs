@@ -11,14 +11,17 @@ use tokio::{net::TcpStream, sync::Mutex};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tungstenite::Message;
 
+type AsyncWebsocketSender = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+type AsyncWebsocketReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
+
 /// A general purpose asynchronous websocket transport type. Holds
 /// the sender and receiver stream of a websocket connection
 /// and implements the common methods `update` and `emit`. This also
 /// implements `Stream`.
 #[derive(Clone)]
 pub(crate) struct AsyncWebsocketGeneralTransport {
-    sender: Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>,
-    receiver: Arc<Mutex<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>>,
+    sender: Arc<Mutex<AsyncWebsocketSender>>,
+    receiver: Arc<Mutex<AsyncWebsocketReceiver>>,
 }
 
 impl AsyncWebsocketGeneralTransport {
@@ -74,6 +77,27 @@ impl AsyncWebsocketGeneralTransport {
         sender.send(message).await?;
 
         Ok(())
+    }
+
+    pub(crate) async fn poll_next(&self) -> Result<Option<Bytes>> {
+        loop {
+            let mut receiver = self.receiver.lock().await;
+            let next = receiver.next().await;
+            match next {
+                Some(Ok(Message::Text(str))) => return Ok(Some(Bytes::from(str))),
+                Some(Ok(Message::Binary(data))) => {
+                    let mut msg = BytesMut::with_capacity(data.len() + 1);
+                    msg.put_u8(PacketId::Message as u8);
+                    msg.put(data.as_ref());
+
+                    return Ok(Some(msg.freeze()));
+                }
+                // ignore packets other than text and binary
+                Some(Ok(_)) => (),
+                Some(Err(err)) => return Err(err.into()),
+                None => return Ok(None),
+            }
+        }
     }
 }
 

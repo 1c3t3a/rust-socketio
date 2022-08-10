@@ -159,12 +159,8 @@ impl Socket {
 
     /// Handles new incoming engineio packets
     fn handle_engineio_packet(&self, packet: EnginePacket) -> Result<Packet> {
-        let socket_packet = Packet::try_from(&packet.data);
-        if let Err(err) = socket_packet {
-            return Err(err);
-        }
-        // SAFETY: checked above to see if it was Err
-        let mut socket_packet = socket_packet.unwrap();
+        let mut socket_packet = Packet::try_from(&packet.data)?;
+
         // Only handle attachments if there are any
         if socket_packet.attachment_count > 0 {
             let mut attachments_left = socket_packet.attachment_count;

@@ -8,17 +8,16 @@ use crate::{
     Error,
 };
 use bytes::Bytes;
-use futures_util::StreamExt;
 use http::HeaderMap;
 use native_tls::TlsConnector;
 use std::sync::Arc;
-use tokio::{runtime::Runtime, sync::Mutex};
+use tokio::runtime::Runtime;
 use url::Url;
 
 #[derive(Clone)]
 pub struct WebsocketSecureTransport {
     runtime: Arc<Runtime>,
-    inner: Arc<Mutex<AsyncWebsocketSecureTransport>>,
+    inner: Arc<AsyncWebsocketSecureTransport>,
 }
 
 impl WebsocketSecureTransport {
@@ -38,47 +37,40 @@ impl WebsocketSecureTransport {
 
         Ok(WebsocketSecureTransport {
             runtime: Arc::new(runtime),
-            inner: Arc::new(Mutex::new(inner)),
+            inner: Arc::new(inner),
         })
     }
 
     /// Sends probe packet to ensure connection is valid, then sends upgrade
     /// request
     pub(crate) fn upgrade(&self) -> Result<()> {
-        self.runtime.block_on(async {
-            let lock = self.inner.lock().await;
-            lock.upgrade().await
-        })
+        self.runtime.block_on(async { self.inner.upgrade().await })
     }
 }
 
 impl Transport for WebsocketSecureTransport {
     fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()> {
-        self.runtime.block_on(async {
-            let lock = self.inner.lock().await;
-            lock.emit(data, is_binary_att).await
-        })
+        self.runtime
+            .block_on(async { self.inner.emit(data, is_binary_att).await })
     }
 
     fn poll(&self) -> Result<Bytes> {
         self.runtime.block_on(async {
-            let mut lock = self.inner.lock().await;
-            lock.next().await.ok_or(Error::IncompletePacket())?
+            let r = self.inner.poll_next().await;
+            match r {
+                Ok(b) => b.ok_or(Error::IncompletePacket()),
+                Err(_) => Err(Error::IncompletePacket()),
+            }
         })
     }
 
     fn base_url(&self) -> Result<url::Url> {
-        self.runtime.block_on(async {
-            let lock = self.inner.lock().await;
-            lock.base_url().await
-        })
+        self.runtime.block_on(async { self.inner.base_url().await })
     }
 
     fn set_base_url(&self, url: url::Url) -> Result<()> {
-        self.runtime.block_on(async {
-            let lock = self.inner.lock().await;
-            lock.set_base_url(url).await
-        })
+        self.runtime
+            .block_on(async { self.inner.set_base_url(url).await })
     }
 }
 
