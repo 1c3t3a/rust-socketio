@@ -1,17 +1,22 @@
 pub use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
 use crate::packet::{Packet, PacketId};
+use crate::Error;
 use rand::{thread_rng, Rng};
 
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
 use crate::error::Result;
+use backoff::backoff::Backoff;
+use backoff::ExponentialBackoff;
 use std::collections::HashMap;
 use std::ops::DerefMut;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use std::time::Instant;
 
 use crate::socket::Socket as InnerSocket;
+
+type BuildSocketFn = dyn Fn() -> Result<InnerSocket> + Send + Sync;
 
 /// Represents an `Ack` as given back to the caller. Holds the internal `id` as
 /// well as the current ack'ed state. Holds data which will be accessible as
@@ -30,8 +35,14 @@ pub struct Ack {
 /// is given the server will connect to the default namespace `"/"`.
 #[derive(Clone)]
 pub struct Client {
+    inner: Arc<RwLock<Inner>>,
+}
+
+#[derive(Clone)]
+struct Inner {
     /// The inner socket client to delegate the methods to.
-    socket: InnerSocket,
+    socket: Option<Arc<RwLock<InnerSocket>>>,
+    socket_fn: Arc<Mutex<Box<BuildSocketFn>>>,
     on: Arc<RwLock<HashMap<Event, Callback<SocketCallback>>>>,
     on_any: Arc<RwLock<Option<Callback<SocketAnyCallback>>>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
@@ -39,6 +50,7 @@ pub struct Client {
     nsp: String,
     // Data sent in opening header
     auth: Option<serde_json::Value>,
+    backoff: ExponentialBackoff,
 }
 
 impl Client {
@@ -47,19 +59,23 @@ impl Client {
     /// `"/"` is taken.
     /// ```
     pub(crate) fn new<T: Into<String>>(
-        socket: InnerSocket,
+        socket_fn: Box<BuildSocketFn>,
         namespace: T,
         on: HashMap<Event, Callback<SocketCallback>>,
         on_any: Option<Callback<SocketAnyCallback>>,
         auth: Option<serde_json::Value>,
     ) -> Result<Self> {
         Ok(Client {
-            socket,
-            nsp: namespace.into(),
-            on: Arc::new(RwLock::new(on)),
-            on_any: Arc::new(RwLock::new(on_any)),
-            outstanding_acks: Arc::new(RwLock::new(Vec::new())),
-            auth,
+            inner: Arc::new(RwLock::new(Inner {
+                socket: None,
+                socket_fn: Arc::new(Mutex::new(socket_fn)),
+                nsp: namespace.into(),
+                on: Arc::new(RwLock::new(on)),
+                on_any: Arc::new(RwLock::new(on_any)),
+                outstanding_acks: Arc::new(RwLock::new(Vec::new())),
+                auth,
+                backoff: ExponentialBackoff::default(),
+            })),
         })
     }
 
@@ -67,15 +83,25 @@ impl Client {
     /// called to interact with the server. Attention: it's not allowed to add a
     /// callback after a call to this method.
     pub(crate) fn connect(&self) -> Result<()> {
-        // Connect the underlying socket
-        self.socket.connect()?;
+        let mut inner = self.inner.write()?;
 
-        let auth = self.auth.as_ref().map(|data| data.to_string());
+        let socket_fn = inner.socket_fn.lock()?;
+        let socket = socket_fn()?;
+        drop(socket_fn);
+
+        // Connect the underlying socket
+        socket.connect()?;
+
+        let auth = inner.auth.as_ref().map(|data| data.to_string());
 
         // construct the opening packet
-        let open_packet = Packet::new(PacketId::Connect, self.nsp.clone(), auth, None, 0, None);
+        let open_packet = Packet::new(PacketId::Connect, inner.nsp.clone(), auth, None, 0, None);
 
-        self.socket.send(open_packet)?;
+        socket.send(open_packet)?;
+
+        inner.socket = Some(Arc::new(RwLock::new(socket)));
+
+        self.poll_callback();
 
         Ok(())
     }
@@ -111,7 +137,14 @@ impl Client {
         E: Into<Event>,
         D: Into<Payload>,
     {
-        self.socket.emit(&self.nsp, event.into(), data.into())
+        let inner = self.inner.read()?;
+        let socket = inner
+            .socket
+            .clone()
+            .ok_or(Error::IllegalActionBeforeOpen())?;
+        let socket = socket.read()?;
+
+        socket.emit(&inner.nsp, event.into(), data.into())
     }
 
     /// Disconnects this client from the server by sending a `socket.io` closing
@@ -140,11 +173,18 @@ impl Client {
     ///
     /// ```
     pub fn disconnect(&self) -> Result<()> {
+        let inner = self.inner.read()?;
         let disconnect_packet =
-            Packet::new(PacketId::Disconnect, self.nsp.clone(), None, None, 0, None);
+            Packet::new(PacketId::Disconnect, inner.nsp.clone(), None, None, 0, None);
 
-        self.socket.send(disconnect_packet)?;
-        self.socket.disconnect()?;
+        let socket = inner
+            .socket
+            .clone()
+            .ok_or(Error::IllegalActionBeforeOpen())?;
+        let socket = socket.read()?;
+
+        socket.send(disconnect_packet)?;
+        socket.disconnect()?;
 
         Ok(())
     }
@@ -197,10 +237,16 @@ impl Client {
         E: Into<Event>,
         D: Into<Payload>,
     {
+        let inner = self.inner.read()?;
+        let socket = inner
+            .socket
+            .clone()
+            .ok_or(Error::IllegalActionBeforeOpen())?;
+        let socket = socket.read()?;
+
         let id = thread_rng().gen_range(0..999);
         let socket_packet =
-            self.socket
-                .build_packet_for_payload(data.into(), event.into(), &self.nsp, Some(id))?;
+            socket.build_packet_for_payload(data.into(), event.into(), &inner.nsp, Some(id))?;
 
         let ack = Ack {
             id,
@@ -210,21 +256,29 @@ impl Client {
         };
 
         // add the ack to the tuple of outstanding acks
-        self.outstanding_acks.write()?.push(ack);
+        inner.outstanding_acks.write()?.push(ack);
 
-        self.socket.send(socket_packet)?;
+        socket.send(socket_packet)?;
+
         Ok(())
     }
 
     pub(crate) fn poll(&self) -> Result<Option<Packet>> {
         loop {
-            match self.socket.poll() {
+            let inner = self.inner.read()?;
+            let socket = inner
+                .socket
+                .clone()
+                .ok_or(Error::IllegalActionBeforeOpen())?;
+            let socket = socket.read()?;
+
+            match socket.poll() {
                 Err(err) => {
                     self.callback(&Event::Error, err.to_string())?;
                     return Err(err);
                 }
                 Ok(Some(packet)) => {
-                    if packet.nsp == self.nsp {
+                    if packet.nsp == inner.nsp {
                         self.handle_socketio_packet(&packet)?;
                         return Ok(Some(packet));
                     } else {
@@ -241,8 +295,9 @@ impl Client {
     }
 
     fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {
-        let mut on = self.on.write()?;
-        let mut on_any = self.on_any.write()?;
+        let inner = self.inner.read()?;
+        let mut on = inner.on.write()?;
+        let mut on_any = inner.on_any.write()?;
         let lock = on.deref_mut();
         let on_any_lock = on_any.deref_mut();
 
@@ -268,8 +323,9 @@ impl Client {
     #[inline]
     fn handle_ack(&self, socket_packet: &Packet) -> Result<()> {
         let mut to_be_removed = Vec::new();
+        let inner = self.inner.read()?;
         if let Some(id) = socket_packet.id {
-            for (index, ack) in self.outstanding_acks.write()?.iter_mut().enumerate() {
+            for (index, ack) in inner.outstanding_acks.write()?.iter_mut().enumerate() {
                 if ack.id == id {
                     to_be_removed.push(index);
 
@@ -294,7 +350,7 @@ impl Client {
                 }
             }
             for index in to_be_removed {
-                self.outstanding_acks.write()?.remove(index);
+                inner.outstanding_acks.write()?.remove(index);
             }
         }
         Ok(())
@@ -356,7 +412,8 @@ impl Client {
     /// engineio client.
     #[inline]
     fn handle_socketio_packet(&self, packet: &Packet) -> Result<()> {
-        if packet.nsp == self.nsp {
+        let inner = self.inner.read()?;
+        if packet.nsp == inner.nsp {
             match packet.packet_type {
                 PacketId::Ack | PacketId::BinaryAck => {
                     if let Err(err) = self.handle_ack(packet) {
@@ -394,6 +451,47 @@ impl Client {
         }
         Ok(())
     }
+
+    fn poll_callback(&self) {
+        let self_clone = self.clone();
+        // Use thread to consume items in iterator in order to call callbacks
+        std::thread::spawn(move || {
+            // tries to restart a poll cycle whenever a 'normal' error occurs,
+            // it just panics on network errors, in case the poll cycle returned
+            // `Result::Ok`, the server receives a close frame so it's safe to
+            // terminate
+            for packet in self_clone.iter() {
+                if let e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
+                    //TODO: 0.3.X handle errors
+                    self_clone.reconnect();
+                    panic!("{}", e.unwrap_err());
+                }
+            }
+        });
+    }
+
+    fn reconnect(&self) {
+        let self_clone = self.clone();
+        std::thread::spawn(move || {
+            let _ = self_clone.disconnect();
+            loop {
+                match self_clone.connect() {
+                    Ok(_) => break,
+                    Err(_) => {
+                        let backoff = self_clone.next_backoff();
+                        if let Some(d) = backoff {
+                            std::thread::sleep(d);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    fn next_backoff(&self) -> Option<Duration> {
+        let mut inner = self.inner.write().ok()?;
+        inner.backoff.next_backoff()
+    }
 }
 
 pub struct Iter<'a> {
@@ -414,6 +512,7 @@ impl<'a> Iterator for Iter<'a> {
 #[cfg(test)]
 mod test {
     use std::sync::mpsc;
+    use std::sync::mpsc::Receiver;
     use std::thread::sleep;
 
     use super::*;
@@ -521,12 +620,17 @@ mod test {
             .build()
             .expect("Found illegal configuration");
 
+        let (tx, rx) = mpsc::sync_channel(1);
+
         let socket = socket_builder
             .namespace("/admin")
             .tls_config(tls_connector)
             .opening_header("accept-encoding", "application/json")
             .on("test", |str, _| println!("Received: {:#?}", str))
             .on("message", |payload, _| println!("{:#?}", payload))
+            .on_any(move |event, payload, _client| {
+                tx.send((String::from(event), payload)).unwrap();
+            })
             .connect_manual()?;
 
         assert!(socket.emit("message", json!("Hello World")).is_ok());
@@ -545,15 +649,13 @@ mod test {
             )
             .is_ok());
 
-        test_socketio_socket(socket, "/admin".to_owned())
+        test_socketio_socket(socket, "/admin".to_owned(), rx)
     }
 
     #[test]
     fn socket_io_on_any_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
-
         let (tx, rx) = mpsc::sync_channel(1);
-
         let _socket = ClientBuilder::new(url)
             .namespace("/")
             .auth(json!({ "password": "123" }))
@@ -585,32 +687,21 @@ mod test {
     fn socket_io_auth_builder_integration() -> Result<()> {
         let url = crate::test::socket_io_auth_server();
         let nsp = String::from("/admin");
-        let socket = ClientBuilder::new(url)
+        let (tx, rx) = mpsc::sync_channel(1);
+        let _socket = ClientBuilder::new(url)
             .namespace(nsp.clone())
             .auth(json!({ "password": "123" }))
+            .on_any(move |event, payload, _client| {
+                tx.send((String::from(event), payload)).unwrap();
+            })
             .connect_manual()?;
 
-        let mut iter = socket
-            .iter()
-            .map(|packet| packet.unwrap())
-            .filter(|packet| packet.packet_type != PacketId::Connect);
-
-        let packet: Option<Packet> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-
-        assert_eq!(
-            packet,
-            Packet::new(
-                PacketId::Event,
-                nsp.clone(),
-                Some("[\"auth\",\"success\"]".to_owned()),
-                None,
-                0,
-                None
-            )
-        );
+        let (event, payload) = rx.recv().unwrap();
+        assert_eq!(event, "auth".to_owned());
+        match payload {
+            Payload::Binary(_) => assert!(false),
+            Payload::String(p) => assert_eq!(p, "\"success\"".to_owned()),
+        };
 
         Ok(())
     }
@@ -618,110 +709,93 @@ mod test {
     #[test]
     fn socketio_polling_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
+        let (tx, rx) = mpsc::sync_channel(1);
         let socket = ClientBuilder::new(url.clone())
             .transport_type(TransportType::Polling)
+            .on_any(move |event, payload, _client| {
+                tx.send((String::from(event), payload)).unwrap();
+            })
             .connect_manual()?;
-        test_socketio_socket(socket, "/".to_owned())
+        test_socketio_socket(socket, "/".to_owned(), rx)
     }
 
     #[test]
     fn socket_io_websocket_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
+        let (tx, rx) = mpsc::sync_channel(1);
         let socket = ClientBuilder::new(url.clone())
             .transport_type(TransportType::Websocket)
+            .on_any(move |event, payload, _client| {
+                tx.send((String::from(event), payload)).unwrap();
+            })
             .connect_manual()?;
-        test_socketio_socket(socket, "/".to_owned())
+        test_socketio_socket(socket, "/".to_owned(), rx)
     }
 
     #[test]
     fn socket_io_websocket_upgrade_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
+        let (tx, rx) = mpsc::sync_channel(1);
+
         let socket = ClientBuilder::new(url)
             .transport_type(TransportType::WebsocketUpgrade)
+            .on_any(move |event, payload, _client| {
+                tx.send((String::from(event), payload)).unwrap();
+            })
             .connect_manual()?;
-        test_socketio_socket(socket, "/".to_owned())
+        test_socketio_socket(socket, "/".to_owned(), rx)
     }
 
     #[test]
     fn socket_io_any_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
+        let (tx, rx) = mpsc::sync_channel(1);
         let socket = ClientBuilder::new(url)
             .transport_type(TransportType::Any)
+            .on_any(move |event, payload, _client| {
+                tx.send((String::from(event), payload)).unwrap();
+            })
             .connect_manual()?;
-        test_socketio_socket(socket, "/".to_owned())
+        test_socketio_socket(socket, "/".to_owned(), rx)
     }
 
-    fn test_socketio_socket(socket: Client, nsp: String) -> Result<()> {
-        let mut iter = socket
+    fn test_socketio_socket(
+        socket: Client,
+        _nsp: String,
+        rx: Receiver<(String, Payload)>,
+    ) -> Result<()> {
+        let _iter = socket
             .iter()
             .map(|packet| packet.unwrap())
             .filter(|packet| packet.packet_type != PacketId::Connect);
 
-        let packet: Option<Packet> = iter.next();
-        assert!(packet.is_some());
+        let (event, payload) = rx.recv().unwrap();
+        assert_eq!(event, "message".to_owned());
+        match payload {
+            Payload::Binary(_) => assert!(false),
+            Payload::String(p) => assert_eq!(p, "\"Hello from the message event!\"".to_owned()),
+        };
 
-        let packet = packet.unwrap();
+        let (event, payload) = rx.recv().unwrap();
+        assert_eq!(event, "test".to_owned());
+        match payload {
+            Payload::Binary(_) => assert!(false),
+            Payload::String(p) => assert_eq!(p, "\"Hello from the test event!\"".to_owned()),
+        };
 
-        assert_eq!(
-            packet,
-            Packet::new(
-                PacketId::Event,
-                nsp.clone(),
-                Some("[\"Hello from the message event!\"]".to_owned()),
-                None,
-                0,
-                None,
-            )
-        );
+        let (event, payload) = rx.recv().unwrap();
+        assert_eq!(event, "message".to_owned());
+        match payload {
+            Payload::Binary(b) => assert_eq!(b, Bytes::from_static(&[4, 5, 6])),
+            Payload::String(_) => assert!(false),
+        };
 
-        let packet: Option<Packet> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-
-        assert_eq!(
-            packet,
-            Packet::new(
-                PacketId::Event,
-                nsp.clone(),
-                Some("[\"test\",\"Hello from the test event!\"]".to_owned()),
-                None,
-                0,
-                None
-            )
-        );
-
-        let packet: Option<Packet> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-        assert_eq!(
-            packet,
-            Packet::new(
-                PacketId::BinaryEvent,
-                nsp.clone(),
-                None,
-                None,
-                1,
-                Some(vec![Bytes::from_static(&[4, 5, 6])]),
-            )
-        );
-
-        let packet: Option<Packet> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-        assert_eq!(
-            packet,
-            Packet::new(
-                PacketId::BinaryEvent,
-                nsp.clone(),
-                Some("\"test\"".to_owned()),
-                None,
-                1,
-                Some(vec![Bytes::from_static(&[1, 2, 3])]),
-            )
-        );
+        let (event, payload) = rx.recv().unwrap();
+        assert_eq!(event, "test".to_owned());
+        match payload {
+            Payload::Binary(b) => assert_eq!(b, Bytes::from_static(&[1, 2, 3])),
+            Payload::String(_) => assert!(false),
+        };
 
         assert!(socket
             .emit_with_ack(

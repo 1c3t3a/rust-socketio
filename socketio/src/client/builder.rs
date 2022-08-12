@@ -7,11 +7,9 @@ use rust_engineio::header::{HeaderMap, HeaderValue};
 use url::Url;
 
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
-use crate::error::{Error, Result};
-use std::collections::HashMap;
-use std::thread;
-
+use crate::error::Result;
 use crate::socket::Socket as InnerSocket;
+use std::collections::HashMap;
 
 /// Flavor of Engine.IO transport.
 #[derive(Clone, Eq, PartialEq)]
@@ -265,22 +263,6 @@ impl ClientBuilder {
     /// ```
     pub fn connect(self) -> Result<Client> {
         let socket = self.connect_manual()?;
-        let socket_clone = socket.clone();
-
-        // Use thread to consume items in iterator in order to call callbacks
-        thread::spawn(move || {
-            // tries to restart a poll cycle whenever a 'normal' error occurs,
-            // it just panics on network errors, in case the poll cycle returned
-            // `Result::Ok`, the server receives a close frame so it's safe to
-            // terminate
-            for packet in socket_clone.iter() {
-                if let e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
-                    //TODO: 0.3.X handle errors
-                    panic!("{}", e.unwrap_err())
-                }
-            }
-        });
-
         Ok(socket)
     }
 
@@ -302,24 +284,31 @@ impl ClientBuilder {
             builder = builder.headers(headers);
         }
 
-        let engine_client = match self.transport_type {
-            TransportType::Any => builder.build_with_fallback()?,
-            TransportType::Polling => builder.build_polling()?,
-            TransportType::Websocket => builder.build_websocket()?,
-            TransportType::WebsocketUpgrade => builder.build_websocket_with_upgrade()?,
-        };
-
-        let inner_socket = InnerSocket::new(engine_client)?;
-
+        let transport_type = self.transport_type.clone();
         let socket = Client::new(
-            inner_socket,
+            Box::new(move || build_socket(transport_type.clone(), builder.clone())),
             &self.namespace,
             self.on,
             self.on_any,
             self.auth,
         )?;
+
         socket.connect()?;
 
         Ok(socket)
     }
+}
+
+fn build_socket(
+    transport_type: TransportType,
+    builder: EngineIoClientBuilder,
+) -> Result<InnerSocket> {
+    let engine_client = match transport_type {
+        TransportType::Any => builder.build_with_fallback()?,
+        TransportType::Polling => builder.build_polling()?,
+        TransportType::Websocket => builder.build_websocket()?,
+        TransportType::WebsocketUpgrade => builder.build_websocket_with_upgrade()?,
+    };
+
+    InnerSocket::new(engine_client)
 }
