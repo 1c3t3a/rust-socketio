@@ -183,7 +183,7 @@ impl Client {
             .ok_or(Error::IllegalActionBeforeOpen())?;
         let socket = socket.read()?;
 
-        let _ = socket.send(disconnect_packet.clone());
+        let _ = socket.send(disconnect_packet);
         socket.disconnect()?;
         let _ = self.callback(&Event::Close, ""); // trigger on_close
 
@@ -564,6 +564,53 @@ mod test {
         sleep(Duration::from_secs(2));
 
         assert!(socket.disconnect().is_ok());
+
+        Ok(())
+    }
+
+    #[test]
+    fn socket_io_reconnect_integration() -> Result<()> {
+        let url = crate::test::socket_io_restart_server();
+
+        let socket = ClientBuilder::new(url).connect();
+        assert!(socket.is_ok(), "should connect success");
+        let socket = socket.unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        let r = socket.emit("message", json!(""));
+        assert!(r.is_ok(), "should emit message success");
+
+        let r = socket.emit("restart_server", json!(""));
+        assert!(r.is_ok(), "should emit restart success");
+
+        let mut is_emit_error = false;
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let r = socket.emit("message", json!(""));
+            if r.is_err() {
+                is_emit_error = true; // server is down
+                break;
+            }
+        }
+
+        assert_eq!(
+            is_emit_error, true,
+            "should emit failed because server is down"
+        );
+
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let r = socket.emit("message", json!(""));
+            if r.is_ok() {
+                is_emit_error = false; // server is restart
+                break;
+            }
+        }
+        assert_eq!(
+            is_emit_error, false,
+            "should emit success because server is restart"
+        );
 
         Ok(())
     }

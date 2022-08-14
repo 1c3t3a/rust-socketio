@@ -79,6 +79,7 @@ impl Socket {
             spawn_scoped!(on_close(()));
         }
 
+        // if server is gone, this emit can not succeed, so we ignored the return value
         let _ = self.emit(Packet::new(PacketId::Close, Bytes::new()));
 
         self.connected.store(false, Ordering::Release);
