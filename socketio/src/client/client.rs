@@ -183,8 +183,9 @@ impl Client {
             .ok_or(Error::IllegalActionBeforeOpen())?;
         let socket = socket.read()?;
 
-        socket.send(disconnect_packet)?;
+        let _ = socket.send(disconnect_packet.clone());
         socket.disconnect()?;
+        let _ = self.callback(&Event::Close, ""); // trigger on_close
 
         Ok(())
     }

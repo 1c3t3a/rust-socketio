@@ -79,7 +79,7 @@ impl Socket {
             spawn_scoped!(on_close(()));
         }
 
-        self.emit(Packet::new(PacketId::Close, Bytes::new()))?;
+        let _ = self.emit(Packet::new(PacketId::Close, Bytes::new()));
 
         self.connected.store(false, Ordering::Release);
 
