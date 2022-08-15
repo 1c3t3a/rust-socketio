@@ -31,6 +31,14 @@ if [ $status -ne 0 ]; then
 fi
 echo "Successfully started socket.io auth instance"
 
+DEBUG=* node socket-io-restart.js &
+status=$?
+if [ $status -ne 0 ]; then
+  echo "Failed to start socket.io-restart: $status"
+  exit $status
+fi
+echo "Successfully started socket.io-restart instance"
+
 DEBUG=* node engine-io-secure.js &
 status=$?
 if [ $status -ne 0 ]; then
