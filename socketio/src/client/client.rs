@@ -143,9 +143,10 @@ impl Client {
         let disconnect_packet =
             Packet::new(PacketId::Disconnect, self.nsp.clone(), None, None, 0, None);
 
-        self.socket.send(disconnect_packet)?;
+        let _ = self.socket.send(disconnect_packet);
         self.socket.disconnect()?;
 
+        let _ = self.callback(&Event::Close, ""); // trigger on_close
         Ok(())
     }
 
