@@ -229,7 +229,7 @@ impl Client {
         let mut on = self.on.write().await;
         let lock = on.deref_mut();
         if let Some(callback) = lock.get_mut(event) {
-            callback(payload.into(), self.clone());
+            callback(payload.into(), self.clone()).await;
         }
         drop(on);
         Ok(())
