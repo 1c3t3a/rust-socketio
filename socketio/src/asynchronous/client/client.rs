@@ -229,7 +229,7 @@ impl Client {
         let mut on = self.on.write().await;
         let lock = on.deref_mut();
         if let Some(callback) = lock.get_mut(event) {
-            callback(payload.into(), self.clone());
+            callback(payload.into(), self.clone()).await;
         }
         drop(on);
         Ok(())
@@ -249,14 +249,16 @@ impl Client {
                             ack.callback.deref_mut()(
                                 Payload::String(payload.to_owned()),
                                 self.clone(),
-                            );
+                            )
+                            .await;
                         }
                         if let Some(ref attachments) = socket_packet.attachments {
                             if let Some(payload) = attachments.get(0) {
                                 ack.callback.deref_mut()(
                                     Payload::Binary(payload.to_owned()),
                                     self.clone(),
-                                );
+                                )
+                                .await;
                             }
                         }
                     } else {
@@ -719,6 +721,38 @@ mod test {
             )
             .await
             .is_ok());
+
+        let packet: Option<Packet> = Some(socket.next().await.unwrap()?);
+
+        assert!(packet.is_some());
+        let packet = packet.unwrap();
+        assert_eq!(
+            packet,
+            Packet::new(
+                PacketId::Event,
+                nsp.clone(),
+                Some("[\"test-received\",123]".to_owned()),
+                None,
+                0,
+                None,
+            )
+        );
+
+        let packet: Option<Packet> = Some(socket.next().await.unwrap()?);
+
+        assert!(packet.is_some());
+        let packet = packet.unwrap();
+        assert!(matches!(
+            packet,
+            Packet {
+                packet_type: PacketId::Ack,
+                nsp: _,
+                data: Some(_),
+                id: Some(_),
+                attachment_count: 0,
+                attachments: None,
+            }
+        ));
 
         Ok(())
     }
