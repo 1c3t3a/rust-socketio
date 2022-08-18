@@ -143,6 +143,7 @@ impl Client {
         let disconnect_packet =
             Packet::new(PacketId::Disconnect, self.nsp.clone(), None, None, 0, None);
 
+        // TODO: logging
         let _ = self.socket.send(disconnect_packet);
         self.socket.disconnect()?;
 
