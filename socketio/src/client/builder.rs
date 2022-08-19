@@ -1,5 +1,6 @@
 use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
+use super::reconnect::ReconnectClient;
 use crate::Client;
 use native_tls::TlsConnector;
 use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
@@ -9,6 +10,7 @@ use url::Url;
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
 use crate::error::{Error, Result};
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use std::thread;
 
 use crate::socket::Socket as InnerSocket;
@@ -30,10 +32,11 @@ pub enum TransportType {
 /// configuring the callback, the namespace and metadata of the socket. If no
 /// namespace is specified, the default namespace `/` is taken. The `connect` method
 /// acts the `build` method and returns a connected [`Client`].
+#[derive(Clone)]
 pub struct ClientBuilder {
     address: String,
-    on: HashMap<Event, Callback<SocketCallback>>,
-    on_any: Option<Callback<SocketAnyCallback>>,
+    on: Arc<RwLock<HashMap<Event, Callback<SocketCallback>>>>,
+    on_any: Arc<RwLock<Option<Callback<SocketAnyCallback>>>>,
     namespace: String,
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
@@ -75,8 +78,8 @@ impl ClientBuilder {
     pub fn new<T: Into<String>>(address: T) -> Self {
         Self {
             address: address.into(),
-            on: HashMap::new(),
-            on_any: None,
+            on: Arc::new(RwLock::new(HashMap::new())),
+            on_any: Arc::new(RwLock::new(None)),
             namespace: "/".to_owned(),
             tls_config: None,
             opening_headers: None,
@@ -116,12 +119,15 @@ impl ClientBuilder {
     ///     .connect();
     ///
     /// ```
+    // While present implementation doesn't require mut, it's likely a future one will.
+    #[allow(unused_mut)]
     pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
         F: for<'a> FnMut(Payload, Client) + 'static + Sync + Send,
     {
-        self.on
-            .insert(event.into(), Callback::<SocketCallback>::new(callback));
+        let callback = Callback::<SocketCallback>::new(callback);
+        // SAFE(ish): Lock is held for such amount of time no code paths lead to a panic while lock is held
+        self.on.write().unwrap().insert(event.into(), callback);
         self
     }
 
@@ -141,11 +147,15 @@ impl ClientBuilder {
     ///     .connect();
     ///
     /// ```
+    // While present implementation doesn't require mut, it's likely a future one will.
+    #[allow(unused_mut)]
     pub fn on_any<F>(mut self, callback: F) -> Self
     where
         F: for<'a> FnMut(Event, Payload, Client) + 'static + Sync + Send,
     {
-        self.on_any = Some(Callback::<SocketAnyCallback>::new(callback));
+        let callback = Some(Callback::<SocketAnyCallback>::new(callback));
+        // SAFE(ish): Lock is held for such amount of time no code paths lead to a panic while lock is held
+        *self.on_any.write().unwrap() = callback;
         self
     }
 
@@ -282,6 +292,12 @@ impl ClientBuilder {
         });
 
         Ok(socket)
+    }
+
+    #[allow(unused)]
+    pub(crate) fn reconnecting(self) -> Result<ReconnectClient> {
+        let client = ReconnectClient::new(self)?;
+        Ok(client)
     }
 
     //TODO: 0.3.X stabilize

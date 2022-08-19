@@ -49,15 +49,15 @@ impl Client {
     pub(crate) fn new<T: Into<String>>(
         socket: InnerSocket,
         namespace: T,
-        on: HashMap<Event, Callback<SocketCallback>>,
-        on_any: Option<Callback<SocketAnyCallback>>,
+        on: Arc<RwLock<HashMap<Event, Callback<SocketCallback>>>>,
+        on_any: Arc<RwLock<Option<Callback<SocketAnyCallback>>>>,
         auth: Option<serde_json::Value>,
     ) -> Result<Self> {
         Ok(Client {
             socket,
             nsp: namespace.into(),
-            on: Arc::new(RwLock::new(on)),
-            on_any: Arc::new(RwLock::new(on_any)),
+            on,
+            on_any,
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
             auth,
         })

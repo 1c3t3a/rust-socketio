@@ -6,7 +6,6 @@
         "./docker-compose.yaml"
     ],
     "service": "rust-client",
-    "workspaceFolder": "/workspace/rust-socketio",
     "shutdownAction": "stopCompose",
     // Set *default* container specific settings.json values on container create.
     "settings": {
@@ -28,7 +27,7 @@
     },
     // Add the IDs of extensions you want installed when the container is created.
     "extensions": [
-        "matklad.rust-analyzer",
+        "rust-lang.rust-analyzer",
         "bungcip.better-toml",
         "vadimcn.vscode-lldb",
         "eamodio.gitlens",
