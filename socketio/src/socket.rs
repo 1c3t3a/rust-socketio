@@ -78,10 +78,6 @@ impl Socket {
         self.send(socket_packet)
     }
 
-    pub fn is_engineio_connected(&self) -> Result<bool> {
-        Ok(self.engine_client.is_connected()?)
-    }
-
     /// Returns a packet for a payload, could be used for bot binary and non binary
     /// events and acks. Convenance method.
     #[inline]
@@ -198,5 +194,9 @@ impl Socket {
         }
 
         Ok(socket_packet)
+    }
+
+    fn is_engineio_connected(&self) -> Result<bool> {
+        Ok(self.engine_client.is_connected()?)
     }
 }

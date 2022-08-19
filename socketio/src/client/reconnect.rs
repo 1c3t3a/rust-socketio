@@ -26,7 +26,6 @@ impl ReconnectClient {
             .with_initial_interval(Duration::from_millis(builder.reconnect_delay_min))
             .with_max_interval(Duration::from_millis(builder.reconnect_delay_max))
             .build();
-        let max_reconnect_attempts = builder.max_reconnect_attempts;
 
         let s = Self {
             builder,
@@ -87,6 +86,7 @@ impl ReconnectClient {
                 }
 
                 if self.do_reconnect().is_ok() {
+                    self.poll_callback();
                     break;
                 }
             }
@@ -168,12 +168,42 @@ mod test {
     #[test]
     fn socket_io_reconnect_integration() -> Result<()> {
         let url = crate::test::socket_io_restart_server();
+        let connect_count = Arc::new(Mutex::new(0));
+        let close_count = Arc::new(Mutex::new(0));
+        let connect_count_clone = connect_count.clone();
+        let close_count_clone = close_count.clone();
 
         let socket = ClientBuilder::new(url)
             .reconnect(true)
             .max_reconnect_attempts(0) // infinity
-            .reconnect_delay(20, 20)
+            .reconnect_delay(100, 100)
+            .on(Event::Connect, move |_, socket| {
+                let mut count = connect_count_clone.lock().unwrap();
+                *count += 1;
+            })
+            .on(Event::Close, move |_, socket| {
+                let mut count = close_count_clone.lock().unwrap();
+                *count += 1;
+            })
             .connect();
+
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            {
+                let open_cnt = connect_count.lock().unwrap();
+                if *open_cnt == 1 {
+                    break;
+                }
+            }
+        }
+
+        {
+            let connect_cnt = connect_count.lock().unwrap();
+            let close_cnt = close_count.lock().unwrap();
+            assert_eq!(*connect_cnt, 1, "should connect once ");
+            assert_eq!(*close_cnt, 0, "should not close");
+        }
+
         assert!(socket.is_ok(), "should connect success");
         let socket = socket.unwrap();
 
@@ -183,31 +213,25 @@ mod test {
         let r = socket.emit("restart_server", json!(""));
         assert!(r.is_ok(), "should emit restart success");
 
-        let mut is_connecting = false;
-        for _ in 0..10 {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            {
-                let client = socket.client.read()?;
-                if !client.is_connected_for_testing()? {
-                    is_connecting = true; // server is down
-                    break;
-                }
-            }
-        }
-
-        assert_eq!(is_connecting, true, "should try reconnecting");
-
         for _ in 0..10 {
             std::thread::sleep(std::time::Duration::from_millis(500));
             {
-                let client = socket.client.read()?;
-                if client.is_connected_for_testing()? {
-                    is_connecting = false; // reconnected
+                let open_cnt = connect_count.lock().unwrap();
+                if *open_cnt == 2 {
                     break;
                 }
             }
         }
-        assert_eq!(is_connecting, false, "should reconnected");
+
+        {
+            let connect_cnt = connect_count.lock().unwrap();
+            let close_cnt = close_count.lock().unwrap();
+            assert_eq!(
+                *connect_cnt, 2,
+                "should connect twice while server is gone and back"
+            );
+            assert_eq!(*close_cnt, 1, "should close once while server is gone");
+        }
 
         socket.disconnect()?;
         Ok(())
