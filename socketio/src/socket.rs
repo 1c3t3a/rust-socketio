@@ -78,6 +78,10 @@ impl Socket {
         self.send(socket_packet)
     }
 
+    pub fn is_engineio_connected(&self) -> Result<bool> {
+        Ok(self.engine_client.is_connected()?)
+    }
+
     /// Returns a packet for a payload, could be used for bot binary and non binary
     /// events and acks. Convenance method.
     #[inline]
@@ -102,12 +106,13 @@ impl Socket {
                 Some(vec![bin_data]),
             )),
             Payload::String(str_data) => {
-                let payload;
-                if serde_json::from_str::<serde_json::Value>(&str_data).is_ok() {
-                    payload = format!("[\"{}\",{}]", String::from(event), str_data);
-                } else {
-                    payload = format!("[\"{}\",\"{}\"]", String::from(event), str_data);
-                }
+                let payload = {
+                    if serde_json::from_str::<serde_json::Value>(&str_data).is_ok() {
+                        format!("[\"{}\",{}]", String::from(event), str_data)
+                    } else {
+                        format!("[\"{}\",\"{}\"]", String::from(event), str_data)
+                    }
+                };
 
                 Ok(Packet::new(
                     PacketId::Event,
@@ -193,9 +198,5 @@ impl Socket {
         }
 
         Ok(socket_packet)
-    }
-
-    fn is_engineio_connected(&self) -> Result<bool> {
-        Ok(self.engine_client.is_connected()?)
     }
 }

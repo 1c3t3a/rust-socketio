@@ -35,9 +35,8 @@ fn main() {
         // Event specified by enum
         .on(Event::Close, |_, socket| {
             println!("Socket Closed");
-            socket
-                .emit("message", json!({"foo": "Hello server"}))
-                .expect("Error emitting");
+            let r = socket.emit("message", json!({"foo": "Hello server"}));
+            assert!(r.is_err());
         })
         .connect()
         .expect("Connection failed");
