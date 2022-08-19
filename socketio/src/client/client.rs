@@ -1,6 +1,6 @@
-pub use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
 use crate::packet::{Packet, PacketId};
+pub use crate::{event::Event, payload::Payload};
 use rand::{thread_rng, Rng};
 
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
@@ -243,9 +243,8 @@ impl Client {
         Iter { socket: self }
     }
 
-    // for reconnect test
     #[allow(dead_code)]
-    pub(crate) fn is_connected(&self) -> Result<bool> {
+    pub(crate) fn is_connected_for_testing(&self) -> Result<bool> {
         self.socket.is_engineio_connected()
     }
 

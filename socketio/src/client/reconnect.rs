@@ -5,18 +5,17 @@ use std::{
     time::Duration,
 };
 
-pub use super::super::{event::Event, payload::Payload};
 use super::{Client, ClientBuilder};
 use crate::{error::Result, packet::Packet, Error};
+pub use crate::{event::Event, payload::Payload};
 use backoff::ExponentialBackoff;
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 
 #[derive(Clone)]
 pub struct ReconnectClient {
     builder: ClientBuilder,
-    client: Arc<RwLock<super::Client>>,
+    client: Arc<RwLock<Client>>,
     backoff: ExponentialBackoff,
-    max_reconnect_attempts: u8,
 }
 
 impl ReconnectClient {
@@ -24,16 +23,15 @@ impl ReconnectClient {
         let builder_clone = builder.clone();
         let client = builder_clone.connect_manual()?;
         let backoff = ExponentialBackoffBuilder::new()
-            .with_initial_interval(Duration::from_millis(builder.reconnect_delay))
+            .with_initial_interval(Duration::from_millis(builder.reconnect_delay_min))
             .with_max_interval(Duration::from_millis(builder.reconnect_delay_max))
             .build();
-        let max_reconnect_attempts = builder.reconnect_attempts;
+        let max_reconnect_attempts = builder.max_reconnect_attempts;
 
         let s = Self {
             builder,
             client: Arc::new(RwLock::new(client)),
             backoff: ExponentialBackoff::default(),
-            max_reconnect_attempts,
         };
         s.poll_callback();
 
@@ -46,7 +44,7 @@ impl ReconnectClient {
         D: Into<Payload>,
     {
         let client = self.client.read()?;
-        // TODO: like js client, buffer emit, resend after reconnect
+        // TODO(#230): like js client, buffer emit, resend after reconnect
         client.emit(event, data)
     }
 
@@ -63,7 +61,7 @@ impl ReconnectClient {
         D: Into<Payload>,
     {
         let client = self.client.read()?;
-        // TODO: like js client, buffer emit, resend after reconnect
+        // TODO(#230): like js client, buffer emit, resend after reconnect
         client.emit_with_ack(event, data, timeout, callback)
     }
 
@@ -76,8 +74,9 @@ impl ReconnectClient {
         let mut reconnect_attempts = 0;
         if self.builder.reconnect {
             loop {
-                if self.max_reconnect_attempts != 0 // 0 means infinity
-                    && reconnect_attempts > self.max_reconnect_attempts
+                // 0 means infinity
+                if self.builder.max_reconnect_attempts != 0
+                    && reconnect_attempts > self.builder.max_reconnect_attempts
                 {
                     break;
                 }
@@ -87,8 +86,8 @@ impl ReconnectClient {
                     std::thread::sleep(backoff);
                 }
 
-                if self.do_reconnect().is_err() {
-                    self.do_reconnect();
+                if self.do_reconnect().is_ok() {
+                    break;
                 }
             }
         }
@@ -120,7 +119,7 @@ impl ReconnectClient {
             for packet in self_clone.iter() {
                 if let e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
                     //TODO: 0.3.X handle errors
-                    println!("{}", e.unwrap_err());
+                    //TODO: logging error
                     let _ = self_clone.disconnect();
                     break;
                 }
@@ -172,8 +171,8 @@ mod test {
 
         let socket = ClientBuilder::new(url)
             .reconnect(true)
-            .reconnect_attempts(0) // infinity
-            .reconnect_delay(10, 100)
+            .max_reconnect_attempts(0) // infinity
+            .reconnect_delay(20, 20)
             .connect();
         assert!(socket.is_ok(), "should connect success");
         let socket = socket.unwrap();
@@ -186,10 +185,10 @@ mod test {
 
         let mut is_connecting = false;
         for _ in 0..10 {
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::thread::sleep(std::time::Duration::from_millis(10));
             {
                 let client = socket.client.read()?;
-                if !client.is_connected()? {
+                if !client.is_connected_for_testing()? {
                     is_connecting = true; // server is down
                     break;
                 }
@@ -202,7 +201,7 @@ mod test {
             std::thread::sleep(std::time::Duration::from_millis(500));
             {
                 let client = socket.client.read()?;
-                if client.is_connected()? {
+                if client.is_connected_for_testing()? {
                     is_connecting = false; // reconnected
                     break;
                 }
