@@ -243,11 +243,6 @@ impl Client {
         Iter { socket: self }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn is_connected_for_testing(&self) -> Result<bool> {
-        self.socket.is_engineio_connected()
-    }
-
     fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {
         let mut on = self.on.write()?;
         let mut on_any = self.on_any.write()?;
