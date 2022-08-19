@@ -1,5 +1,6 @@
 use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
+use super::reconnect::ReconnectClient;
 use crate::Client;
 use native_tls::TlsConnector;
 use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
@@ -7,9 +8,9 @@ use rust_engineio::header::{HeaderMap, HeaderValue};
 use url::Url;
 
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
-use crate::error::{Error, Result};
+use crate::error::Result;
 use std::collections::HashMap;
-use std::thread;
+use std::sync::{Arc, RwLock};
 
 use crate::socket::Socket as InnerSocket;
 
@@ -30,15 +31,20 @@ pub enum TransportType {
 /// configuring the callback, the namespace and metadata of the socket. If no
 /// namespace is specified, the default namespace `/` is taken. The `connect` method
 /// acts the `build` method and returns a connected [`Client`].
+#[derive(Clone)]
 pub struct ClientBuilder {
     address: String,
-    on: HashMap<Event, Callback<SocketCallback>>,
-    on_any: Option<Callback<SocketAnyCallback>>,
+    on: Arc<RwLock<HashMap<Event, Callback<SocketCallback>>>>,
+    on_any: Arc<RwLock<Option<Callback<SocketAnyCallback>>>>,
     namespace: String,
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
     auth: Option<serde_json::Value>,
+    pub reconnect: bool,
+    pub reconnect_attempts: u8, // 0 means infinity
+    pub reconnect_delay: u64,
+    pub reconnect_delay_max: u64,
 }
 
 impl ClientBuilder {
@@ -75,13 +81,17 @@ impl ClientBuilder {
     pub fn new<T: Into<String>>(address: T) -> Self {
         Self {
             address: address.into(),
-            on: HashMap::new(),
-            on_any: None,
+            on: Arc::new(RwLock::new(HashMap::new())),
+            on_any: Arc::new(RwLock::new(None)),
             namespace: "/".to_owned(),
             tls_config: None,
             opening_headers: None,
             transport_type: TransportType::Any,
             auth: None,
+            reconnect: true,
+            reconnect_attempts: 0, // infinity
+            reconnect_delay: 1000,
+            reconnect_delay_max: 5000,
         }
     }
 
@@ -93,6 +103,24 @@ impl ClientBuilder {
             nsp = "/".to_owned() + &nsp;
         }
         self.namespace = nsp;
+        self
+    }
+
+    pub fn reconnect(mut self, reconnect: bool) -> Self {
+        self.reconnect = reconnect;
+        self
+    }
+
+    pub fn reconnect_delay(mut self, min: u64, max: u64) -> Self {
+        self.reconnect_delay = min;
+        self.reconnect_delay_max = max;
+
+        self
+    }
+
+    // reconnect_attempts 0 means infinity
+    pub fn reconnect_attempts(mut self, reconnect_attempts: u8) -> Self {
+        self.reconnect_attempts = reconnect_attempts;
         self
     }
 
@@ -116,12 +144,12 @@ impl ClientBuilder {
     ///     .connect();
     ///
     /// ```
-    pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
+    pub fn on<T: Into<Event>, F>(self, event: T, callback: F) -> Self
     where
         F: for<'a> FnMut(Payload, Client) + 'static + Sync + Send,
     {
-        self.on
-            .insert(event.into(), Callback::<SocketCallback>::new(callback));
+        let callback = Callback::<SocketCallback>::new(callback);
+        self.on.write().unwrap().insert(event.into(), callback);
         self
     }
 
@@ -141,11 +169,12 @@ impl ClientBuilder {
     ///     .connect();
     ///
     /// ```
-    pub fn on_any<F>(mut self, callback: F) -> Self
+    pub fn on_any<F>(self, callback: F) -> Self
     where
         F: for<'a> FnMut(Event, Payload, Client) + 'static + Sync + Send,
     {
-        self.on_any = Some(Callback::<SocketAnyCallback>::new(callback));
+        let callback = Some(Callback::<SocketAnyCallback>::new(callback));
+        *self.on_any.write().unwrap() = callback;
         self
     }
 
@@ -263,25 +292,8 @@ impl ClientBuilder {
     ///
     /// assert!(result.is_ok());
     /// ```
-    pub fn connect(self) -> Result<Client> {
-        let socket = self.connect_manual()?;
-        let socket_clone = socket.clone();
-
-        // Use thread to consume items in iterator in order to call callbacks
-        thread::spawn(move || {
-            // tries to restart a poll cycle whenever a 'normal' error occurs,
-            // it just panics on network errors, in case the poll cycle returned
-            // `Result::Ok`, the server receives a close frame so it's safe to
-            // terminate
-            for packet in socket_clone.iter() {
-                if let e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
-                    //TODO: 0.3.X handle errors
-                    panic!("{}", e.unwrap_err())
-                }
-            }
-        });
-
-        Ok(socket)
+    pub fn connect(self) -> Result<ReconnectClient> {
+        ReconnectClient::new(self)
     }
 
     //TODO: 0.3.X stabilize

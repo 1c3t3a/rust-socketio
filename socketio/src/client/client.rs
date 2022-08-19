@@ -49,15 +49,15 @@ impl Client {
     pub(crate) fn new<T: Into<String>>(
         socket: InnerSocket,
         namespace: T,
-        on: HashMap<Event, Callback<SocketCallback>>,
-        on_any: Option<Callback<SocketAnyCallback>>,
+        on: Arc<RwLock<HashMap<Event, Callback<SocketCallback>>>>,
+        on_any: Arc<RwLock<Option<Callback<SocketAnyCallback>>>>,
         auth: Option<serde_json::Value>,
     ) -> Result<Self> {
         Ok(Client {
             socket,
             nsp: namespace.into(),
-            on: Arc::new(RwLock::new(on)),
-            on_any: Arc::new(RwLock::new(on_any)),
+            on,
+            on_any,
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
             auth,
         })
@@ -178,7 +178,7 @@ impl Client {
     ///     match message {
     ///         Payload::String(str) => println!("{}", str),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
-    ///    }    
+    ///    }
     /// };
     ///
     /// let payload = json!({"token": 123});
@@ -238,8 +238,15 @@ impl Client {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn iter(&self) -> Iter {
         Iter { socket: self }
+    }
+
+    // for reconnect test
+    #[allow(dead_code)]
+    pub(crate) fn is_connected(&self) -> Result<bool> {
+        self.socket.is_engineio_connected()
     }
 
     fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {

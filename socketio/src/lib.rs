@@ -139,4 +139,19 @@ pub(crate) mod test {
 
         url
     }
+
+    // The socket.io restart server for testing runs on port 4205
+    const RESTART_SERVER_URL: &str = "http://localhost:4205";
+
+    pub(crate) fn socket_io_restart_server() -> Url {
+        let url = std::env::var("SOCKET_IO_RESTART_SERVER")
+            .unwrap_or_else(|_| RESTART_SERVER_URL.to_owned());
+        let mut url = Url::parse(&url).unwrap();
+
+        if url.path() == "/" {
+            url.set_path("/socket.io/");
+        }
+
+        url
+    }
 }
