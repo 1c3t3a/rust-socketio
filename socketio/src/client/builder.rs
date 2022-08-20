@@ -41,11 +41,11 @@ pub struct ClientBuilder {
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
     auth: Option<serde_json::Value>,
-    pub reconnect: bool,
-    // 0 means infinity
-    pub max_reconnect_attempts: u8,
-    pub reconnect_delay_min: u64,
-    pub reconnect_delay_max: u64,
+    pub(crate) reconnect: bool,
+    // None reconnect attempts represent infinity.
+    pub(crate) max_reconnect_attempts: Option<u8>,
+    pub(crate) reconnect_delay_min: u64,
+    pub(crate) reconnect_delay_max: u64,
 }
 
 impl ClientBuilder {
@@ -90,8 +90,8 @@ impl ClientBuilder {
             transport_type: TransportType::Any,
             auth: None,
             reconnect: true,
-            // 0 means infinity
-            max_reconnect_attempts: 0,
+            // None means infinity
+            max_reconnect_attempts: None,
             reconnect_delay_min: 1000,
             reconnect_delay_max: 5000,
         }
@@ -120,9 +120,8 @@ impl ClientBuilder {
         self
     }
 
-    // Zero reconnect attempts represent infinity.
     pub fn max_reconnect_attempts(mut self, reconnect_attempts: u8) -> Self {
-        self.max_reconnect_attempts = reconnect_attempts;
+        self.max_reconnect_attempts = Some(reconnect_attempts);
         self
     }
 
@@ -146,11 +145,14 @@ impl ClientBuilder {
     ///     .connect();
     ///
     /// ```
-    pub fn on<T: Into<Event>, F>(self, event: T, callback: F) -> Self
+    // While present implementation doesn't require mut, it's reasonable to require mutability.
+    #[allow(unused_mut)]
+    pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
         F: for<'a> FnMut(Payload, Client) + 'static + Sync + Send,
     {
         let callback = Callback::<SocketCallback>::new(callback);
+        // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
         self.on.write().unwrap().insert(event.into(), callback);
         self
     }
@@ -171,11 +173,14 @@ impl ClientBuilder {
     ///     .connect();
     ///
     /// ```
-    pub fn on_any<F>(self, callback: F) -> Self
+    // While present implementation doesn't require mut, it's reasonable to require mutability.
+    #[allow(unused_mut)]
+    pub fn on_any<F>(mut self, callback: F) -> Self
     where
         F: for<'a> FnMut(Event, Payload, Client) + 'static + Sync + Send,
     {
         let callback = Some(Callback::<SocketAnyCallback>::new(callback));
+        // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
         *self.on_any.write().unwrap() = callback;
         self
     }

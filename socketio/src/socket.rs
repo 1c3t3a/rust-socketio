@@ -102,12 +102,10 @@ impl Socket {
                 Some(vec![bin_data]),
             )),
             Payload::String(str_data) => {
-                let payload = {
-                    if serde_json::from_str::<serde_json::Value>(&str_data).is_ok() {
-                        format!("[\"{}\",{}]", String::from(event), str_data)
-                    } else {
-                        format!("[\"{}\",\"{}\"]", String::from(event), str_data)
-                    }
+                let payload = if serde_json::from_str::<serde_json::Value>(&str_data).is_ok() {
+                    format!("[\"{}\",{}]", String::from(event), str_data)
+                } else {
+                    format!("[\"{}\",\"{}\"]", String::from(event), str_data)
                 };
 
                 Ok(Packet::new(
