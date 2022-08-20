@@ -30,7 +30,7 @@ impl ReconnectClient {
         let s = Self {
             builder,
             client: Arc::new(RwLock::new(client)),
-            backoff: ExponentialBackoff::default(),
+            backoff,
         };
         s.poll_callback();
 
@@ -69,15 +69,14 @@ impl ReconnectClient {
         client.disconnect()
     }
 
-    fn reconnect(&mut self) -> Result<()> {
+    fn reconnect(&mut self) {
         let mut reconnect_attempts = 0;
         if self.builder.reconnect {
             loop {
-                // 0 means infinity
-                if self.builder.max_reconnect_attempts != 0
-                    && reconnect_attempts > self.builder.max_reconnect_attempts
-                {
-                    break;
+                if let Some(max_reconnect_attempts) = self.builder.max_reconnect_attempts {
+                    if reconnect_attempts > max_reconnect_attempts {
+                        break;
+                    }
                 }
                 reconnect_attempts += 1;
 
@@ -86,12 +85,10 @@ impl ReconnectClient {
                 }
 
                 if self.do_reconnect().is_ok() {
-                    self.poll_callback();
                     break;
                 }
             }
         }
-        Ok(())
     }
 
     fn do_reconnect(&self) -> Result<()> {
@@ -121,10 +118,9 @@ impl ReconnectClient {
                     //TODO: 0.3.X handle errors
                     //TODO: logging error
                     let _ = self_clone.disconnect();
-                    break;
+                    self_clone.reconnect();
                 }
             }
-            self_clone.reconnect();
         });
     }
 }
@@ -163,61 +159,54 @@ mod test {
     use bytes::Bytes;
     use native_tls::TlsConnector;
     use serde_json::json;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn socket_io_reconnect_integration() -> Result<()> {
         let url = crate::test::socket_io_restart_server();
         let connect_count = Arc::new(Mutex::new(0));
         let close_count = Arc::new(Mutex::new(0));
+        let message_count = Arc::new(Mutex::new(0));
         let connect_count_clone = connect_count.clone();
         let close_count_clone = close_count.clone();
+        let message_count_clone = message_count.clone();
 
         let socket = ClientBuilder::new(url)
             .reconnect(true)
-            .max_reconnect_attempts(0) // infinity
+            .max_reconnect_attempts(100)
             .reconnect_delay(100, 100)
             .on(Event::Connect, move |_, socket| {
-                let mut count = connect_count_clone.lock().unwrap();
-                *count += 1;
+                let mut connect_cnt = connect_count_clone.lock().unwrap();
+                *connect_cnt += 1;
+
+                let r = socket.emit_with_ack(
+                    "message",
+                    json!(""),
+                    Duration::from_millis(100),
+                    |_, _| {},
+                );
+                assert!(r.is_ok(), "should emit message success");
             })
-            .on(Event::Close, move |_, socket| {
-                let mut count = close_count_clone.lock().unwrap();
-                *count += 1;
+            .on(Event::Close, move |_, _| {
+                let mut close_cnt = close_count_clone.lock().unwrap();
+                *close_cnt += 1;
+            })
+            .on("message", move |_, socket| {
+                // test the iterator implementation and make sure there is a constant
+                // stream of packets, even when reconnecting
+                let mut message_cnt = message_count_clone.lock().unwrap();
+                *message_cnt += 1;
             })
             .connect();
-
-        for _ in 0..10 {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            {
-                let open_cnt = connect_count.lock().unwrap();
-                if *open_cnt == 1 {
-                    break;
-                }
-            }
-        }
-
-        {
-            let connect_cnt = connect_count.lock().unwrap();
-            let close_cnt = close_count.lock().unwrap();
-            assert_eq!(*connect_cnt, 1, "should connect once ");
-            assert_eq!(*close_cnt, 0, "should not close");
-        }
 
         assert!(socket.is_ok(), "should connect success");
         let socket = socket.unwrap();
 
-        let r = socket.emit_with_ack("message", json!(""), Duration::from_millis(100), |_, _| {});
-        assert!(r.is_ok(), "should emit message success");
-
-        let r = socket.emit("restart_server", json!(""));
-        assert!(r.is_ok(), "should emit restart success");
-
         for _ in 0..10 {
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::thread::sleep(std::time::Duration::from_millis(100));
             {
-                let open_cnt = connect_count.lock().unwrap();
-                if *open_cnt == 2 {
+                let message_cnt = message_count.lock().unwrap();
+                if *message_cnt == 1 {
                     break;
                 }
             }
@@ -225,12 +214,35 @@ mod test {
 
         {
             let connect_cnt = connect_count.lock().unwrap();
+            let message_cnt = message_count.lock().unwrap();
             let close_cnt = close_count.lock().unwrap();
-            assert_eq!(
-                *connect_cnt, 2,
-                "should connect twice while server is gone and back"
-            );
-            assert_eq!(*close_cnt, 1, "should close once while server is gone");
+            assert_eq!(*connect_cnt, 1, "should connect once");
+            assert_eq!(*message_cnt, 1, "should receive message ");
+            assert_eq!(*close_cnt, 0, "should not close");
+        }
+
+        let r = socket.emit("restart_server", json!(""));
+        assert!(r.is_ok(), "should emit restart success");
+
+        let now = Instant::now();
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            {
+                let message_cnt = message_count.lock().unwrap();
+                let connect_cnt = connect_count.lock().unwrap();
+                if *message_cnt == 2 && *connect_cnt == 2 {
+                    break;
+                }
+            }
+        }
+
+        {
+            let connect_cnt = connect_count.lock().unwrap();
+            let message_cnt = message_count.lock().unwrap();
+            let close_cnt = close_count.lock().unwrap();
+            assert_eq!(*connect_cnt, 2, "should connect twice {:?}", now.elapsed());
+            assert_eq!(*message_cnt, 2, "should receive two messages");
+            assert_eq!(*close_cnt, 1, "should close once");
         }
 
         socket.disconnect()?;
