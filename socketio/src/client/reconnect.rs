@@ -7,7 +7,7 @@ use std::{
 
 use super::{Client, ClientBuilder};
 use crate::{error::Result, packet::Packet, Error};
-pub use crate::{event::Event, payload::Payload};
+pub(crate) use crate::{event::Event, payload::Payload};
 use backoff::ExponentialBackoff;
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 
@@ -138,7 +138,9 @@ impl Iterator for Iter {
             Ok(socket) => match socket.poll() {
                 Err(err) => Some(Err(err)),
                 Ok(Some(packet)) => Some(Ok(packet)),
-                Ok(None) => None,
+                // If the underlying engineIO connection is closed,
+                // throw an error so we know to reconnect
+                Ok(None) => Some(Err(Error::MissingInnerSocket)),
             },
             Err(_) => {
                 // Lock is poisoned, our iterator is useless.
@@ -246,6 +248,63 @@ mod test {
         }
 
         socket.disconnect()?;
+        Ok(())
+    }
+
+    #[test]
+    fn socket_io_iterator_integration() -> Result<()> {
+        let url = crate::test::socket_io_server();
+        let builder = ClientBuilder::new(url);
+        let builder_clone = builder.clone();
+
+        let client = Arc::new(RwLock::new(builder_clone.connect_manual()?));
+        let mut socket = ReconnectClient {
+            builder,
+            client,
+            backoff: Default::default(),
+        };
+        let socket_clone = socket.clone();
+
+        let packets: Arc<RwLock<Vec<Packet>>> = Default::default();
+        let packets_clone = packets.clone();
+
+        std::thread::spawn(move || {
+            for packet in socket_clone.iter() {
+                {
+                    let mut packets = packets_clone.write().unwrap();
+                    if let Ok(packet) = packet {
+                        (*packets).push(packet);
+                    }
+                }
+            }
+        });
+
+        // wait to recevive client messages
+        std::thread::sleep(Duration::from_millis(100));
+        let mut pre_num = 0;
+        {
+            let packets = packets.read().unwrap();
+            pre_num = packets.len();
+        }
+
+        socket.disconnect();
+        socket.reconnect();
+
+        // wait to recevive client messages
+        std::thread::sleep(Duration::from_millis(100));
+        let mut post_num = 0;
+        {
+            let packets = packets.read().unwrap();
+            post_num = packets.len();
+        }
+
+        assert!(
+            pre_num < post_num,
+            "pre_num {} should less than post_num {}",
+            pre_num,
+            post_num
+        );
+
         Ok(())
     }
 }
