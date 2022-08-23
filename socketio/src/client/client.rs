@@ -1,6 +1,6 @@
 use super::callback::Callback;
 use crate::packet::{Packet, PacketId};
-pub use crate::{event::Event, payload::Payload};
+pub(crate) use crate::{event::Event, payload::Payload};
 use rand::{thread_rng, Rng};
 
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
@@ -238,7 +238,7 @@ impl Client {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn iter(&self) -> Iter {
         Iter { socket: self }
     }
