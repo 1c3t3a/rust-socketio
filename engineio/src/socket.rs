@@ -79,7 +79,7 @@ impl Socket {
             spawn_scoped!(on_close(()));
         }
 
-        // will not succeed when server is gone
+        // will not succeed when connection to the server is interrupted
         let _ = self.emit(Packet::new(PacketId::Close, Bytes::new()));
 
         self.connected.store(false, Ordering::Release);

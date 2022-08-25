@@ -152,6 +152,7 @@ impl Iterator for Iter {
 
 #[cfg(test)]
 mod test {
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc;
     use std::thread::sleep;
 
@@ -166,21 +167,21 @@ mod test {
     #[test]
     fn socket_io_reconnect_integration() -> Result<()> {
         let url = crate::test::socket_io_restart_server();
-        let connect_count = Arc::new(Mutex::new(0));
-        let close_count = Arc::new(Mutex::new(0));
-        let message_count = Arc::new(Mutex::new(0));
-        let connect_count_clone = connect_count.clone();
-        let close_count_clone = close_count.clone();
-        let message_count_clone = message_count.clone();
+
+        let connect_num = Arc::new(AtomicUsize::new(0));
+        let close_num = Arc::new(AtomicUsize::new(0));
+        let message_num = Arc::new(AtomicUsize::new(0));
+
+        let connect_num_clone = Arc::clone(&connect_num);
+        let close_num_clone = Arc::clone(&close_num);
+        let message_num_clone = Arc::clone(&message_num);
 
         let socket = ClientBuilder::new(url)
             .reconnect(true)
             .max_reconnect_attempts(100)
             .reconnect_delay(100, 100)
             .on(Event::Connect, move |_, socket| {
-                let mut connect_cnt = connect_count_clone.lock().unwrap();
-                *connect_cnt += 1;
-
+                connect_num_clone.fetch_add(1, Ordering::SeqCst);
                 let r = socket.emit_with_ack(
                     "message",
                     json!(""),
@@ -190,62 +191,46 @@ mod test {
                 assert!(r.is_ok(), "should emit message success");
             })
             .on(Event::Close, move |_, _| {
-                let mut close_cnt = close_count_clone.lock().unwrap();
-                *close_cnt += 1;
+                close_num_clone.fetch_add(1, Ordering::SeqCst);
             })
             .on("message", move |_, socket| {
                 // test the iterator implementation and make sure there is a constant
                 // stream of packets, even when reconnecting
-                let mut message_cnt = message_count_clone.lock().unwrap();
-                *message_cnt += 1;
+                message_num_clone.fetch_add(1, Ordering::SeqCst);
             })
             .connect();
 
         assert!(socket.is_ok(), "should connect success");
         let socket = socket.unwrap();
 
+        // waiting for server to emit message
         for _ in 0..10 {
             std::thread::sleep(std::time::Duration::from_millis(100));
             {
-                let message_cnt = message_count.lock().unwrap();
-                if *message_cnt == 1 {
+                if load(&message_num) == 1 {
                     break;
                 }
             }
         }
 
-        {
-            let connect_cnt = connect_count.lock().unwrap();
-            let message_cnt = message_count.lock().unwrap();
-            let close_cnt = close_count.lock().unwrap();
-            assert_eq!(*connect_cnt, 1, "should connect once");
-            assert_eq!(*message_cnt, 1, "should receive message ");
-            assert_eq!(*close_cnt, 0, "should not close");
-        }
+        assert_eq!(load(&connect_num), 1, "should connect once");
+        assert_eq!(load(&message_num), 1, "should receive one");
+        assert_eq!(load(&close_num), 0, "should not close");
 
         let r = socket.emit("restart_server", json!(""));
         assert!(r.is_ok(), "should emit restart success");
 
-        let now = Instant::now();
+        // waiting for server to restart
         for _ in 0..10 {
             std::thread::sleep(std::time::Duration::from_millis(400));
-            {
-                let message_cnt = message_count.lock().unwrap();
-                let connect_cnt = connect_count.lock().unwrap();
-                if *message_cnt == 2 && *connect_cnt == 2 {
-                    break;
-                }
+            if load(&connect_num) == 2 && load(&message_num) == 2 {
+                break;
             }
         }
 
-        {
-            let connect_cnt = connect_count.lock().unwrap();
-            let message_cnt = message_count.lock().unwrap();
-            let close_cnt = close_count.lock().unwrap();
-            assert_eq!(*connect_cnt, 2, "should connect twice {:?}", now.elapsed());
-            assert_eq!(*message_cnt, 2, "should receive two messages");
-            assert_eq!(*close_cnt, 1, "should close once");
-        }
+        assert_eq!(load(&connect_num), 2, "should connect twice");
+        assert_eq!(load(&message_num), 2, "should receive two messages");
+        assert_eq!(load(&close_num), 1, "should close once");
 
         socket.disconnect()?;
         Ok(())
@@ -279,7 +264,7 @@ mod test {
             }
         });
 
-        // wait to recevive client messages
+        // waiting for client to emit messages
         std::thread::sleep(Duration::from_millis(100));
         let mut pre_num = 0;
         {
@@ -290,7 +275,7 @@ mod test {
         socket.disconnect();
         socket.reconnect();
 
-        // wait to recevive client messages
+        // waiting for client to emit messages
         std::thread::sleep(Duration::from_millis(100));
         let mut post_num = 0;
         {
@@ -306,5 +291,9 @@ mod test {
         );
 
         Ok(())
+    }
+
+    fn load(num: &Arc<AtomicUsize>) -> usize {
+        num.load(Ordering::SeqCst)
     }
 }
