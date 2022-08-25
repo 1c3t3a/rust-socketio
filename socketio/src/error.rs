@@ -44,8 +44,8 @@ pub enum Error {
     IncompleteResponseFromEngineIo(#[from] rust_engineio::Error),
     #[error("Invalid packet type while reading attachments")]
     InvalidAttachmentPacketType(u8),
-    #[error("Missing inner socket")]
-    MissingInnerSocket,
+    #[error("Underlying Engine.IO connection has closed")]
+    StoppedEngineIoSocket,
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;

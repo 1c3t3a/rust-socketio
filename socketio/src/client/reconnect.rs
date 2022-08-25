@@ -140,7 +140,7 @@ impl Iterator for Iter {
                 Ok(Some(packet)) => Some(Ok(packet)),
                 // If the underlying engineIO connection is closed,
                 // throw an error so we know to reconnect
-                Ok(None) => Some(Err(Error::MissingInnerSocket)),
+                Ok(None) => Some(Err(Error::StoppedEngineIoSocket)),
             },
             Err(_) => {
                 // Lock is poisoned, our iterator is useless.
