@@ -9,6 +9,8 @@ mod callback;
 pub mod client;
 #[cfg(feature = "async")]
 mod generator;
+#[cfg(feature = "async")]
+pub mod server;
 
 #[cfg(feature = "async")]
 pub use client::{Client, ClientBuilder};

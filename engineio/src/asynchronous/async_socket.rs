@@ -35,6 +35,7 @@ pub struct Socket {
     last_pong: Arc<Mutex<Instant>>,
     connection_data: Arc<HandshakePacket>,
     generator: StreamGenerator<Packet>,
+    is_server: bool,
 }
 
 impl Socket {
@@ -60,7 +61,12 @@ impl Socket {
             last_pong: Arc::new(Mutex::new(Instant::now())),
             connection_data: Arc::new(handshake),
             generator: StreamGenerator::new(Self::stream(transport)),
+            is_server: false,
         }
+    }
+
+    pub(crate) fn set_server(&mut self) {
+        self.is_server = true;
     }
 
     /// Opens the connection to a specified server. The first Pong packet is sent
@@ -77,8 +83,10 @@ impl Socket {
         // set the last ping to now and set the connected state
         *self.last_ping.lock().await = Instant::now();
 
-        // emit a pong packet to keep trigger the ping cycle on the server
-        self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
+        if !self.is_server {
+            // emit a pong packet to keep trigger the ping cycle on the server
+            self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
+        }
 
         Ok(())
     }

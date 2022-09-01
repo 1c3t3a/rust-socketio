@@ -1361,6 +1361,7 @@ dependencies = [
  "crossbeam-utils",
  "futures-util",
  "http",
+ "httparse",
  "lazy_static",
  "native-tls",
  "reqwest",
@@ -1369,6 +1370,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-tungstenite",
+ "tokio-util 0.7.3",
  "tungstenite",
  "url",
 ]

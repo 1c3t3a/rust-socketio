@@ -2,17 +2,11 @@ use std::{borrow::Cow, str::from_utf8, sync::Arc, task::Poll};
 
 use crate::{error::Result, Error, Packet, PacketId};
 use bytes::{BufMut, Bytes, BytesMut};
-use futures_util::{
-    ready,
-    stream::{SplitSink, SplitStream},
-    FutureExt, SinkExt, Stream, StreamExt,
-};
-use tokio::{net::TcpStream, sync::Mutex};
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use futures_util::{ready, FutureExt, SinkExt, Stream, StreamExt};
+use tokio::sync::Mutex;
 use tungstenite::Message;
 
-type AsyncWebsocketSender = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
-type AsyncWebsocketReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
+use super::{AsyncWebsocketReceiver, AsyncWebsocketSender};
 
 /// A general purpose asynchronous websocket transport type. Holds
 /// the sender and receiver stream of a websocket connection
@@ -25,10 +19,7 @@ pub(crate) struct AsyncWebsocketGeneralTransport {
 }
 
 impl AsyncWebsocketGeneralTransport {
-    pub(crate) async fn new(
-        sender: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-        receiver: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
-    ) -> Self {
+    pub(crate) fn new(sender: AsyncWebsocketSender, receiver: AsyncWebsocketReceiver) -> Self {
         AsyncWebsocketGeneralTransport {
             sender: Arc::new(Mutex::new(sender)),
             receiver: Arc::new(Mutex::new(receiver)),

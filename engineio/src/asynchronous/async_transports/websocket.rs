@@ -15,6 +15,7 @@ use tungstenite::client::IntoClientRequest;
 use url::Url;
 
 use super::websocket_general::AsyncWebsocketGeneralTransport;
+use super::{AsyncWebsocketReceiver, AsyncWebsocketSender};
 
 /// An asynchronous websocket transport type.
 /// This type only allows for plain websocket
@@ -41,11 +42,20 @@ impl WebsocketTransport {
         let (ws_stream, _) = connect_async(req).await?;
         let (sen, rec) = ws_stream.split();
 
-        let inner = AsyncWebsocketGeneralTransport::new(sen, rec).await;
+        let inner = AsyncWebsocketGeneralTransport::new(sen, rec);
         Ok(WebsocketTransport {
             inner,
             base_url: Arc::new(RwLock::new(url)),
         })
+    }
+
+    pub fn new_for_server(sender: AsyncWebsocketSender, receiver: AsyncWebsocketReceiver) -> Self {
+        let inner = AsyncWebsocketGeneralTransport::new(sender, receiver);
+        WebsocketTransport {
+            inner,
+            // TODO: server no need
+            base_url: Arc::new(RwLock::new(Url::parse("https://example.net").unwrap())),
+        }
     }
 
     /// Sends probe packet to ensure connection is valid, then sends upgrade
