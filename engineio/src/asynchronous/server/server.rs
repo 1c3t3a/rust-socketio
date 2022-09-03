@@ -9,8 +9,8 @@ use crate::packet::HandshakePacket;
 use crate::Packet;
 use bytes::Bytes;
 use futures_util::StreamExt;
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::{collections::HashMap, net::SocketAddr};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -58,9 +58,9 @@ impl Server {
             .await
             .expect("engine-io server can not listen port");
 
-        while let Ok((stream, _)) = listener.accept().await {
+        while let Ok((stream, peer_addr)) = listener.accept().await {
             let server = self.clone();
-            tokio::spawn(async move { accept_connection(server, stream).await });
+            tokio::spawn(async move { accept_connection(server, stream, peer_addr).await });
         }
     }
 
@@ -73,26 +73,40 @@ impl Server {
         Ok(())
     }
 
+    pub async fn is_connected(&self, sid: &str) -> Result<bool> {
+        let sockets = self.inner.sockets.read().await;
+        match sockets.get(sid) {
+            Some(s) => s.is_connected(),
+            None => Ok(false),
+        }
+    }
+
     pub async fn store_stream(
         &self,
         sid: String,
+        peer_addr: &SocketAddr,
         ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> Result<()> {
         let (sender, receiver) = ws_stream.split();
-        let transport: AsyncTransportType =
-            AsyncTransportType::Websocket(WebsocketTransport::new_for_server(sender, receiver));
+        let url = format!("http://{}", peer_addr);
+        let transport: AsyncTransportType = AsyncTransportType::Websocket(
+            WebsocketTransport::new_for_server(sender, receiver, url),
+        );
         let handshake = self.handshake_packet(vec!["webscocket".to_owned()], Some(sid.clone()));
         let mut socket = Socket::new(
             transport,
             handshake,
-            self.inner.on_close.clone(),
+            self.on_close(&sid),
             self.inner.on_data.clone(),
             self.inner.on_error.clone(),
             self.inner.on_open.clone(),
             self.inner.on_packet.clone(),
         );
+
         socket.set_server();
         socket.connect().await?;
+        poll_packet(socket.clone());
+
         let mut sockets = self.inner.sockets.write().await;
         let _ = sockets.insert(sid, socket);
         Ok(())
@@ -118,6 +132,29 @@ impl Server {
     pub fn sid(&self) -> Sid {
         self.inner.id_generator.generate()
     }
+
+    fn on_close(&self, sid: &str) -> OptionalCallback<()> {
+        let sid_clone = sid.to_owned();
+        let on_close = self.inner.on_close.clone();
+        let server = self.clone();
+
+        OptionalCallback::new(move |p| {
+            let sid = sid_clone.clone();
+            let on_close = on_close.clone();
+            let server = server.clone();
+            Box::pin(async move {
+                if let Some(on_close) = on_close.as_deref() {
+                    on_close(p).await;
+                }
+                server.drop_socket(&sid).await;
+            })
+        })
+    }
+
+    async fn drop_socket(&self, sid: &str) {
+        let mut sockets = self.inner.sockets.write().await;
+        let _ = sockets.remove(sid);
+    }
 }
 
 impl Default for Inner {
@@ -137,79 +174,158 @@ impl Default for Inner {
     }
 }
 
-async fn accept_connection(server: Server, stream: TcpStream) -> Result<()> {
+async fn accept_connection(server: Server, stream: TcpStream, peer_addr: SocketAddr) -> Result<()> {
     // TODO: tls
-    match peek_request_type(&stream).await {
+    match peek_request_type(&stream, &peer_addr).await {
         Some(RequestType::WsUpgrade(sid)) => {
-            WebsocketAcceptor::accept(server, sid, MaybeTlsStream::Plain(stream)).await
+            WebsocketAcceptor::accept(server, sid, MaybeTlsStream::Plain(stream), &peer_addr).await
         }
         // TODO: polling transport
-        _ => PollingAcceptor::accept(server, stream).await,
+        _ => PollingAcceptor::accept(server, stream, &peer_addr).await,
     }
+}
+
+fn poll_packet(mut socket: Socket) {
+    tokio::spawn(async move {
+        while let Some(packet) = socket.next().await {
+            let result = match packet {
+                Ok(p) => socket.handle_inconming_packet(p).await,
+                Err(e) => Err(e),
+            };
+            if result.is_err() {
+                // TODO: handle error
+                break;
+            }
+        }
+    });
 }
 
 #[cfg(test)]
 mod test {
 
+    use super::*;
     use crate::{
         asynchronous::{server::builder::ServerBuilder, Client, ClientBuilder},
         PacketId,
     };
-
-    use super::*;
-
-    // #[tokio::test]
-    // async fn start_server_for_node() {
-    //     let url = crate::test::engine_io_server().unwrap();
-    //     let port = url.port().unwrap();
-    //     let server = ServerBuilder::new(port).build();
-    //     server.serve().await;
-    // }
+    use tokio::sync::{mpsc::Receiver, Mutex};
 
     #[tokio::test]
     async fn test_connection() -> Result<()> {
-        start_server();
+        let mut rx = start_server();
 
         let url = crate::test::rust_engine_io_server()?;
         let socket = ClientBuilder::new(url.clone()).build().await?;
-        test_connect(socket).await?;
+        test_data_transport(socket, &mut rx).await?;
 
         let socket = ClientBuilder::new(url.clone()).build_websocket().await?;
-        test_connect(socket).await?;
+        test_data_transport(socket, &mut rx).await?;
 
         let socket = ClientBuilder::new(url)
             .build_websocket_with_upgrade()
             .await?;
-        test_connect(socket).await?;
+        test_data_transport(socket, &mut rx).await?;
 
         Ok(())
     }
 
-    fn start_server() {
+    fn start_server() -> Receiver<String> {
         let url = crate::test::rust_engine_io_server().unwrap();
         let port = url.port().unwrap();
-        let server = ServerBuilder::new(port).build();
+        let (builder, rx) = setup(port);
+        let server = builder.build();
+
         tokio::spawn(async move {
             server.serve().await;
         });
+
+        rx
     }
 
-    async fn test_connect(mut socket: Client) -> Result<()> {
+    async fn test_data_transport(
+        mut socket: Client,
+        server_rx: &mut Receiver<String>,
+    ) -> Result<()> {
         socket.connect().await?;
 
-        let p = socket.next().await.unwrap()?;
         // Ping
         assert!(matches!(
-            p,
+            socket.next().await.unwrap()?,
             Packet {
                 packet_id: PacketId::Ping,
                 ..
             }
         ));
 
+        socket
+            .emit(Packet::new(PacketId::Message, Bytes::from("msg")))
+            .await?;
+
         socket.disconnect().await?;
 
+        let mut receive_pong = false;
+        let mut receive_msg = false;
+
+        while let Some(item) = server_rx.recv().await {
+            match item.as_str() {
+                "3" => receive_pong = true,
+                "msg" => receive_msg = true,
+                "close" => break,
+                _ => {}
+            }
+        }
+
+        assert!(receive_pong);
+        assert!(receive_msg);
         assert!(!socket.is_connected()?);
+
         Ok(())
+    }
+
+    fn setup(port: u16) -> (ServerBuilder, Receiver<String>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let tx = Arc::new(Mutex::new(tx));
+        let tx1 = Arc::clone(&tx);
+        let tx2 = Arc::clone(&tx);
+        let tx3 = Arc::clone(&tx);
+        let tx4 = Arc::clone(&tx);
+        (
+            ServerBuilder::new(port)
+                .on_open(move |_| {
+                    let tx = Arc::clone(&tx1);
+                    Box::pin(async move {
+                        let guard = tx.lock().await;
+                        let _ = guard.send("open".to_owned()).await;
+                    })
+                })
+                .on_packet(move |packet| {
+                    let tx = Arc::clone(&tx2);
+                    Box::pin(async move {
+                        let guard = tx.lock().await;
+                        let _ = guard.send(String::from(packet.packet_id)).await;
+                    })
+                })
+                .on_data(move |data| {
+                    let tx = Arc::clone(&tx3);
+                    Box::pin(async move {
+                        let data = std::str::from_utf8(&data).unwrap();
+                        let guard = tx.lock().await;
+                        let _ = guard.send(data.to_owned()).await;
+                    })
+                })
+                .on_close(move |_| {
+                    let tx = Arc::clone(&tx4);
+                    Box::pin(async move {
+                        let guard = tx.lock().await;
+                        let _ = guard.send("close".to_owned()).await;
+                    })
+                })
+                .on_error(|error| {
+                    Box::pin(async move {
+                        println!("Error {}", error);
+                    })
+                }),
+            rx,
+        )
     }
 }

@@ -49,12 +49,17 @@ impl WebsocketTransport {
         })
     }
 
-    pub fn new_for_server(sender: AsyncWebsocketSender, receiver: AsyncWebsocketReceiver) -> Self {
+    pub fn new_for_server(
+        sender: AsyncWebsocketSender,
+        receiver: AsyncWebsocketReceiver,
+        url: String,
+    ) -> Self {
         let inner = AsyncWebsocketGeneralTransport::new(sender, receiver);
         WebsocketTransport {
             inner,
-            // TODO: server no need
-            base_url: Arc::new(RwLock::new(Url::parse("https://example.net").unwrap())),
+            // TODO: server do not need base_url
+            // SAFETY: url is valid to parse
+            base_url: Arc::new(RwLock::new(Url::parse(&url).unwrap())),
         }
     }
 

@@ -113,9 +113,11 @@ impl Socket {
                 self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
             }
             PacketId::Pong | PacketId::Open => {
-                // this will never happen as the pong and open
-                // packets are only sent by the client
-                return Err(Error::InvalidPacket());
+                if !self.is_server {
+                    // this will never happen as the pong and open
+                    // packets are only sent by the client
+                    return Err(Error::InvalidPacket());
+                }
             }
             PacketId::Noop => (),
         }

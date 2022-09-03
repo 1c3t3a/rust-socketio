@@ -4,10 +4,10 @@ use futures_util::{SinkExt, StreamExt};
 use http::Response;
 use httparse::{Request, Status, EMPTY_HEADER};
 use reqwest::Url;
-use std::borrow::Cow;
 use std::str::from_utf8;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use std::{borrow::Cow, net::SocketAddr};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{accept_async, MaybeTlsStream, WebSocketStream};
@@ -39,9 +39,13 @@ impl SidGenerator {
 pub(crate) struct PollingAcceptor {}
 
 impl PollingAcceptor {
-    pub(crate) async fn accept(server: Server, mut stream: TcpStream) -> Result<()> {
+    pub(crate) async fn accept(
+        server: Server,
+        mut stream: TcpStream,
+        addr: &SocketAddr,
+    ) -> Result<()> {
         // TODO: polling transport
-        match read_request_type(&mut stream).await {
+        match read_request_type(&mut stream, addr).await {
             Some(RequestType::PollingOpen) => {
                 let packet = server.handshake_packet(vec!["websocket".to_owned()], None);
                 // SAFETY: all fields are safe to serialize
@@ -64,6 +68,7 @@ impl WebsocketAcceptor {
         server: Server,
         sid: Option<String>,
         stream: MaybeTlsStream<TcpStream>,
+        addr: &SocketAddr,
     ) -> Result<()> {
         let mut ws_stream = accept_async(stream).await?;
         let sid = match sid {
@@ -78,12 +83,12 @@ impl WebsocketAcceptor {
                 PING_PROBE => {
                     send_pong_probe(&mut ws_stream).await?;
                     start_ping_pong(server.clone(), &sid);
-                    server.store_stream(sid, ws_stream).await?;
+                    server.store_stream(sid, addr, ws_stream).await?;
                 }
                 // websocket connecting directly
                 PONG => {
                     start_ping_pong(server.clone(), &sid);
-                    server.store_stream(sid, ws_stream).await?;
+                    server.store_stream(sid, addr, ws_stream).await?;
                 }
                 _ => {}
             }
@@ -123,7 +128,7 @@ fn start_ping_pong(server: Server, sid: &str) {
     let server_option = server.server_option();
     let mut interval = tokio::time::interval(Duration::from_millis(server_option.ping_interval));
     tokio::spawn(async move {
-        loop {
+        while let Ok(true) = server.is_connected(&sid_clone).await {
             // TODO: close if timeout
             if server
                 .emit(&sid_clone, Packet::new(PacketId::Ping, Bytes::new()))
@@ -144,22 +149,25 @@ pub(crate) enum RequestType {
     PollingPost(String),
 }
 
-pub(crate) async fn peek_request_type(stream: &TcpStream) -> Option<RequestType> {
+pub(crate) async fn peek_request_type(
+    stream: &TcpStream,
+    addr: &SocketAddr,
+) -> Option<RequestType> {
     let mut buf = [0; MAX_BUFF_LEN];
     let mut buf = ReadBuf::new(&mut buf);
 
     poll_fn(|cx| stream.poll_peek(cx, &mut buf)).await.ok()?;
-    parse_request_type(buf.filled())
+    parse_request_type(buf.filled(), addr)
 }
 
-async fn read_request_type(stream: &mut TcpStream) -> Option<RequestType> {
+async fn read_request_type(stream: &mut TcpStream, addr: &SocketAddr) -> Option<RequestType> {
     let mut buf = [0; MAX_BUFF_LEN];
     let n = stream.read(&mut buf).await.ok()?;
 
-    parse_request_type(&buf[0..n])
+    parse_request_type(&buf[0..n], addr)
 }
 
-pub(crate) fn parse_request_type(buf: &[u8]) -> Option<RequestType> {
+pub(crate) fn parse_request_type(buf: &[u8], addr: &SocketAddr) -> Option<RequestType> {
     let mut header_buf = [EMPTY_HEADER; MAX_HEADERS];
     let mut req = Request::new(&mut header_buf);
     let (req, idx) = match req.parse(buf) {
@@ -172,11 +180,11 @@ pub(crate) fn parse_request_type(buf: &[u8]) -> Option<RequestType> {
     }
 
     let mut content_length = 0;
-    let path = format!("http://dummy.com{}", req.path?);
-    let path = Url::parse(&path).ok()?;
+    let url = format!("http://{}{}", addr, req.path?);
+    let url = Url::parse(&url).ok()?;
     let mut sid = None;
 
-    for (query_key, query_value) in path.query_pairs() {
+    for (query_key, query_value) in url.query_pairs() {
         if query_key == "EIO" && query_value != "4" {
             return None;
         }
