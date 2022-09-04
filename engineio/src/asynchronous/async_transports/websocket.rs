@@ -57,8 +57,7 @@ impl WebsocketTransport {
         let inner = AsyncWebsocketGeneralTransport::new(sender, receiver);
         WebsocketTransport {
             inner,
-            // TODO: server do not need base_url
-            // SAFETY: url is valid to parse
+            // host of base_url is peer address
             base_url: Arc::new(RwLock::new(url)),
         }
     }

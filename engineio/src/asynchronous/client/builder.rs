@@ -20,6 +20,7 @@ use super::Client;
 #[derive(Clone, Debug)]
 pub struct ClientBuilder {
     url: Url,
+    should_pong: bool,
     tls_config: Option<TlsConnector>,
     headers: Option<HeaderMap>,
     handshake: Option<HandshakePacket>,
@@ -44,6 +45,7 @@ impl ClientBuilder {
             url,
             headers: None,
             tls_config: None,
+            should_pong: true,
             handshake: None,
             on_close: OptionalCallback::default(),
             on_data: OptionalCallback::default(),
@@ -107,6 +109,12 @@ impl ClientBuilder {
         T: 'static + Send + Sync + Fn(Packet) -> BoxFuture<'static, ()>,
     {
         self.on_packet = OptionalCallback::new(callback);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn should_pong_for_test(mut self, should_pong: bool) -> Self {
+        self.should_pong = should_pong;
         self
     }
 
@@ -180,6 +188,7 @@ impl ClientBuilder {
         Ok(Client::new(InnerSocket::new(
             transport.into(),
             self.handshake.unwrap(),
+            self.should_pong,
             self.on_close,
             self.on_data,
             self.on_error,
@@ -221,6 +230,7 @@ impl ClientBuilder {
                 Ok(Client::new(InnerSocket::new(
                     transport.into(),
                     self.handshake.unwrap(),
+                    self.should_pong,
                     self.on_close,
                     self.on_data,
                     self.on_error,
@@ -246,6 +256,7 @@ impl ClientBuilder {
                 Ok(Client::new(InnerSocket::new(
                     transport.into(),
                     self.handshake.unwrap(),
+                    self.should_pong,
                     self.on_close,
                     self.on_data,
                     self.on_error,

@@ -6,7 +6,6 @@ use httparse::{Request, Status, EMPTY_HEADER};
 use reqwest::Url;
 use std::str::from_utf8;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
 use std::{borrow::Cow, net::SocketAddr};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
@@ -82,12 +81,10 @@ impl WebsocketAcceptor {
                 // upgrade from polling
                 PING_PROBE => {
                     send_pong_probe(&mut ws_stream).await?;
-                    start_ping_pong(server.clone(), sid.clone());
                     server.store_stream(sid, addr, ws_stream).await?;
                 }
                 // websocket connecting directly
                 PONG => {
-                    start_ping_pong(server.clone(), sid.clone());
                     server.store_stream(sid, addr, ws_stream).await?;
                 }
                 _ => {}
@@ -121,29 +118,6 @@ async fn handshake(
     )))?));
     ws_stream.send(message).await?;
     Ok(sid)
-}
-
-fn start_ping_pong(server: Server, sid: Sid) {
-    let option = server.server_option();
-    let timeout = Duration::from_millis(option.ping_timeout + option.ping_interval);
-    let mut interval = tokio::time::interval(Duration::from_millis(option.ping_interval));
-    tokio::spawn(async move {
-        while let Ok(true) = server.is_connected(&sid).await {
-            if server
-                .emit(&sid, Packet::new(PacketId::Ping, Bytes::new()))
-                .await
-                .is_err()
-            {
-                break;
-            };
-            match server.last_pong(&sid).await {
-                Some(instant) if instant.elapsed() < timeout => {}
-                _ => break,
-            }
-            interval.tick().await;
-        }
-        server.close_socket(&sid).await;
-    });
 }
 
 pub(crate) enum RequestType {

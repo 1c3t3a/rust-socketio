@@ -36,12 +36,16 @@ pub struct Socket {
     connection_data: Arc<HandshakePacket>,
     generator: StreamGenerator<Packet>,
     is_server: bool,
+    should_pong: bool,
 }
 
 impl Socket {
+    // TODO: fix too_many_arguments
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         transport: AsyncTransportType,
         handshake: HandshakePacket,
+        should_pong: bool,
         on_close: OptionalCallback<()>,
         on_data: OptionalCallback<Bytes>,
         on_error: OptionalCallback<String>,
@@ -62,6 +66,7 @@ impl Socket {
             connection_data: Arc::new(handshake),
             generator: StreamGenerator::new(Self::stream(transport)),
             is_server: false,
+            should_pong,
         }
     }
 
@@ -116,7 +121,10 @@ impl Socket {
             }
             PacketId::Ping => {
                 self.pinged().await;
-                self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
+                // server and pong timeout test case no need to pong
+                if self.should_pong {
+                    self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
+                }
             }
             PacketId::Pong | PacketId::Open => {
                 if !self.is_server {

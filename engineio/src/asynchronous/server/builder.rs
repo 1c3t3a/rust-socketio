@@ -15,8 +15,7 @@ pub struct ServerBuilder {
     on_close: OptionalCallback<()>,
     on_data: OptionalCallback<Bytes>,
     on_packet: OptionalCallback<Packet>,
-    ping_timeout: u64,
-    ping_interval: u64,
+    server_option: ServerOption,
 }
 
 #[allow(dead_code)]
@@ -29,8 +28,7 @@ impl ServerBuilder {
             on_error: OptionalCallback::default(),
             on_open: OptionalCallback::default(),
             on_packet: OptionalCallback::default(),
-            ping_timeout: 25000,
-            ping_interval: 20000,
+            server_option: Default::default(),
         }
     }
 
@@ -79,16 +77,16 @@ impl ServerBuilder {
         self
     }
 
-    pub fn build(self) -> Server {
-        let server_option = ServerOption {
-            ping_interval: self.ping_interval,
-            ping_timeout: self.ping_timeout,
-        };
+    pub fn server_option(mut self, server_option: ServerOption) -> Self {
+        self.server_option = server_option;
+        self
+    }
 
+    pub fn build(self) -> Server {
         Server {
             inner: Arc::new(server::Inner {
-                server_option,
                 port: self.port,
+                server_option: self.server_option,
                 on_open: self.on_open,
                 on_close: self.on_close,
                 on_error: self.on_error,
