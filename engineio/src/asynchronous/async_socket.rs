@@ -69,6 +69,10 @@ impl Socket {
         self.is_server = true;
     }
 
+    pub(crate) async fn last_pong(&self) -> Instant {
+        *(self.last_pong.lock().await)
+    }
+
     /// Opens the connection to a specified server. The first Pong packet is sent
     /// to the server to trigger the Ping-cycle.
     pub async fn connect(&self) -> Result<()> {
@@ -93,6 +97,8 @@ impl Socket {
 
     /// A helper method that distributes
     pub(super) async fn handle_inconming_packet(&self, packet: Packet) -> Result<()> {
+        // update last_pong on any packet, incoming data is a good sign of other side's liveness
+        self.ponged().await;
         // check for the appropriate action or callback
         self.handle_packet(packet.clone());
         match packet.packet_id {
@@ -212,6 +218,10 @@ impl Socket {
         *self.last_ping.lock().await = Instant::now();
     }
 
+    pub(crate) async fn ponged(&self) {
+        *self.last_pong.lock().await = Instant::now();
+    }
+
     pub(crate) fn handle_packet(&self, packet: Packet) {
         if let Some(on_packet) = self.on_packet.as_ref() {
             let on_packet = on_packet.clone();
@@ -261,6 +271,7 @@ impl Debug for Socket {
             .field("last_ping", &self.last_ping)
             .field("last_pong", &self.last_pong)
             .field("connection_data", &self.connection_data)
+            .field("is_server", &self.is_server)
             .finish()
     }
 }

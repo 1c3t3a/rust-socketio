@@ -1,5 +1,6 @@
-use super::accept::WebsocketAcceptor;
-use super::accept::{peek_request_type, PollingAcceptor, RequestType, SidGenerator};
+use super::accept::{
+    peek_request_type, PollingAcceptor, RequestType, SidGenerator, WebsocketAcceptor,
+};
 use crate::asynchronous::async_socket::Socket;
 use crate::asynchronous::async_transports::WebsocketTransport;
 use crate::asynchronous::callback::OptionalCallback;
@@ -9,13 +10,15 @@ use crate::packet::HandshakePacket;
 use crate::Packet;
 use bytes::Bytes;
 use futures_util::StreamExt;
+use reqwest::Url;
 use std::sync::Arc;
 use std::{collections::HashMap, net::SocketAddr};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
+use tokio::time::Instant;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-type Sid = String;
+pub type Sid = String;
 
 #[derive(Clone)]
 pub struct ServerOption {
@@ -37,7 +40,6 @@ pub struct Server {
     pub(crate) inner: Arc<Inner>,
 }
 
-#[allow(dead_code)]
 pub(crate) struct Inner {
     pub(crate) port: u16,
     pub(crate) id_generator: SidGenerator,
@@ -88,7 +90,8 @@ impl Server {
         ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> Result<()> {
         let (sender, receiver) = ws_stream.split();
-        let url = format!("http://{}", peer_addr);
+        // SAFETY: url is valid to parse
+        let url = Url::parse(&format!("http://{}", peer_addr)).unwrap();
         let transport: AsyncTransportType = AsyncTransportType::Websocket(
             WebsocketTransport::new_for_server(sender, receiver, url),
         );
@@ -112,6 +115,11 @@ impl Server {
         Ok(())
     }
 
+    pub async fn close_socket(&self, sid: &str) {
+        let mut sockets = self.inner.sockets.write().await;
+        let _ = sockets.remove(sid);
+    }
+
     pub fn handshake_packet(&self, upgrades: Vec<String>, sid: Option<Sid>) -> HandshakePacket {
         let sid = match sid {
             Some(sid) => sid,
@@ -133,6 +141,11 @@ impl Server {
         self.inner.id_generator.generate()
     }
 
+    pub async fn last_pong(&self, sid: &str) -> Option<Instant> {
+        let sockets = self.inner.sockets.read().await;
+        Some(sockets.get(sid)?.last_pong().await)
+    }
+
     fn on_close(&self, sid: &str) -> OptionalCallback<()> {
         let sid_clone = sid.to_owned();
         let on_close = self.inner.on_close.clone();
@@ -146,14 +159,9 @@ impl Server {
                 if let Some(on_close) = on_close.as_deref() {
                     on_close(p).await;
                 }
-                server.drop_socket(&sid).await;
+                server.close_socket(&sid).await;
             })
         })
-    }
-
-    async fn drop_socket(&self, sid: &str) {
-        let mut sockets = self.inner.sockets.write().await;
-        let _ = sockets.remove(sid);
     }
 }
 

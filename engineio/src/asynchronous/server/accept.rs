@@ -16,7 +16,7 @@ use tungstenite::Message;
 use crate::error::Result;
 use crate::{Packet, PacketId};
 
-use super::Server;
+use super::{Server, Sid};
 
 const MAX_BUFF_LEN: usize = 1024;
 /// Limit for the number of header lines.
@@ -66,7 +66,7 @@ pub(crate) struct WebsocketAcceptor {}
 impl WebsocketAcceptor {
     pub(crate) async fn accept(
         server: Server,
-        sid: Option<String>,
+        sid: Option<Sid>,
         stream: MaybeTlsStream<TcpStream>,
         addr: &SocketAddr,
     ) -> Result<()> {
@@ -82,12 +82,12 @@ impl WebsocketAcceptor {
                 // upgrade from polling
                 PING_PROBE => {
                     send_pong_probe(&mut ws_stream).await?;
-                    start_ping_pong(server.clone(), &sid);
+                    start_ping_pong(server.clone(), sid.clone());
                     server.store_stream(sid, addr, ws_stream).await?;
                 }
                 // websocket connecting directly
                 PONG => {
-                    start_ping_pong(server.clone(), &sid);
+                    start_ping_pong(server.clone(), sid.clone());
                     server.store_stream(sid, addr, ws_stream).await?;
                 }
                 _ => {}
@@ -110,7 +110,7 @@ async fn send_pong_probe(ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStrea
 async fn handshake(
     server: Server,
     ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-) -> Result<String> {
+) -> Result<Sid> {
     let sid = server.sid();
     let packet = server.handshake_packet(vec![], Some(sid.clone()));
     // SAFETY: all fields are safe to serialize
@@ -123,30 +123,34 @@ async fn handshake(
     Ok(sid)
 }
 
-fn start_ping_pong(server: Server, sid: &str) {
-    let sid_clone = sid.to_owned();
-    let server_option = server.server_option();
-    let mut interval = tokio::time::interval(Duration::from_millis(server_option.ping_interval));
+fn start_ping_pong(server: Server, sid: Sid) {
+    let option = server.server_option();
+    let timeout = Duration::from_millis(option.ping_timeout + option.ping_interval);
+    let mut interval = tokio::time::interval(Duration::from_millis(option.ping_interval));
     tokio::spawn(async move {
-        while let Ok(true) = server.is_connected(&sid_clone).await {
-            // TODO: close if timeout
+        while let Ok(true) = server.is_connected(&sid).await {
             if server
-                .emit(&sid_clone, Packet::new(PacketId::Ping, Bytes::new()))
+                .emit(&sid, Packet::new(PacketId::Ping, Bytes::new()))
                 .await
                 .is_err()
             {
                 break;
             };
+            match server.last_pong(&sid).await {
+                Some(instant) if instant.elapsed() < timeout => {}
+                _ => break,
+            }
             interval.tick().await;
         }
+        server.close_socket(&sid).await;
     });
 }
 
 pub(crate) enum RequestType {
-    WsUpgrade(Option<String>),
+    WsUpgrade(Option<Sid>),
     PollingOpen,
-    PollingGet(String),
-    PollingPost(String),
+    PollingGet(Sid),
+    PollingPost(Sid),
 }
 
 pub(crate) async fn peek_request_type(

@@ -52,14 +52,14 @@ impl WebsocketTransport {
     pub fn new_for_server(
         sender: AsyncWebsocketSender,
         receiver: AsyncWebsocketReceiver,
-        url: String,
+        url: Url,
     ) -> Self {
         let inner = AsyncWebsocketGeneralTransport::new(sender, receiver);
         WebsocketTransport {
             inner,
             // TODO: server do not need base_url
             // SAFETY: url is valid to parse
-            base_url: Arc::new(RwLock::new(Url::parse(&url).unwrap())),
+            base_url: Arc::new(RwLock::new(url)),
         }
     }
 

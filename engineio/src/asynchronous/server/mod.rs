@@ -4,4 +4,4 @@ mod server;
 
 pub use server::Server;
 
-use server::ServerOption;
+use server::{ServerOption, Sid};
