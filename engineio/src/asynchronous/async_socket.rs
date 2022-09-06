@@ -105,13 +105,13 @@ impl Socket {
         // update last_pong on any packet, incoming data is a good sign of other side's liveness
         self.ponged().await;
         // check for the appropriate action or callback
-        self.handle_packet(packet.clone());
+        self.handle_packet(&packet);
         match packet.packet_id {
             PacketId::MessageBinary => {
-                self.handle_data(packet.data.clone());
+                self.handle_data(packet.data);
             }
             PacketId::Message => {
-                self.handle_data(packet.data.clone());
+                self.handle_data(packet.data);
             }
             PacketId::Close => {
                 self.handle_close();
@@ -230,8 +230,9 @@ impl Socket {
         *self.last_pong.lock().await = Instant::now();
     }
 
-    pub(crate) fn handle_packet(&self, packet: Packet) {
+    pub(crate) fn handle_packet(&self, packet: &Packet) {
         if let Some(on_packet) = self.on_packet.as_ref() {
+            let packet = packet.to_owned();
             let on_packet = on_packet.clone();
             self.handle.spawn(async move { on_packet(packet).await });
         }
