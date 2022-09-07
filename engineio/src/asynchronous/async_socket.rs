@@ -13,7 +13,7 @@ use futures_util::{Stream, StreamExt};
 use tokio::{runtime::Handle, sync::Mutex, time::Instant};
 
 use crate::{
-    asynchronous::{callback::OptionalCallback, transport::AsyncTransportType},
+    asynchronous::{callback::OptionalCallback, server::Sid, transport::AsyncTransportType},
     error::Result,
     packet::{HandshakePacket, Payload},
     Error, Packet, PacketId,
@@ -25,11 +25,11 @@ use super::generator::StreamGenerator;
 pub struct Socket {
     handle: Handle,
     transport: Arc<Mutex<AsyncTransportType>>,
-    on_close: OptionalCallback<()>,
-    on_data: OptionalCallback<Bytes>,
-    on_error: OptionalCallback<String>,
-    on_open: OptionalCallback<()>,
-    on_packet: OptionalCallback<Packet>,
+    on_close: OptionalCallback<Sid>,
+    on_data: OptionalCallback<(Sid, Bytes)>,
+    on_error: OptionalCallback<(Sid, String)>,
+    on_open: OptionalCallback<Sid>,
+    on_packet: OptionalCallback<(Sid, Packet)>,
     connected: Arc<AtomicBool>,
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
@@ -46,11 +46,11 @@ impl Socket {
         transport: AsyncTransportType,
         handshake: HandshakePacket,
         should_pong: bool,
-        on_close: OptionalCallback<()>,
-        on_data: OptionalCallback<Bytes>,
-        on_error: OptionalCallback<String>,
-        on_open: OptionalCallback<()>,
-        on_packet: OptionalCallback<Packet>,
+        on_close: OptionalCallback<Sid>,
+        on_data: OptionalCallback<(Sid, Bytes)>,
+        on_error: OptionalCallback<(Sid, String)>,
+        on_open: OptionalCallback<Sid>,
+        on_packet: OptionalCallback<(Sid, Packet)>,
     ) -> Self {
         Socket {
             handle: Handle::current(),
@@ -86,7 +86,8 @@ impl Socket {
 
         if let Some(on_open) = self.on_open.as_ref() {
             let on_open = on_open.clone();
-            self.handle.spawn(async move { on_open(()).await });
+            let sid = self.sid();
+            self.handle.spawn(async move { on_open(sid).await });
         }
 
         // set the last ping to now and set the connected state
@@ -138,6 +139,10 @@ impl Socket {
         Ok(())
     }
 
+    fn sid(&self) -> Sid {
+        Arc::clone(&self.connection_data.sid)
+    }
+
     /// Helper method that parses bytes and returns an iterator over the elements.
     fn parse_payload(bytes: Bytes) -> impl Stream<Item = Result<Packet>> {
         try_stream! {
@@ -166,9 +171,13 @@ impl Socket {
     }
 
     pub async fn disconnect(&self) -> Result<()> {
+        if !self.is_connected() {
+            return Ok(());
+        }
         if let Some(on_close) = self.on_close.as_ref() {
             let on_close = on_close.clone();
-            self.handle.spawn(async move { on_close(()).await });
+            let sid = self.sid();
+            self.handle.spawn(async move { on_close(sid).await });
         }
 
         self.emit(Packet::new(PacketId::Close, Bytes::new()))
@@ -213,13 +222,15 @@ impl Socket {
     fn call_error_callback(&self, text: String) {
         if let Some(on_error) = self.on_error.as_ref() {
             let on_error = on_error.clone();
-            self.handle.spawn(async move { on_error(text).await });
+            let sid = self.sid();
+            self.handle
+                .spawn(async move { on_error((sid, text)).await });
         }
     }
 
     // Check if the underlying transport client is connected.
-    pub(crate) fn is_connected(&self) -> Result<bool> {
-        Ok(self.connected.load(Ordering::Acquire))
+    pub(crate) fn is_connected(&self) -> bool {
+        self.connected.load(Ordering::Acquire)
     }
 
     pub(crate) async fn pinged(&self) {
@@ -234,21 +245,28 @@ impl Socket {
         if let Some(on_packet) = self.on_packet.as_ref() {
             let packet = packet.to_owned();
             let on_packet = on_packet.clone();
-            self.handle.spawn(async move { on_packet(packet).await });
+            let sid = self.sid();
+            self.handle
+                .spawn(async move { on_packet((sid, packet)).await });
         }
     }
 
     pub(crate) fn handle_data(&self, data: Bytes) {
         if let Some(on_data) = self.on_data.as_ref() {
             let on_data = on_data.clone();
-            self.handle.spawn(async move { on_data(data).await });
+            let sid = self.sid();
+            self.handle.spawn(async move { on_data((sid, data)).await });
         }
     }
 
     pub(crate) fn handle_close(&self) {
+        if !self.is_connected() {
+            return;
+        }
         if let Some(on_close) = self.on_close.as_ref() {
             let on_close = on_close.clone();
-            self.handle.spawn(async move { on_close(()).await });
+            let sid = self.sid();
+            self.handle.spawn(async move { on_close(sid).await });
         }
 
         self.connected.store(false, Ordering::Release);

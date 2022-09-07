@@ -1,10 +1,10 @@
 use super::accept::{
     peek_request_type, PollingAcceptor, RequestType, SidGenerator, WebsocketAcceptor,
 };
-use crate::asynchronous::async_socket::Socket;
 use crate::asynchronous::async_transports::WebsocketTransport;
 use crate::asynchronous::callback::OptionalCallback;
 use crate::asynchronous::transport::AsyncTransportType;
+use crate::asynchronous::{async_socket::Socket, Client};
 use crate::error::Result;
 use crate::packet::HandshakePacket;
 use crate::{Packet, PacketId};
@@ -18,7 +18,7 @@ use tokio::sync::RwLock;
 use tokio::time::{interval, Instant};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-pub type Sid = String;
+pub type Sid = Arc<String>;
 
 #[derive(Clone, Debug)]
 pub struct ServerOption {
@@ -45,13 +45,13 @@ pub(crate) struct Inner {
     pub(crate) port: u16,
     pub(crate) id_generator: SidGenerator,
     pub(crate) server_option: ServerOption,
-    pub(crate) sockets: RwLock<HashMap<String, Socket>>,
+    pub(crate) clients: RwLock<HashMap<Sid, Client>>,
 
-    pub(crate) on_error: OptionalCallback<String>,
-    pub(crate) on_open: OptionalCallback<()>,
-    pub(crate) on_close: OptionalCallback<()>,
-    pub(crate) on_data: OptionalCallback<Bytes>,
-    pub(crate) on_packet: OptionalCallback<Packet>,
+    pub(crate) on_open: OptionalCallback<Sid>,
+    pub(crate) on_close: OptionalCallback<Sid>,
+    pub(crate) on_data: OptionalCallback<(Sid, Bytes)>,
+    pub(crate) on_error: OptionalCallback<(Sid, String)>,
+    pub(crate) on_packet: OptionalCallback<(Sid, Packet)>,
 }
 
 impl Server {
@@ -67,20 +67,20 @@ impl Server {
         }
     }
 
-    pub async fn emit(&self, sid: &str, packet: Packet) -> Result<()> {
-        let sockets = self.inner.sockets.read().await;
-        let socket = sockets.get(sid);
-        if let Some(socket) = socket {
-            socket.emit(packet).await?;
+    pub async fn emit(&self, sid: &Sid, packet: Packet) -> Result<()> {
+        let clients = self.inner.clients.read().await;
+        let client = clients.get(sid);
+        if let Some(client) = client {
+            client.emit(packet).await?;
         }
         Ok(())
     }
 
-    pub async fn is_connected(&self, sid: &str) -> Result<bool> {
-        let sockets = self.inner.sockets.read().await;
-        match sockets.get(sid) {
+    pub async fn is_connected(&self, sid: &Sid) -> bool {
+        let clients = self.inner.clients.read().await;
+        match clients.get(sid) {
             Some(s) => s.is_connected(),
-            None => Ok(false),
+            None => false,
         }
     }
 
@@ -107,20 +107,26 @@ impl Server {
             self.inner.on_open.clone(),
             self.inner.on_packet.clone(),
         );
-
         socket.set_server();
-        socket.connect().await?;
-        poll_packet(socket.clone());
+
+        let client = Client::new(socket);
+        let mut clients = self.inner.clients.write().await;
+        let _ = clients.insert(sid.clone(), client.clone());
+
+        // socket.io server will receive Sid by on_open callback,
+        // then fetch engine.io client
+        client.connect().await?;
         self.start_ping_pong(&sid);
-
-        let mut sockets = self.inner.sockets.write().await;
-        let _ = sockets.insert(sid, socket);
-
         Ok(())
     }
 
-    pub async fn close_socket(&self, sid: &str) {
-        let mut sockets = self.inner.sockets.write().await;
+    pub async fn client(&self, sid: &Sid) -> Option<Client> {
+        let clients = self.inner.clients.read().await;
+        clients.get(sid).map(|x| x.to_owned())
+    }
+
+    pub async fn close_socket(&self, sid: &Sid) {
+        let mut sockets = self.inner.clients.write().await;
         if let Some(socket) = sockets.remove(sid) {
             // socket.disconnect will call on_close, on_close will call server.drop_socket,
             // inner.sockets write lock will conflict
@@ -129,8 +135,8 @@ impl Server {
         }
     }
 
-    async fn drop_socket(&self, sid: &str) {
-        let mut sockets = self.inner.sockets.write().await;
+    async fn drop_socket(&self, sid: &Sid) {
+        let mut sockets = self.inner.clients.write().await;
         let _ = sockets.remove(sid);
     }
 
@@ -147,7 +153,7 @@ impl Server {
         }
     }
 
-    pub fn start_ping_pong(&self, sid: &str) {
+    pub fn start_ping_pong(&self, sid: &Sid) {
         let sid = sid.to_owned();
         let server = self.clone();
         let option = server.server_option();
@@ -155,7 +161,7 @@ impl Server {
         let mut interval = interval(Duration::from_millis(option.ping_interval));
 
         tokio::spawn(async move {
-            while let Ok(true) = server.is_connected(&sid).await {
+            while server.is_connected(&sid).await {
                 if server
                     .emit(&sid, Packet::new(PacketId::Ping, Bytes::new()))
                     .await
@@ -184,18 +190,18 @@ impl Server {
         self.inner.id_generator.generate()
     }
 
-    pub async fn last_pong(&self, sid: &str) -> Option<Instant> {
-        let sockets = self.inner.sockets.read().await;
+    pub async fn last_pong(&self, sid: &Sid) -> Option<Instant> {
+        let sockets = self.inner.clients.read().await;
         Some(sockets.get(sid)?.last_pong().await)
     }
 
-    fn on_close(&self, sid: &str) -> OptionalCallback<()> {
-        let sid_clone = sid.to_owned();
+    fn on_close(&self, sid: &Sid) -> OptionalCallback<Sid> {
+        let sid = sid.to_owned();
         let on_close = self.inner.on_close.clone();
         let server = self.clone();
 
         OptionalCallback::new(move |p| {
-            let sid = sid_clone.clone();
+            let sid = sid.clone();
             let on_close = on_close.clone();
             let server = server.clone();
             Box::pin(async move {
@@ -214,7 +220,7 @@ impl Default for Inner {
             port: 80,
             id_generator: SidGenerator::default(),
             server_option: ServerOption::default(),
-            sockets: Default::default(),
+            clients: Default::default(),
 
             on_error: OptionalCallback::default(),
             on_open: OptionalCallback::default(),
@@ -236,21 +242,6 @@ async fn accept_connection(server: Server, stream: TcpStream, peer_addr: SocketA
     }
 }
 
-fn poll_packet(mut socket: Socket) {
-    tokio::spawn(async move {
-        while let Some(packet) = socket.next().await {
-            let result = match packet {
-                Ok(p) => socket.handle_inconming_packet(p).await,
-                Err(e) => Err(e),
-            };
-            if result.is_err() {
-                // TODO: handle error
-                break;
-            }
-        }
-    });
-}
-
 #[cfg(test)]
 mod test {
 
@@ -259,23 +250,23 @@ mod test {
         asynchronous::{server::builder::ServerBuilder, Client, ClientBuilder},
         PacketId,
     };
-    use tokio::sync::{mpsc::Receiver, Mutex};
+    use tokio::sync::mpsc::Receiver;
 
     #[tokio::test]
     async fn test_connection() -> Result<()> {
         let url = crate::test::rust_engine_io_server().unwrap();
-        let mut rx = start_server(url.clone());
+        let (mut rx, server) = start_server(url.clone());
 
         let socket = ClientBuilder::new(url.clone()).build().await?;
-        test_data_transport(socket, &mut rx).await?;
+        test_data_transport(server.clone(), socket, &mut rx).await?;
 
         let socket = ClientBuilder::new(url.clone()).build_websocket().await?;
-        test_data_transport(socket, &mut rx).await?;
+        test_data_transport(server.clone(), socket, &mut rx).await?;
 
         let socket = ClientBuilder::new(url)
             .build_websocket_with_upgrade()
             .await?;
-        test_data_transport(socket, &mut rx).await?;
+        test_data_transport(server, socket, &mut rx).await?;
 
         Ok(())
     }
@@ -306,7 +297,7 @@ mod test {
         Ok(())
     }
 
-    fn start_server(url: Url) -> Receiver<String> {
+    fn start_server(url: Url) -> (Receiver<String>, Server) {
         let port = url.port().unwrap();
         let server_option = ServerOption {
             ping_timeout: 50,
@@ -314,15 +305,21 @@ mod test {
         };
         let (builder, rx) = setup(port, server_option);
         let server = builder.build();
+        let server_clone = server.clone();
 
         tokio::spawn(async move {
-            server.serve().await;
+            server_clone.serve().await;
         });
 
-        rx
+        (rx, server)
+    }
+
+    fn poll_client(mut client: Client) {
+        tokio::spawn(async move { while let Some(_) = client.next().await {} });
     }
 
     async fn test_data_transport(
+        server: Server,
         mut client: Client,
         server_rx: &mut Receiver<String>,
     ) -> Result<()> {
@@ -344,6 +341,22 @@ mod test {
             .emit(Packet::new(PacketId::Message, Bytes::from("msg")))
             .await?;
 
+        let mut sid = Arc::new("".to_owned());
+
+        // ignore item send by last client
+        while let Some(item) = server_rx.recv().await {
+            if item.starts_with("open") {
+                let items: Vec<&str> = item.split(' ').collect();
+                sid = Arc::new(items[1].to_owned());
+                break;
+            }
+        }
+
+        let client = server.client(&sid).await;
+        assert!(client.is_some());
+        let client = client.unwrap();
+        poll_client(client.clone());
+
         // wait ping pong
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -363,7 +376,7 @@ mod test {
 
         assert!(receive_pong);
         assert!(receive_msg);
-        assert!(!client.is_connected()?);
+        assert!(!client.is_connected());
 
         Ok(())
     }
@@ -377,14 +390,14 @@ mod test {
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         // closed by server
-        assert!(!client_clone.is_connected()?);
+        assert!(!client_clone.is_connected());
 
         Ok(())
     }
 
     fn setup(port: u16, server_option: ServerOption) -> (ServerBuilder, Receiver<String>) {
         let (tx, rx) = tokio::sync::mpsc::channel(100);
-        let tx = Arc::new(Mutex::new(tx));
+        let tx = Arc::new(tx);
         let tx1 = Arc::clone(&tx);
         let tx2 = Arc::clone(&tx);
         let tx3 = Arc::clone(&tx);
@@ -392,36 +405,32 @@ mod test {
         (
             ServerBuilder::new(port)
                 .server_option(server_option)
-                .on_open(move |_| {
+                .on_open(move |sid| {
                     let tx = Arc::clone(&tx1);
                     Box::pin(async move {
-                        let guard = tx.lock().await;
-                        let _ = guard.send("open".to_owned()).await;
+                        let _ = tx.send(format!("open {}", sid)).await;
                     })
                 })
-                .on_packet(move |packet| {
+                .on_packet(move |(_sid, packet)| {
                     let tx = Arc::clone(&tx2);
                     Box::pin(async move {
-                        let guard = tx.lock().await;
-                        let _ = guard.send(String::from(packet.packet_id)).await;
+                        let _ = tx.send(String::from(packet.packet_id)).await;
                     })
                 })
-                .on_data(move |data| {
+                .on_data(move |(_sid, data)| {
                     let tx = Arc::clone(&tx3);
                     Box::pin(async move {
                         let data = std::str::from_utf8(&data).unwrap();
-                        let guard = tx.lock().await;
-                        let _ = guard.send(data.to_owned()).await;
+                        let _ = tx.send(data.to_owned()).await;
                     })
                 })
-                .on_close(move |_| {
+                .on_close(move |_sid| {
                     let tx = Arc::clone(&tx4);
                     Box::pin(async move {
-                        let guard = tx.lock().await;
-                        let _ = guard.send("close".to_owned()).await;
+                        let _ = tx.send("close".to_owned()).await;
                     })
                 })
-                .on_error(|error| {
+                .on_error(|(_sid, error)| {
                     Box::pin(async move {
                         println!("Error {}", error);
                     })

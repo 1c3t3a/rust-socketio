@@ -14,3 +14,5 @@ pub mod server;
 
 #[cfg(feature = "async")]
 pub use client::{Client, ClientBuilder};
+#[cfg(feature = "async")]
+pub use server::Sid;

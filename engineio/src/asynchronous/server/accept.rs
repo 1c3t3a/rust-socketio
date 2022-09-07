@@ -4,9 +4,9 @@ use futures_util::{SinkExt, StreamExt};
 use http::Response;
 use httparse::{Request, Status, EMPTY_HEADER};
 use reqwest::Url;
-use std::str::from_utf8;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{borrow::Cow, net::SocketAddr};
+use std::{str::from_utf8, sync::Arc};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{accept_async, MaybeTlsStream, WebSocketStream};
@@ -29,9 +29,9 @@ pub(crate) struct SidGenerator {
 }
 
 impl SidGenerator {
-    pub fn generate(&self) -> String {
+    pub fn generate(&self) -> Sid {
         let seq = self.seq.fetch_add(1, Ordering::SeqCst);
-        base64::encode(format!("{}", seq))
+        Arc::new(base64::encode(format!("{}", seq)))
     }
 }
 
@@ -167,7 +167,7 @@ pub(crate) fn parse_request_type(buf: &[u8], addr: &SocketAddr) -> Option<Reques
             return None;
         }
         if query_key == "sid" {
-            sid = Some(query_value.to_string());
+            sid = Some(Arc::new(query_value.to_string()));
         }
     }
 
@@ -184,7 +184,8 @@ pub(crate) fn parse_request_type(buf: &[u8], addr: &SocketAddr) -> Option<Reques
 
     if req.method? == "POST" {
         let body_str = from_utf8(&buf[idx..idx + content_length]).ok()?;
-        return Some(RequestType::PollingPost(body_str.to_owned()));
+        let sid = Arc::new(body_str.to_owned());
+        return Some(RequestType::PollingPost(sid));
     }
 
     match sid {

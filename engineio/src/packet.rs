@@ -7,7 +7,10 @@ use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::ops::Index;
 
-use crate::error::{Error, Result};
+use crate::{
+    asynchronous::server::Sid,
+    error::{Error, Result},
+};
 /// Enumeration of the `engine.io` `Packet` types.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum PacketId {
@@ -73,7 +76,7 @@ pub struct Packet {
 /// Data which gets exchanged in a handshake as defined by the server.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct HandshakePacket {
-    pub sid: String,
+    pub sid: Sid,
     pub upgrades: Vec<String>,
     #[serde(rename = "pingInterval")]
     pub ping_interval: u64,
@@ -232,6 +235,8 @@ impl Index<usize> for Payload {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
 
     #[test]
@@ -344,7 +349,7 @@ mod tests {
         let packet = HandshakePacket {
             ping_interval: 10000,
             ping_timeout: 1000,
-            sid: "Test".to_owned(),
+            sid: Arc::new("Test".to_owned()),
             upgrades: vec!["websocket".to_owned(), "test".to_owned()],
         };
         let encoded: String = serde_json::to_string(&packet).unwrap();

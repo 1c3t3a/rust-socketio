@@ -2,7 +2,7 @@ use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use std::{fmt::Debug, ops::Deref, sync::Arc};
 
-use crate::Packet;
+use crate::{asynchronous::Sid, Packet};
 
 /// Internal type, provides a way to store futures and return them in a boxed manner.
 pub(crate) type DynAsyncCallback<I> = dyn 'static + Send + Sync + Fn(I) -> BoxFuture<'static, ()>;
@@ -29,12 +29,12 @@ impl<I> OptionalCallback<I> {
 }
 
 #[cfg_attr(tarpaulin, ignore)]
-impl Debug for OptionalCallback<String> {
+impl Debug for OptionalCallback<(Sid, String)> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         f.write_fmt(format_args!(
             "Callback({:?})",
             if self.inner.is_some() {
-                "Fn(String)"
+                "Fn((Sid, String))"
             } else {
                 "None"
             }
@@ -43,12 +43,12 @@ impl Debug for OptionalCallback<String> {
 }
 
 #[cfg_attr(tarpaulin, ignore)]
-impl Debug for OptionalCallback<()> {
+impl Debug for OptionalCallback<Sid> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         f.write_fmt(format_args!(
             "Callback({:?})",
             if self.inner.is_some() {
-                "Fn(())"
+                "Fn(Sid)"
             } else {
                 "None"
             }
@@ -57,12 +57,12 @@ impl Debug for OptionalCallback<()> {
 }
 
 #[cfg_attr(tarpaulin, ignore)]
-impl Debug for OptionalCallback<Packet> {
+impl Debug for OptionalCallback<(Sid, Packet)> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         f.write_fmt(format_args!(
             "Callback({:?})",
             if self.inner.is_some() {
-                "Fn(Packet)"
+                "Fn((Sid, Packet))"
             } else {
                 "None"
             }
@@ -71,12 +71,12 @@ impl Debug for OptionalCallback<Packet> {
 }
 
 #[cfg_attr(tarpaulin, ignore)]
-impl Debug for OptionalCallback<Bytes> {
+impl Debug for OptionalCallback<(Sid, Bytes)> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         f.write_fmt(format_args!(
             "Callback({:?})",
             if self.inner.is_some() {
-                "Fn(Bytes)"
+                "Fn((Sid, Bytes))"
             } else {
                 "None"
             }

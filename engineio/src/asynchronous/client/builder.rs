@@ -4,6 +4,7 @@ use crate::{
         async_transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport},
         callback::OptionalCallback,
         transport::AsyncTransport,
+        Sid,
     },
     error::Result,
     header::HeaderMap,
@@ -24,11 +25,11 @@ pub struct ClientBuilder {
     tls_config: Option<TlsConnector>,
     headers: Option<HeaderMap>,
     handshake: Option<HandshakePacket>,
-    on_error: OptionalCallback<String>,
-    on_open: OptionalCallback<()>,
-    on_close: OptionalCallback<()>,
-    on_data: OptionalCallback<Bytes>,
-    on_packet: OptionalCallback<Packet>,
+    on_error: OptionalCallback<(Sid, String)>,
+    on_open: OptionalCallback<Sid>,
+    on_close: OptionalCallback<Sid>,
+    on_data: OptionalCallback<(Sid, Bytes)>,
+    on_packet: OptionalCallback<(Sid, Packet)>,
 }
 
 impl ClientBuilder {
@@ -72,7 +73,7 @@ impl ClientBuilder {
     where
         T: 'static + Send + Sync + Fn(()) -> BoxFuture<'static, ()>,
     {
-        self.on_close = OptionalCallback::new(callback);
+        self.on_close = OptionalCallback::new(move |_| Box::pin(callback(())));
         self
     }
 
@@ -81,7 +82,7 @@ impl ClientBuilder {
     where
         T: 'static + Send + Sync + Fn(Bytes) -> BoxFuture<'static, ()>,
     {
-        self.on_data = OptionalCallback::new(callback);
+        self.on_data = OptionalCallback::new(move |(_, p)| Box::pin(callback(p)));
         self
     }
 
@@ -90,7 +91,7 @@ impl ClientBuilder {
     where
         T: 'static + Send + Sync + Fn(String) -> BoxFuture<'static, ()>,
     {
-        self.on_error = OptionalCallback::new(callback);
+        self.on_error = OptionalCallback::new(move |(_, p)| Box::pin(callback(p)));
         self
     }
 
@@ -99,7 +100,7 @@ impl ClientBuilder {
     where
         T: 'static + Send + Sync + Fn(()) -> BoxFuture<'static, ()>,
     {
-        self.on_open = OptionalCallback::new(callback);
+        self.on_open = OptionalCallback::new(move |_| Box::pin(callback(())));
         self
     }
 
@@ -108,7 +109,7 @@ impl ClientBuilder {
     where
         T: 'static + Send + Sync + Fn(Packet) -> BoxFuture<'static, ()>,
     {
-        self.on_packet = OptionalCallback::new(callback);
+        self.on_packet = OptionalCallback::new(move |(_, p)| Box::pin(callback(p)));
         self
     }
 
