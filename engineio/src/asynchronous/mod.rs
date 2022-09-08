@@ -10,8 +10,6 @@ mod generator;
 #[cfg(feature = "async")]
 pub mod server;
 
+pub use client::{Client, ClientBuilder};
 #[cfg(feature = "async")]
-pub use client::Client;
-
-#[cfg(feature = "async")]
-pub use client::ClientBuilder;
+pub use server::Sid;

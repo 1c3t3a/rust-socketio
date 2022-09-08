@@ -7,6 +7,7 @@ use crate::{
 };
 use async_stream::try_stream;
 use futures_util::{Stream, StreamExt};
+use tokio::time::Instant;
 
 /// An engine.io client that allows interaction with the connected engine.io
 /// server. This client provides means for connecting, disconnecting and sending
@@ -22,7 +23,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub(super) fn new(socket: InnerSocket) -> Self {
+    pub(crate) fn new(socket: InnerSocket) -> Self {
         Client {
             socket: socket.clone(),
             generator: StreamGenerator::new(Self::stream(socket)),
@@ -47,6 +48,10 @@ impl Client {
     /// Sends a packet to the server.
     pub async fn emit(&self, packet: Packet) -> Result<()> {
         self.socket.emit(packet).await
+    }
+
+    pub(crate) async fn last_pong(&self) -> Instant {
+        self.socket.last_pong().await
     }
 
     /// Static method that returns a generator for each element of the stream.

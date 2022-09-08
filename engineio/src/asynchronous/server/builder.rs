@@ -3,18 +3,18 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 
-use super::{server, Server, ServerOption};
+use super::{server, Server, ServerOption, Sid};
 use crate::{asynchronous::callback::OptionalCallback, Packet};
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct ServerBuilder {
     port: u16,
-    on_error: OptionalCallback<String>,
-    on_open: OptionalCallback<()>,
-    on_close: OptionalCallback<()>,
-    on_data: OptionalCallback<Bytes>,
-    on_packet: OptionalCallback<Packet>,
+    on_open: OptionalCallback<Sid>,
+    on_close: OptionalCallback<Sid>,
+    on_data: OptionalCallback<(Sid, Bytes)>,
+    on_packet: OptionalCallback<(Sid, Packet)>,
+    on_error: OptionalCallback<(Sid, String)>,
     server_option: ServerOption,
 }
 
@@ -35,7 +35,7 @@ impl ServerBuilder {
     /// Registers the `on_close` callback.
     pub fn on_close<T>(mut self, callback: T) -> Self
     where
-        T: 'static + Send + Sync + Fn(()) -> BoxFuture<'static, ()>,
+        T: 'static + Send + Sync + Fn(Sid) -> BoxFuture<'static, ()>,
     {
         self.on_close = OptionalCallback::new(callback);
         self
@@ -44,7 +44,7 @@ impl ServerBuilder {
     /// Registers the `on_data` callback.
     pub fn on_data<T>(mut self, callback: T) -> Self
     where
-        T: 'static + Send + Sync + Fn(Bytes) -> BoxFuture<'static, ()>,
+        T: 'static + Send + Sync + Fn((Sid, Bytes)) -> BoxFuture<'static, ()>,
     {
         self.on_data = OptionalCallback::new(callback);
         self
@@ -53,7 +53,7 @@ impl ServerBuilder {
     /// Registers the `on_error` callback.
     pub fn on_error<T>(mut self, callback: T) -> Self
     where
-        T: 'static + Send + Sync + Fn(String) -> BoxFuture<'static, ()>,
+        T: 'static + Send + Sync + Fn((Sid, String)) -> BoxFuture<'static, ()>,
     {
         self.on_error = OptionalCallback::new(callback);
         self
@@ -62,7 +62,7 @@ impl ServerBuilder {
     /// Registers the `on_open` callback.
     pub fn on_open<T>(mut self, callback: T) -> Self
     where
-        T: 'static + Send + Sync + Fn(()) -> BoxFuture<'static, ()>,
+        T: 'static + Send + Sync + Fn(Sid) -> BoxFuture<'static, ()>,
     {
         self.on_open = OptionalCallback::new(callback);
         self
@@ -71,7 +71,7 @@ impl ServerBuilder {
     /// Registers the `on_packet` callback.
     pub fn on_packet<T>(mut self, callback: T) -> Self
     where
-        T: 'static + Send + Sync + Fn(Packet) -> BoxFuture<'static, ()>,
+        T: 'static + Send + Sync + Fn((Sid, Packet)) -> BoxFuture<'static, ()>,
     {
         self.on_packet = OptionalCallback::new(callback);
         self
@@ -93,7 +93,7 @@ impl ServerBuilder {
                 on_data: self.on_data,
                 on_packet: self.on_packet,
                 id_generator: Default::default(),
-                sockets: Default::default(),
+                clients: Default::default(),
             }),
         }
     }
