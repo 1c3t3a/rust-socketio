@@ -10,41 +10,39 @@ use futures_util::{Stream, StreamExt};
 use rust_engineio::{
     asynchronous::Client as EngineClient, Packet as EnginePacket, PacketId as EnginePacketId,
 };
-use std::{
-    fmt::Debug,
-    pin::Pin,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
+use std::{fmt::Debug, pin::Pin, sync::Arc};
 
 #[derive(Clone)]
 pub(crate) struct Socket {
     engine_client: Arc<EngineClient>,
-    connected: Arc<AtomicBool>,
     generator: StreamGenerator<Packet>,
+    is_server: bool,
 }
 
 impl Socket {
     /// Creates an instance of `Socket`.
     pub(super) fn new(engine_client: EngineClient) -> Result<Self> {
-        let connected = Arc::new(AtomicBool::default());
         Ok(Socket {
             engine_client: Arc::new(engine_client.clone()),
-            connected: connected.clone(),
-            generator: StreamGenerator::new(Self::stream(engine_client, connected)),
+            generator: StreamGenerator::new(Self::stream(engine_client)),
+            is_server: false,
         })
+    }
+
+    pub(super) fn new_server(engine_client: EngineClient) -> Self {
+        Socket {
+            engine_client: Arc::new(engine_client.clone()),
+            generator: StreamGenerator::new(Self::stream(engine_client)),
+            is_server: true,
+        }
     }
 
     /// Connects to the server. This includes a connection of the underlying
     /// engine.io client and afterwards an opening socket.io request.
     pub async fn connect(&self) -> Result<()> {
-        self.engine_client.connect().await?;
-
-        // store the connected value as true, if the connection process fails
-        // later, the value will be updated
-        self.connected.store(true, Ordering::Release);
+        if !self.is_server {
+            self.engine_client.connect().await?;
+        }
 
         Ok(())
     }
@@ -55,15 +53,13 @@ impl Socket {
         if self.is_engineio_connected() {
             self.engine_client.disconnect().await?;
         }
-        if self.connected.load(Ordering::Acquire) {
-            self.connected.store(false, Ordering::Release);
-        }
+
         Ok(())
     }
 
     /// Sends a `socket.io` packet to the server using the `engine.io` client.
     pub async fn send(&self, packet: Packet) -> Result<()> {
-        if !self.is_engineio_connected() || !self.connected.load(Ordering::Acquire) {
+        if !self.is_engineio_connected() {
             return Err(Error::IllegalActionBeforeOpen());
         }
 
@@ -129,37 +125,18 @@ impl Socket {
         }
     }
 
-    fn stream(
-        client: EngineClient,
-        is_connected: Arc<AtomicBool>,
-    ) -> Pin<Box<impl Stream<Item = Result<Packet>> + Send>> {
+    fn stream(client: EngineClient) -> Pin<Box<impl Stream<Item = Result<Packet>> + Send>> {
         Box::pin(try_stream! {
-                for await received_data in client.clone() {
-                    let packet = received_data?;
+            for await received_data in client.clone() {
+                let packet = received_data?;
 
+                if packet.packet_id == EnginePacketId::Message || packet.packet_id == EnginePacketId::MessageBinary {
                     let packet = Self::handle_engineio_packet(packet, client.clone()).await?;
-                    Self::handle_socketio_packet(&packet, is_connected.clone());
 
                     yield packet;
                 }
+            }
         })
-    }
-
-    /// Handles the connection/disconnection.
-    #[inline]
-    fn handle_socketio_packet(socket_packet: &Packet, is_connected: Arc<AtomicBool>) {
-        match socket_packet.packet_type {
-            PacketId::Connect => {
-                is_connected.store(true, Ordering::Release);
-            }
-            PacketId::ConnectError => {
-                is_connected.store(false, Ordering::Release);
-            }
-            PacketId::Disconnect => {
-                is_connected.store(false, Ordering::Release);
-            }
-            _ => (),
-        }
     }
 
     /// Handles new incoming engineio packets
@@ -221,7 +198,8 @@ impl Debug for Socket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Socket")
             .field("engine_client", &self.engine_client)
-            .field("connected", &self.connected)
+            .field("is_server", &self.is_server)
+            .field("connected", &self.is_engineio_connected())
             .finish()
     }
 }

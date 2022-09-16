@@ -1,4 +1,13 @@
-use std::{collections::HashMap, ops::DerefMut, pin::Pin, sync::Arc, task::Poll};
+use std::{
+    collections::HashMap,
+    ops::{Deref, DerefMut},
+    pin::Pin,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    task::Poll,
+};
 
 use futures_util::{future::BoxFuture, ready, FutureExt, Stream, StreamExt};
 use log::trace;
@@ -9,28 +18,63 @@ use tokio::{
     time::{Duration, Instant},
 };
 
-use super::{ack::Ack, callback::Callback};
 use crate::{
-    asynchronous::socket::Socket as InnerSocket,
+    asynchronous::{ack::Ack, callback::Callback, socket::Socket as InnerSocket},
     error::{Error, Result},
     packet::{Packet, PacketId},
     Event, Payload,
 };
 
-/// A socket which handles communication with the server. It's initialized with
-/// a specific address as well as an optional namespace to connect to. If `None`
-/// is given the client will connect to the default namespace `"/"`.
 #[derive(Clone)]
 pub struct Client {
-    /// The inner socket client to delegate the methods to.
-    socket: InnerSocket,
-    on: Arc<RwLock<HashMap<Event, Callback>>>,
-    outstanding_acks: Arc<RwLock<Vec<Ack>>>,
-    // namespace, for multiplexing messages
-    nsp: String,
+    inner: CommonClient<Self>,
+}
+
+impl Deref for Client {
+    type Target = CommonClient<Self>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for Client {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
 }
 
 impl Client {
+    pub(crate) fn new<T: Into<String>>(
+        socket: InnerSocket,
+        namespace: T,
+        on: Arc<RwLock<HashMap<Event, Callback<Self>>>>,
+    ) -> Self {
+        Self {
+            inner: CommonClient::new(socket, namespace, on, Arc::new(|inner| Client { inner })),
+        }
+    }
+}
+
+// TODO: move SharedClient to common file.
+
+/// A socket which handles communication with the server. It's initialized with
+/// a specific address as well as an optional namespace to connect to. If `None`
+/// is given the client will connect to the default namespace `"/"`. Both client side
+/// and server side, use this Client.
+#[derive(Clone)]
+pub struct CommonClient<C> {
+    // namespace, for multiplexing messages
+    pub(crate) nsp: String,
+    /// The inner socket client to delegate the methods to.
+    socket: InnerSocket,
+    on: Arc<RwLock<HashMap<Event, Callback<C>>>>,
+    outstanding_acks: Arc<RwLock<Vec<Ack<C>>>>,
+    is_connected: Arc<AtomicBool>,
+    callback_client_fn: Arc<dyn Fn(Self) -> C + Send + Sync>,
+}
+
+impl<C: Clone> CommonClient<C> {
     /// Creates a socket with a certain address to connect to as well as a
     /// namespace. If `None` is passed in as namespace, the default namespace
     /// `"/"` is taken.
@@ -38,14 +82,17 @@ impl Client {
     pub(crate) fn new<T: Into<String>>(
         socket: InnerSocket,
         namespace: T,
-        on: HashMap<Event, Callback>,
-    ) -> Result<Self> {
-        Ok(Client {
+        on: Arc<RwLock<HashMap<Event, Callback<C>>>>,
+        callback_client_fn: Arc<dyn Fn(Self) -> C + Send + Sync>,
+    ) -> Self {
+        CommonClient {
             socket,
             nsp: namespace.into(),
-            on: Arc::new(RwLock::new(on)),
+            on,
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
-        })
+            is_connected: Arc::new(AtomicBool::new(true)),
+            callback_client_fn,
+        }
     }
 
     /// Connects the client to a server. Afterwards the `emit_*` methods can be
@@ -100,6 +147,9 @@ impl Client {
         E: Into<Event>,
         D: Into<Payload>,
     {
+        if !self.is_connected.load(Ordering::Acquire) {
+            return Err(Error::IllegalActionBeforeOpen());
+        }
         self.socket.emit(&self.nsp, event.into(), data.into()).await
     }
 
@@ -137,6 +187,9 @@ impl Client {
     /// }
     /// ```
     pub async fn disconnect(&self) -> Result<()> {
+        if self.is_connected.load(Ordering::Acquire) {
+            self.is_connected.store(false, Ordering::Release);
+        }
         let disconnect_packet =
             Packet::new(PacketId::Disconnect, self.nsp.clone(), None, None, 0, None);
 
@@ -200,13 +253,13 @@ impl Client {
         callback: F,
     ) -> Result<()>
     where
-        F: for<'a> std::ops::FnMut(Payload, Client) -> BoxFuture<'static, ()>
-            + 'static
-            + Send
-            + Sync,
+        F: for<'a> std::ops::FnMut(Payload, C) -> BoxFuture<'static, ()> + 'static + Send + Sync,
         E: Into<Event>,
         D: Into<Payload>,
     {
+        if !self.is_connected.load(Ordering::Acquire) {
+            return Err(Error::IllegalActionBeforeOpen());
+        }
         let id = thread_rng().gen_range(0..999);
         let socket_packet =
             self.socket
@@ -229,7 +282,8 @@ impl Client {
         let mut on = self.on.write().await;
         let lock = on.deref_mut();
         if let Some(callback) = lock.get_mut(event) {
-            callback(payload.into(), self.clone()).await;
+            let c = (self.callback_client_fn)((self).clone());
+            callback(payload.into(), c).await;
         }
         drop(on);
         Ok(())
@@ -248,14 +302,14 @@ impl Client {
                         if let Some(ref payload) = socket_packet.data {
                             ack.callback.deref_mut()(
                                 Payload::String(payload.to_owned()),
-                                self.clone(),
+                                (self.callback_client_fn)(self.clone()),
                             );
                         }
                         if let Some(ref attachments) = socket_packet.attachments {
                             if let Some(payload) = attachments.get(0) {
                                 ack.callback.deref_mut()(
                                     Payload::Binary(payload.to_owned()),
-                                    self.clone(),
+                                    (self.callback_client_fn)(self.clone()),
                                 );
                             }
                         }
@@ -350,12 +404,15 @@ impl Client {
                     }
                 }
                 PacketId::Connect => {
+                    self.is_connected.store(true, Ordering::Release);
                     self.callback(&Event::Connect, "").await?;
                 }
                 PacketId::Disconnect => {
+                    self.is_connected.store(false, Ordering::Release);
                     self.callback(&Event::Close, "").await?;
                 }
                 PacketId::ConnectError => {
+                    self.is_connected.store(false, Ordering::Release);
                     self.callback(
                         &Event::Error,
                         String::from("Received an ConnectError frame: ")
@@ -377,7 +434,7 @@ impl Client {
     }
 }
 
-impl Stream for Client {
+impl<C: Clone> Stream for CommonClient<C> {
     type Item = Result<Packet>;
 
     fn poll_next(
@@ -387,7 +444,6 @@ impl Stream for Client {
         loop {
             // poll for the next payload
             let next = ready!(self.socket.poll_next_unpin(cx));
-
             match next {
                 None => {
                     // end the stream if the underlying one is closed

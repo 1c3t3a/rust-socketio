@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use futures_util::{future::BoxFuture, StreamExt};
 use log::trace;
@@ -7,11 +7,14 @@ use rust_engineio::{
     asynchronous::ClientBuilder as EngineIoClientBuilder,
     header::{HeaderMap, HeaderValue},
 };
+use tokio::sync::RwLock;
 use url::Url;
 
-use crate::{error::Result, Error, Event, Payload, TransportType};
+use crate::{
+    asynchronous::callback::Callback, error::Result, Error, Event, Payload, TransportType,
+};
 
-use super::{callback::Callback, client::Client};
+use super::client::Client;
 use crate::asynchronous::socket::Socket as InnerSocket;
 
 /// A builder class for a `socket.io` socket. This handles setting up the client and
@@ -20,7 +23,7 @@ use crate::asynchronous::socket::Socket as InnerSocket;
 /// acts the `build` method and returns a connected [`Client`].
 pub struct ClientBuilder {
     address: String,
-    on: HashMap<Event, Callback>,
+    on: HashMap<Event, Callback<Client>>,
     namespace: String,
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
@@ -325,7 +328,11 @@ impl ClientBuilder {
 
         let inner_socket = InnerSocket::new(engine_client)?;
 
-        let socket = Client::new(inner_socket, &self.namespace, self.on)?;
+        let socket = Client::new(
+            inner_socket,
+            &self.namespace,
+            Arc::new(RwLock::new(self.on)),
+        );
         socket.connect().await?;
 
         Ok(socket)

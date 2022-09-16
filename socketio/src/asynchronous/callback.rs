@@ -6,41 +6,38 @@ use std::{
 
 use crate::Payload;
 
-use super::client::Client;
-
 /// Internal type, provides a way to store futures and return them in a boxed manner.
-type DynAsyncCallback =
-    Box<dyn for<'a> FnMut(Payload, Client) -> BoxFuture<'static, ()> + 'static + Send + Sync>;
+type DynAsyncCallback<C> =
+    Box<dyn for<'a> FnMut(Payload, C) -> BoxFuture<'static, ()> + 'static + Send + Sync>;
 
-pub(crate) struct Callback {
-    inner: DynAsyncCallback,
+pub(crate) struct Callback<C> {
+    inner: DynAsyncCallback<C>,
 }
 
-impl Debug for Callback {
+impl<C> Debug for Callback<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Callback")
     }
 }
 
-impl Deref for Callback {
-    type Target =
-        dyn for<'a> FnMut(Payload, Client) -> BoxFuture<'static, ()> + 'static + Sync + Send;
+impl<C> Deref for Callback<C> {
+    type Target = dyn for<'a> FnMut(Payload, C) -> BoxFuture<'static, ()> + 'static + Sync + Send;
 
     fn deref(&self) -> &Self::Target {
         self.inner.as_ref()
     }
 }
 
-impl DerefMut for Callback {
+impl<C> DerefMut for Callback<C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner.as_mut()
     }
 }
 
-impl Callback {
+impl<C> Callback<C> {
     pub(crate) fn new<T>(callback: T) -> Self
     where
-        T: for<'a> FnMut(Payload, Client) -> BoxFuture<'static, ()> + 'static + Sync + Send,
+        T: for<'a> FnMut(Payload, C) -> BoxFuture<'static, ()> + 'static + Sync + Send,
     {
         Callback {
             inner: Box::new(callback),

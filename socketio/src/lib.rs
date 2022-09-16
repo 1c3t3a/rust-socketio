@@ -220,4 +220,19 @@ pub(crate) mod test {
 
         url
     }
+
+    /// The rust socket.io server for testing runs on port 4209
+    const RUST_SERVER_URL: &str = "http://localhost:4209";
+
+    pub(crate) fn rust_socket_io_server() -> Url {
+        let url =
+            std::env::var("SOCKET_IO_RUST_SERVER").unwrap_or_else(|_| RUST_SERVER_URL.to_owned());
+        let mut url = Url::parse(&url).unwrap();
+
+        if url.path() == "/" {
+            url.set_path("/socket.io/");
+        }
+
+        url
+    }
 }
