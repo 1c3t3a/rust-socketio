@@ -2,7 +2,10 @@ use crate::error::{Error, Result};
 use crate::Error::{InvalidJson, InvalidUtf8};
 use bytes::{BufMut, Bytes, BytesMut};
 use regex::Regex;
-use std::convert::TryFrom;
+use std::{
+    convert::TryFrom,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 /// An enumeration of the different `Packet` types in the `socket.io` protocol.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -22,7 +25,7 @@ pub struct Packet {
     pub packet_type: PacketId,
     pub nsp: String,
     pub data: Option<String>,
-    pub id: Option<i32>,
+    pub id: Option<usize>,
     pub attachment_count: u8,
     pub attachments: Option<Vec<Bytes>>,
 }
@@ -69,7 +72,7 @@ impl Packet {
         packet_type: PacketId,
         nsp: String,
         data: Option<String>,
-        id: Option<i32>,
+        id: Option<usize>,
         attachment_count: u8,
         attachments: Option<Vec<Bytes>>,
     ) -> Self {
@@ -228,7 +231,7 @@ impl TryFrom<&Bytes> for Packet {
         }
 
         let count_str: String = char_buf.iter().collect();
-        if let Ok(count) = count_str.parse::<i32>() {
+        if let Ok(count) = count_str.parse::<usize>() {
             packet.id = Some(count);
         }
 
@@ -258,6 +261,18 @@ impl TryFrom<&Bytes> for Packet {
         };
 
         Ok(packet)
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct AckIdGenerator {
+    seq: AtomicUsize,
+}
+
+impl AckIdGenerator {
+    pub fn generate(&self) -> usize {
+        let seq = self.seq.fetch_add(1, Ordering::SeqCst);
+        seq as usize
     }
 }
 

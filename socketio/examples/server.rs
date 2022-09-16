@@ -7,7 +7,7 @@ use serde_json::json;
 
 #[tokio::main]
 async fn main() {
-    let callback = |_payload: Payload, socket: ServerClient| {
+    let callback = |_payload: Payload, socket: ServerClient, _| {
         async move {
             socket.join(vec!["room 1"]).await;
             let _ = socket
@@ -17,6 +17,8 @@ async fn main() {
         }
         .boxed()
     };
-    let server = ServerBuilder::new(4209).on("/", "echo", callback).build();
+    let server = ServerBuilder::new(4209)
+        .on("/admin", "foo", callback)
+        .build();
     server.serve().await;
 }

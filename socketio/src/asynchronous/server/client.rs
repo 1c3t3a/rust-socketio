@@ -1,12 +1,13 @@
-use std::{collections::HashMap, ops::Deref, pin::Pin, sync::Arc};
+use std::{collections::HashMap, ops::Deref, pin::Pin, sync::Arc, time::Duration};
 
-use futures_util::{Stream, StreamExt};
+use futures_util::{future::BoxFuture, Stream, StreamExt};
 use rust_engineio::asynchronous::Sid;
 use tokio::sync::RwLock;
 
 use crate::{
     asynchronous::{
-        callback::Callback, client::client::CommonClient, server::server::Server, socket::Socket,
+        ack::AckId, callback::Callback, client::client::CommonClient, server::server::Server,
+        socket::Socket,
     },
     error::Result,
     packet::Packet,
@@ -67,6 +68,28 @@ impl Client {
     {
         self.server
             .emit_to(&self.client.nsp, rooms, event, data)
+            .await
+    }
+
+    pub async fn emit_to_with_ack<F, E, D>(
+        &self,
+        rooms: Vec<&str>,
+        event: E,
+        data: D,
+        timeout: Duration,
+        callback: F,
+    ) -> Result<()>
+    where
+        F: for<'a> std::ops::FnMut(Payload, Self, Option<AckId>) -> BoxFuture<'static, ()>
+            + 'static
+            + Send
+            + Sync
+            + Clone,
+        E: Into<Event>,
+        D: Into<Payload>,
+    {
+        self.server
+            .emit_to_with_ack(&self.client.nsp, rooms, event, data, timeout, callback)
             .await
     }
 }

@@ -1,8 +1,7 @@
 pub use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
-use crate::packet::{Packet, PacketId};
+use crate::packet::{AckIdGenerator, Packet, PacketId};
 use log::trace;
-use rand::{thread_rng, Rng};
 
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
 use crate::error::Result;
@@ -20,7 +19,7 @@ use crate::socket::Socket as InnerSocket;
 /// won't contain data.
 #[derive(Debug)]
 pub struct Ack {
-    pub id: i32,
+    pub id: usize,
     timeout: Duration,
     time_started: Instant,
     callback: Callback<SocketCallback>,
@@ -40,6 +39,7 @@ pub struct Client {
     nsp: String,
     // Data sent in opening header
     auth: Option<serde_json::Value>,
+    ack_id_gen: Arc<AckIdGenerator>,
 }
 
 impl Client {
@@ -61,6 +61,7 @@ impl Client {
             on_any: Arc::new(RwLock::new(on_any)),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
             auth,
+            ack_id_gen: Default::default(),
         })
     }
 
@@ -198,7 +199,7 @@ impl Client {
         E: Into<Event>,
         D: Into<Payload>,
     {
-        let id = thread_rng().gen_range(0..999);
+        let id = self.ack_id_gen.generate();
         let socket_packet =
             self.socket
                 .build_packet_for_payload(data.into(), event.into(), &self.nsp, Some(id))?;

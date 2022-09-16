@@ -6,6 +6,7 @@ mod socket;
 
 #[cfg(feature = "async-callbacks")]
 pub(crate) mod callback;
+pub use ack::AckId;
 #[cfg(feature = "async")]
 pub use client::builder::ClientBuilder;
 pub use client::client::Client;

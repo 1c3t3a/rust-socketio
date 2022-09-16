@@ -1,6 +1,6 @@
 use crate::asynchronous::server::server::Server;
-use crate::asynchronous::NameSpace;
 use crate::asynchronous::{callback::Callback, server::client::Client};
+use crate::asynchronous::{AckId, NameSpace};
 use crate::{Event, Payload};
 use futures_util::future::BoxFuture;
 use rust_engineio::{
@@ -39,7 +39,7 @@ impl ServerBuilder {
         callback: F,
     ) -> Self
     where
-        F: for<'a> std::ops::FnMut(Payload, Client) -> BoxFuture<'static, ()>
+        F: for<'a> std::ops::FnMut(Payload, Client, Option<AckId>) -> BoxFuture<'static, ()>
             + 'static
             + Send
             + Sync,

@@ -77,10 +77,16 @@ impl Socket {
         Ok(())
     }
 
+    pub async fn ack(&self, nsp: &str, id: usize, data: Payload) -> Result<()> {
+        let socket_packet = self.build_packet_for_payload(data, None, nsp, Some(id), true)?;
+
+        self.send(socket_packet).await
+    }
+
     /// Emits to certain event with given data. The data needs to be JSON,
     /// otherwise this returns an `InvalidJson` error.
     pub async fn emit(&self, nsp: &str, event: Event, data: Payload) -> Result<()> {
-        let socket_packet = self.build_packet_for_payload(data, event, nsp, None)?;
+        let socket_packet = self.build_packet_for_payload(data, Some(event), nsp, None, false)?;
 
         self.send(socket_packet).await
     }
@@ -91,19 +97,20 @@ impl Socket {
     pub(crate) fn build_packet_for_payload<'a>(
         &'a self,
         payload: Payload,
-        event: Event,
+        event: Option<Event>,
         nsp: &'a str,
-        id: Option<i32>,
+        id: Option<usize>,
+        is_ack: bool,
     ) -> Result<Packet> {
         match payload {
             Payload::Binary(bin_data) => Ok(Packet::new(
-                if id.is_some() {
+                if id.is_some() && is_ack {
                     PacketId::BinaryAck
                 } else {
                     PacketId::BinaryEvent
                 },
                 nsp.to_owned(),
-                Some(serde_json::Value::String(event.into()).to_string()),
+                event.map(|event| serde_json::Value::String(event.into()).to_string()),
                 id,
                 1,
                 Some(vec![bin_data]),
@@ -111,10 +118,17 @@ impl Socket {
             Payload::String(str_data) => {
                 serde_json::from_str::<serde_json::Value>(&str_data)?;
 
-                let payload = format!("[\"{}\",{}]", String::from(event), str_data);
+                let payload = match event {
+                    None => format!("[{}]", str_data),
+                    Some(event) => format!("[\"{}\",{}]", String::from(event), str_data),
+                };
 
                 Ok(Packet::new(
-                    PacketId::Event,
+                    if id.is_some() && is_ack {
+                        PacketId::Ack
+                    } else {
+                        PacketId::Event
+                    },
                     nsp.to_owned(),
                     Some(payload),
                     id,

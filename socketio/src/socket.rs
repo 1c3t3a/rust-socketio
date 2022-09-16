@@ -86,7 +86,7 @@ impl Socket {
         payload: Payload,
         event: Event,
         nsp: &'a str,
-        id: Option<i32>,
+        id: Option<usize>,
     ) -> Result<Packet> {
         match payload {
             Payload::Binary(bin_data) => Ok(Packet::new(

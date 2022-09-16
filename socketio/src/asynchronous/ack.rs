@@ -10,8 +10,10 @@ use crate::asynchronous::callback::Callback;
 /// won't contain data.
 #[derive(Debug)]
 pub(crate) struct Ack<C> {
-    pub id: i32,
+    pub id: usize,
     pub timeout: Duration,
     pub time_started: Instant,
     pub callback: Callback<C>,
 }
+
+pub type AckId = usize;

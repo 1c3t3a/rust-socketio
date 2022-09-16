@@ -11,7 +11,7 @@ async fn main() {
     // define a callback which is called when a payload is received
     // this callback gets the payload as well as an instance of the
     // socket to communicate with the server
-    let callback = |payload: Payload, socket: Client| {
+    let callback = |payload: Payload, socket: Client, _| {
         async move {
             match payload {
                 Payload::String(str) => println!("Received: {}", str),
@@ -26,10 +26,10 @@ async fn main() {
     };
 
     // get a socket that is connected to the admin namespace
-    let socket = ClientBuilder::new("http://localhost:4200/")
+    let socket = ClientBuilder::new("http://localhost:4209/")
         .namespace("/admin")
         .on("test", callback)
-        .on("error", |err, _| {
+        .on("error", |err, _, _| {
             async move { eprintln!("Error: {:#?}", err) }.boxed()
         })
         .connect()
@@ -44,7 +44,7 @@ async fn main() {
         .expect("Server unreachable");
 
     // define a callback, that's executed when the ack got acked
-    let ack_callback = |message: Payload, _: Client| {
+    let ack_callback = |message: Payload, _: Client, _| {
         async move {
             println!("Yehaa! My ack got acked?");
             println!("Ack data: {:#?}", message);

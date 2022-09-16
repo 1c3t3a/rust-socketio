@@ -11,7 +11,6 @@ use std::{
 
 use futures_util::{future::BoxFuture, ready, FutureExt, Stream, StreamExt};
 use log::trace;
-use rand::{thread_rng, Rng};
 use serde_json::{from_str, Value};
 use tokio::{
     sync::RwLock,
@@ -19,9 +18,13 @@ use tokio::{
 };
 
 use crate::{
-    asynchronous::{ack::Ack, callback::Callback, socket::Socket as InnerSocket},
+    asynchronous::{
+        ack::{Ack, AckId},
+        callback::Callback,
+        socket::Socket as InnerSocket,
+    },
     error::{Error, Result},
-    packet::{Packet, PacketId},
+    packet::{AckIdGenerator, Packet, PacketId},
     Event, Payload,
 };
 
@@ -72,6 +75,7 @@ pub struct CommonClient<C> {
     outstanding_acks: Arc<RwLock<Vec<Ack<C>>>>,
     is_connected: Arc<AtomicBool>,
     callback_client_fn: Arc<dyn Fn(Self) -> C + Send + Sync>,
+    ack_id_gen: Arc<AckIdGenerator>,
 }
 
 impl<C: Clone> CommonClient<C> {
@@ -92,6 +96,7 @@ impl<C: Clone> CommonClient<C> {
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
             is_connected: Arc::new(AtomicBool::new(true)),
             callback_client_fn,
+            ack_id_gen: Default::default(),
         }
     }
 
@@ -117,14 +122,14 @@ impl<C: Clone> CommonClient<C> {
     ///
     /// # Example
     /// ```
-    /// use rust_socketio::{asynchronous::{ClientBuilder, Client}, Payload};
+    /// use rust_socketio::{asynchronous::{ClientBuilder, Client, AckId}, Payload};
     /// use serde_json::json;
     /// use futures_util::FutureExt;
     ///
     /// #[tokio::main]
     /// async fn main() {
     ///     let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///         .on("test", |payload: Payload, socket: Client| {
+    ///         .on("test", |payload: Payload, socket: Client, need_ack: Option<AckId>| {
     ///             async move {
     ///                 println!("Received: {:#?}", payload);
     ///                 socket.emit("test", json!({"hello": true})).await.expect("Server unreachable");
@@ -153,11 +158,22 @@ impl<C: Clone> CommonClient<C> {
         self.socket.emit(&self.nsp, event.into(), data.into()).await
     }
 
+    #[inline]
+    pub async fn ack<D>(&self, id: usize, data: D) -> Result<()>
+    where
+        D: Into<Payload>,
+    {
+        if !self.is_connected.load(Ordering::Acquire) {
+            return Err(Error::IllegalActionBeforeOpen());
+        }
+        self.socket.ack(&self.nsp, id, data.into()).await
+    }
+
     /// Disconnects this client from the server by sending a `socket.io` closing
     /// packet.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{asynchronous::{ClientBuilder, Client}, Payload};
+    /// use rust_socketio::{asynchronous::{ClientBuilder, Client, AckId}, Payload};
     /// use serde_json::json;
     /// use futures_util::{FutureExt, future::BoxFuture};
     ///
@@ -165,7 +181,7 @@ impl<C: Clone> CommonClient<C> {
     /// async fn main() {
     ///     // apparently the syntax for functions is a bit verbose as rust currently doesn't
     ///     // support an `AsyncFnMut` type that conform with async functions
-    ///     fn handle_test(payload: Payload, socket: Client) -> BoxFuture<'static, ()> {
+    ///     fn handle_test(payload: Payload, socket: Client, need_ack: Option<AckId>) -> BoxFuture<'static, ()> {
     ///         async move {
     ///             println!("Received: {:#?}", payload);
     ///             socket.emit("test", json!({"hello": true})).await.expect("Server unreachable");
@@ -223,12 +239,12 @@ impl<C: Clone> CommonClient<C> {
     /// #[tokio::main]
     /// async fn main() {
     ///     let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///         .on("foo", |payload: Payload, _| async move { println!("Received: {:#?}", payload) }.boxed())
+    ///         .on("foo", |payload: Payload, _, _| async move { println!("Received: {:#?}", payload) }.boxed())
     ///         .connect()
     ///         .await
     ///         .expect("connection failed");
     ///
-    ///     let ack_callback = |message: Payload, socket: Client| {
+    ///     let ack_callback = |message: Payload, socket: Client, _| {
     ///         async move {
     ///             match message {
     ///                 Payload::String(str) => println!("{}", str),
@@ -253,17 +269,24 @@ impl<C: Clone> CommonClient<C> {
         callback: F,
     ) -> Result<()>
     where
-        F: for<'a> std::ops::FnMut(Payload, C) -> BoxFuture<'static, ()> + 'static + Send + Sync,
+        F: for<'a> std::ops::FnMut(Payload, C, Option<AckId>) -> BoxFuture<'static, ()>
+            + 'static
+            + Send
+            + Sync,
         E: Into<Event>,
         D: Into<Payload>,
     {
         if !self.is_connected.load(Ordering::Acquire) {
             return Err(Error::IllegalActionBeforeOpen());
         }
-        let id = thread_rng().gen_range(0..999);
-        let socket_packet =
-            self.socket
-                .build_packet_for_payload(data.into(), event.into(), &self.nsp, Some(id))?;
+        let id = self.ack_id_gen.generate();
+        let socket_packet = self.socket.build_packet_for_payload(
+            data.into(),
+            Some(event.into()),
+            &self.nsp,
+            Some(id),
+            false,
+        )?;
 
         let ack = Ack {
             id,
@@ -278,12 +301,17 @@ impl<C: Clone> CommonClient<C> {
         self.socket.send(socket_packet).await
     }
 
-    async fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {
+    async fn callback<P: Into<Payload>>(
+        &self,
+        event: &Event,
+        payload: P,
+        need_ack: Option<AckId>,
+    ) -> Result<()> {
         let mut on = self.on.write().await;
         let lock = on.deref_mut();
         if let Some(callback) = lock.get_mut(event) {
             let c = (self.callback_client_fn)((self).clone());
-            callback(payload.into(), c).await;
+            callback(payload.into(), c, need_ack).await;
         }
         drop(on);
         Ok(())
@@ -303,14 +331,18 @@ impl<C: Clone> CommonClient<C> {
                             ack.callback.deref_mut()(
                                 Payload::String(payload.to_owned()),
                                 (self.callback_client_fn)(self.clone()),
-                            );
+                                None,
+                            )
+                            .await;
                         }
                         if let Some(ref attachments) = socket_packet.attachments {
                             if let Some(payload) = attachments.get(0) {
                                 ack.callback.deref_mut()(
                                     Payload::Binary(payload.to_owned()),
                                     (self.callback_client_fn)(self.clone()),
-                                );
+                                    None,
+                                )
+                                .await;
                             }
                         }
                     } else {
@@ -336,8 +368,12 @@ impl<C: Clone> CommonClient<C> {
 
         if let Some(attachments) = &packet.attachments {
             if let Some(binary_payload) = attachments.get(0) {
-                self.callback(&event, Payload::Binary(binary_payload.to_owned()))
-                    .await?;
+                self.callback(
+                    &event,
+                    Payload::Binary(binary_payload.to_owned()),
+                    packet.id,
+                )
+                .await?;
             }
         }
         Ok(())
@@ -379,7 +415,7 @@ impl<C: Clone> CommonClient<C> {
             };
 
             // call the correct callback
-            self.callback(&event, data.to_string()).await?;
+            self.callback(&event, data.to_string(), packet.id).await?;
         }
 
         Ok(())
@@ -394,22 +430,22 @@ impl<C: Clone> CommonClient<C> {
             match packet.packet_type {
                 PacketId::Ack | PacketId::BinaryAck => {
                     if let Err(err) = self.handle_ack(packet).await {
-                        self.callback(&Event::Error, err.to_string()).await?;
+                        self.callback(&Event::Error, err.to_string(), None).await?;
                         return Err(err);
                     }
                 }
                 PacketId::BinaryEvent => {
                     if let Err(err) = self.handle_binary_event(packet).await {
-                        self.callback(&Event::Error, err.to_string()).await?;
+                        self.callback(&Event::Error, err.to_string(), None).await?;
                     }
                 }
                 PacketId::Connect => {
                     self.is_connected.store(true, Ordering::Release);
-                    self.callback(&Event::Connect, "").await?;
+                    self.callback(&Event::Connect, "", None).await?;
                 }
                 PacketId::Disconnect => {
                     self.is_connected.store(false, Ordering::Release);
-                    self.callback(&Event::Close, "").await?;
+                    self.callback(&Event::Close, "", None).await?;
                 }
                 PacketId::ConnectError => {
                     self.is_connected.store(false, Ordering::Release);
@@ -420,12 +456,13 @@ impl<C: Clone> CommonClient<C> {
                                 .data
                                 .as_ref()
                                 .unwrap_or(&String::from("\"No error message provided\"")),
+                        None,
                     )
                     .await?;
                 }
                 PacketId::Event => {
                     if let Err(err) = self.handle_event(packet).await {
-                        self.callback(&Event::Error, err.to_string()).await?;
+                        self.callback(&Event::Error, err.to_string(), None).await?;
                     }
                 }
             }
@@ -451,7 +488,10 @@ impl<C: Clone> Stream for CommonClient<C> {
                 }
                 Some(Err(err)) => {
                     // call the error callback
-                    ready!(Box::pin(self.callback(&Event::Error, err.to_string())).poll_unpin(cx))?;
+                    ready!(
+                        Box::pin(self.callback(&Event::Error, err.to_string(), None))
+                            .poll_unpin(cx)
+                    )?;
                     return Poll::Ready(Some(Err(err)));
                 }
                 Some(Ok(packet)) => {
@@ -489,7 +529,7 @@ mod test {
         let url = crate::test::socket_io_server();
 
         let socket = ClientBuilder::new(url)
-            .on("test", |msg, _| {
+            .on("test", |msg, _, _| {
                 async {
                     match msg {
                         Payload::String(str) => println!("Received string: {}", str),
@@ -513,7 +553,7 @@ mod test {
                 "test",
                 Payload::String(payload.to_string()),
                 Duration::from_secs(1),
-                |message: Payload, socket: Client| {
+                |message: Payload, socket: Client, _| {
                     async move {
                         let result = socket
                             .emit(
@@ -558,10 +598,10 @@ mod test {
             .namespace("/admin")
             .tls_config(tls_connector)
             .opening_header("accept-encoding", "application/json")
-            .on("test", |str, _| {
+            .on("test", |str, _, _| {
                 async move { println!("Received: {:#?}", str) }.boxed()
             })
-            .on("message", |payload, _| {
+            .on("message", |payload, _, _| {
                 async move { println!("{:#?}", payload) }.boxed()
             })
             .connect()
@@ -579,7 +619,7 @@ mod test {
                 "binary",
                 json!("pls ack"),
                 Duration::from_secs(1),
-                |payload, _| async move {
+                |payload, _, _| async move {
                     println!("Yehaa the ack got acked");
                     println!("With data: {:#?}", payload);
                 }
@@ -609,10 +649,10 @@ mod test {
             .namespace("/admin")
             .tls_config(tls_connector)
             .opening_header("accept-encoding", "application/json")
-            .on("test", |str, _| {
+            .on("test", |str, _, _| {
                 async move { println!("Received: {:#?}", str) }.boxed()
             })
-            .on("message", |payload, _| {
+            .on("message", |payload, _, _| {
                 async move { println!("{:#?}", payload) }.boxed()
             })
             .connect_manual()
@@ -630,7 +670,7 @@ mod test {
                 "binary",
                 json!("pls ack"),
                 Duration::from_secs(1),
-                |payload, _| async move {
+                |payload, _, _| async move {
                     println!("Yehaa the ack got acked");
                     println!("With data: {:#?}", payload);
                 }
@@ -755,7 +795,7 @@ mod test {
             )
         );
 
-        let cb = |message: Payload, _| {
+        let cb = |message: Payload, _, _| {
             async {
                 println!("Yehaa! My ack got acked?");
                 if let Payload::String(str) = message {

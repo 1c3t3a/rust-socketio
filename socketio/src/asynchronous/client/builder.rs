@@ -1,5 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
-
+use crate::asynchronous::ack::AckId;
 use futures_util::{future::BoxFuture, StreamExt};
 use log::trace;
 use native_tls::TlsConnector;
@@ -7,6 +6,7 @@ use rust_engineio::{
     asynchronous::ClientBuilder as EngineIoClientBuilder,
     header::{HeaderMap, HeaderValue},
 };
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use url::Url;
 
@@ -37,14 +37,14 @@ impl ClientBuilder {
     /// will be used.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{Payload, asynchronous::{ClientBuilder, Client}};
+    /// use rust_socketio::{Payload, asynchronous::{ClientBuilder, Client, AckId}};
     /// use serde_json::json;
     /// use futures_util::future::FutureExt;
     ///
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let callback = |payload: Payload, socket: Client| {
+    ///     let callback = |payload: Payload, socket: Client, need_ack: Option<AckId>| {
     ///         async move {
     ///             match payload {
     ///                 Payload::String(str) => println!("Received: {}", str),
@@ -106,7 +106,7 @@ impl ClientBuilder {
     /// async fn main() {
     ///     let socket = ClientBuilder::new("http://localhost:4200/")
     ///         .namespace("/admin")
-    ///         .on("test", |payload: Payload, _| {
+    ///         .on("test", |payload: Payload, _, _| {
     ///             async move {
     ///                 match payload {
     ///                        Payload::String(str) => println!("Received: {}", str),
@@ -115,7 +115,7 @@ impl ClientBuilder {
     ///             }
     ///             .boxed()
     ///         })
-    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .on("error", |err, _, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
     ///         .connect()
     ///         .await;
     /// }
@@ -140,7 +140,7 @@ impl ClientBuilder {
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let callback = |payload: Payload, _| {
+    ///     let callback = |payload: Payload, _, _| {
     ///             async move {
     ///                 match payload {
     ///                        Payload::String(str) => println!("Received: {}", str),
@@ -161,7 +161,7 @@ impl ClientBuilder {
     #[cfg(feature = "async-callbacks")]
     pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
-        F: for<'a> std::ops::FnMut(Payload, Client) -> BoxFuture<'static, ()>
+        F: for<'a> std::ops::FnMut(Payload, Client, Option<AckId>) -> BoxFuture<'static, ()>
             + 'static
             + Send
             + Sync,
@@ -187,7 +187,7 @@ impl ClientBuilder {
     ///
     ///     let socket = ClientBuilder::new("http://localhost:4200/")
     ///         .namespace("/admin")
-    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .on("error", |err, _, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
     ///         .tls_config(tls_connector)
     ///         .connect()
     ///         .await;
@@ -210,7 +210,7 @@ impl ClientBuilder {
     /// async fn main() {
     ///     let socket = ClientBuilder::new("http://localhost:4200/")
     ///         .namespace("/admin")
-    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .on("error", |err, _, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
     ///         .opening_header("accept-encoding", "application/json")
     ///         .connect()
     ///         .await;
@@ -266,7 +266,7 @@ impl ClientBuilder {
     /// async fn main() {
     ///     let mut socket = ClientBuilder::new("http://localhost:4200/")
     ///         .namespace("/admin")
-    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .on("error", |err, _, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
     ///         .connect()
     ///         .await
     ///         .expect("connection failed");

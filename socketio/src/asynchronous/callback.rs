@@ -4,11 +4,12 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::Payload;
+use crate::{asynchronous::ack::AckId, Payload};
 
 /// Internal type, provides a way to store futures and return them in a boxed manner.
-type DynAsyncCallback<C> =
-    Box<dyn for<'a> FnMut(Payload, C) -> BoxFuture<'static, ()> + 'static + Send + Sync>;
+type DynAsyncCallback<C> = Box<
+    dyn for<'a> FnMut(Payload, C, Option<AckId>) -> BoxFuture<'static, ()> + 'static + Send + Sync,
+>;
 
 pub(crate) struct Callback<C> {
     inner: DynAsyncCallback<C>,
@@ -21,7 +22,10 @@ impl<C> Debug for Callback<C> {
 }
 
 impl<C> Deref for Callback<C> {
-    type Target = dyn for<'a> FnMut(Payload, C) -> BoxFuture<'static, ()> + 'static + Sync + Send;
+    type Target = dyn for<'a> FnMut(Payload, C, Option<AckId>) -> BoxFuture<'static, ()>
+        + 'static
+        + Sync
+        + Send;
 
     fn deref(&self) -> &Self::Target {
         self.inner.as_ref()
@@ -37,7 +41,10 @@ impl<C> DerefMut for Callback<C> {
 impl<C> Callback<C> {
     pub(crate) fn new<T>(callback: T) -> Self
     where
-        T: for<'a> FnMut(Payload, C) -> BoxFuture<'static, ()> + 'static + Sync + Send,
+        T: for<'a> FnMut(Payload, C, Option<AckId>) -> BoxFuture<'static, ()>
+            + 'static
+            + Sync
+            + Send,
     {
         Callback {
             inner: Box::new(callback),
