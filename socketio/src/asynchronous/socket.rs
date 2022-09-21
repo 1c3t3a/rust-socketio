@@ -91,6 +91,12 @@ impl Socket {
         self.send(socket_packet).await
     }
 
+    pub(crate) async fn handshake(&self, nsp: &str, data: String) -> Result<()> {
+        let socket_packet =
+            Packet::new(PacketId::Connect, nsp.to_owned(), Some(data), None, 0, None);
+        self.send(socket_packet).await
+    }
+
     /// Returns a packet for a payload, could be used for bot binary and non binary
     /// events and acks. Convenance method.
     #[inline]

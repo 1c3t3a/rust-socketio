@@ -169,6 +169,14 @@ impl<C: Clone> CommonClient<C> {
         self.socket.ack(&self.nsp, id, data.into()).await
     }
 
+    #[inline]
+    pub(crate) async fn handshake(&self, data: String) -> Result<()> {
+        if !self.is_connected.load(Ordering::Acquire) {
+            return Err(Error::IllegalActionBeforeOpen());
+        }
+        self.socket.handshake(&self.nsp, data).await
+    }
+
     /// Disconnects this client from the server by sending a `socket.io` closing
     /// packet.
     /// # Example

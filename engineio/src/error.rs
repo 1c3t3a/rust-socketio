@@ -52,6 +52,8 @@ pub enum Error {
     InvalidHeaderNameFromReqwest(#[from] reqwest::header::InvalidHeaderName),
     #[error("Invalid header value")]
     InvalidHeaderValueFromReqwest(#[from] reqwest::header::InvalidHeaderValue),
+    #[error("Failed to emit: {0}")]
+    FailedToEmit(String),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;

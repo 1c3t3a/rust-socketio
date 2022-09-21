@@ -1,10 +1,9 @@
 use bytes::Bytes;
-use futures_util::future::poll_fn;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::SinkExt;
+use futures_util::{future::poll_fn, StreamExt};
 use http::Response;
 use httparse::{Request, Status, EMPTY_HEADER};
 use reqwest::Url;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{borrow::Cow, net::SocketAddr};
 use std::{str::from_utf8, sync::Arc};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadBuf};
@@ -12,28 +11,13 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::{accept_async, MaybeTlsStream, WebSocketStream};
 use tungstenite::Message;
 
-use crate::error::Result;
+use crate::{error::Result, Error};
 use crate::{Packet, PacketId};
 
 use super::{Server, Sid};
 
-const MAX_BUFF_LEN: usize = 1024;
 /// Limit for the number of header lines.
 const MAX_HEADERS: usize = 124;
-const PING_PROBE: &str = "2probe";
-const PONG: &str = "3";
-
-#[derive(Default)]
-pub(crate) struct SidGenerator {
-    seq: AtomicUsize,
-}
-
-impl SidGenerator {
-    pub fn generate(&self) -> Sid {
-        let seq = self.seq.fetch_add(1, Ordering::SeqCst);
-        Arc::new(base64::encode(format!("{}", seq)))
-    }
-}
 
 pub(crate) struct PollingAcceptor {}
 
@@ -43,19 +27,27 @@ impl PollingAcceptor {
         mut stream: TcpStream,
         addr: &SocketAddr,
     ) -> Result<()> {
-        // TODO: polling transport
-        match read_request_type(&mut stream, addr).await {
+        match read_request_type(&mut stream, addr, server.max_payload()).await {
             Some(RequestType::PollingOpen) => {
                 let packet = server.handshake_packet(vec!["websocket".to_owned()], None);
                 // SAFETY: all fields are safe to serialize
                 let data = serde_json::to_string(&packet).unwrap();
                 let body = format!("{}{}", PacketId::Open as u8, data);
-                write_stream(&mut stream, 200, body).await
+                if server.store_polling(packet.sid, addr).await.is_ok() {
+                    write_stream(&mut stream, 200, Some(body)).await
+                } else {
+                    write_stream(&mut stream, 500, None).await
+                }
             }
-            Some(RequestType::PollingGet(_sid)) => {
-                write_stream(&mut stream, 200, PacketId::Upgrade.into()).await
+            Some(RequestType::PollingPost(sid, data)) => {
+                server.polling_post(&sid, data).await;
+                write_stream(&mut stream, 200, Some("ok".to_string())).await
             }
-            _ => Ok(()),
+            Some(RequestType::PollingGet(sid)) => {
+                let data = server.polling_get(&sid).await;
+                write_stream(&mut stream, 200, data).await
+            }
+            _ => write_stream(&mut stream, 400, None).await,
         }
     }
 }
@@ -73,42 +65,48 @@ impl WebsocketAcceptor {
         let sid = match sid {
             // websocket connecting directly, instead of upgrading from polling
             None => handshake(server.clone(), &mut ws_stream).await?,
-            Some(sid) => sid,
+            Some(sid) => handle_probe(server.clone(), sid, &mut ws_stream).await?,
         };
 
-        if let Some(Ok(Message::Text(msg))) = ws_stream.next().await {
-            match msg.as_str() {
-                // upgrade from polling
-                PING_PROBE => {
-                    send_pong_probe(&mut ws_stream).await?;
-                    server.store_stream(sid, addr, ws_stream).await?;
-                }
-                // websocket connecting directly
-                PONG => {
-                    server.store_stream(sid, addr, ws_stream).await?;
-                }
-                _ => {}
-            }
-        }
+        server.store_stream(sid, addr, ws_stream).await?;
 
         Ok(())
     }
 }
 
-async fn send_pong_probe(ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>) -> Result<()> {
-    let packet = Bytes::from(Packet::new(PacketId::Pong, Bytes::from("probe")));
-    let pong_probe = from_utf8(&packet).unwrap();
-    ws_stream
-        .send(Message::text(Cow::Borrowed(pong_probe)))
-        .await?;
-    Ok(())
+async fn handle_probe(
+    server: Server,
+    sid: Sid,
+    ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+) -> Result<Sid> {
+    if let Some(Ok(Message::Text(packet))) = ws_stream.next().await {
+        if packet == "2probe" {
+            let message = Message::text(Cow::Borrowed(from_utf8(&Bytes::from(Packet::new(
+                PacketId::Pong,
+                Bytes::from("probe"),
+            )))?));
+            ws_stream.send(message).await?;
+        }
+    }
+
+    if let Some(Ok(Message::Text(packet))) = ws_stream.next().await {
+        // PacketId::Upgrade
+        if packet == "5" {
+            server.close_polling(&sid).await;
+            return Ok(sid);
+        }
+    }
+
+    Err(Error::InvalidHandshake(
+        "upgrade missing packet".to_string(),
+    ))
 }
 
 async fn handshake(
     server: Server,
     ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
 ) -> Result<Sid> {
-    let sid = server.sid();
+    let sid = server.generate_sid();
     let packet = server.handshake_packet(vec![], Some(sid.clone()));
     // SAFETY: all fields are safe to serialize
     let data = serde_json::to_string(&packet).unwrap();
@@ -124,22 +122,27 @@ pub(crate) enum RequestType {
     WsUpgrade(Option<Sid>),
     PollingOpen,
     PollingGet(Sid),
-    PollingPost(Sid),
+    PollingPost(Sid, Bytes),
 }
 
 pub(crate) async fn peek_request_type(
     stream: &TcpStream,
     addr: &SocketAddr,
+    max_payload: usize,
 ) -> Option<RequestType> {
-    let mut buf = [0; MAX_BUFF_LEN];
+    let mut buf = vec![0; max_payload];
     let mut buf = ReadBuf::new(&mut buf);
 
     poll_fn(|cx| stream.poll_peek(cx, &mut buf)).await.ok()?;
     parse_request_type(buf.filled(), addr)
 }
 
-async fn read_request_type(stream: &mut TcpStream, addr: &SocketAddr) -> Option<RequestType> {
-    let mut buf = [0; MAX_BUFF_LEN];
+async fn read_request_type(
+    stream: &mut TcpStream,
+    addr: &SocketAddr,
+    max_payload: usize,
+) -> Option<RequestType> {
+    let mut buf = vec![0; max_payload];
     let n = stream.read(&mut buf).await.ok()?;
 
     parse_request_type(&buf[0..n], addr)
@@ -183,9 +186,11 @@ pub(crate) fn parse_request_type(buf: &[u8], addr: &SocketAddr) -> Option<Reques
     }
 
     if req.method? == "POST" {
-        let body_str = from_utf8(&buf[idx..idx + content_length]).ok()?;
-        let sid = Arc::new(body_str.to_owned());
-        return Some(RequestType::PollingPost(sid));
+        let body_bytes = Bytes::from(buf[idx..idx + content_length].to_vec());
+
+        if let Some(sid) = sid {
+            return Some(RequestType::PollingPost(sid, body_bytes));
+        }
     }
 
     match sid {
@@ -194,18 +199,22 @@ pub(crate) fn parse_request_type(buf: &[u8], addr: &SocketAddr) -> Option<Reques
     }
 }
 
-async fn write_stream(stream: &mut TcpStream, status: u16, body: String) -> Result<()> {
+async fn write_stream(stream: &mut TcpStream, status: u16, body: Option<String>) -> Result<()> {
     let response = http_response(status, body); // not ok, will lost message
     stream.write_all(&Bytes::from(response)).await?;
     Ok(())
 }
 
-fn http_response(status: u16, body: String) -> String {
+fn http_response(status: u16, body: Option<String>) -> String {
+    let body_len = match body {
+        None => 0,
+        Some(ref b) => b.len(),
+    };
     let response = Response::builder()
         .status(status)
         .header("Content-Type", "text/plain; charset=UTF-8")
         .header("Connection", "Close")
-        .header("Content-Length", body.len())
+        .header("Content-Length", body_len)
         .body(body);
     // SAFETY: all response fields are valid to build
     let response = response.unwrap();
@@ -222,8 +231,10 @@ fn http_response(status: u16, body: String) -> String {
         response_str.push_str(&header);
     }
 
-    response_str.push_str("\r\n");
-    response_str.push_str(response.body());
+    if let Some(body) = response.body() {
+        response_str.push_str("\r\n");
+        response_str.push_str(body);
+    }
 
     response_str
 }
