@@ -94,6 +94,7 @@ impl ServerBuilder {
                 on_packet: self.on_packet,
                 id_generator: Default::default(),
                 clients: Default::default(),
+                polling_handles: Default::default(),
             }),
         }
     }

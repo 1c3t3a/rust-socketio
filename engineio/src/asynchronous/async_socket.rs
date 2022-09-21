@@ -122,9 +122,9 @@ impl Socket {
             }
             PacketId::Ping => {
                 self.pinged().await;
-                // server and pong timeout test case no need to pong
+                // server and pong timeout test case should not pong
                 if self.should_pong {
-                    self.emit(Packet::new(PacketId::Pong, Bytes::new())).await?;
+                    self.emit(Packet::new(PacketId::Pong, packet.data)).await?;
                 }
             }
             PacketId::Pong | PacketId::Open => {

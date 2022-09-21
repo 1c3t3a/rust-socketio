@@ -1,29 +1,39 @@
-use super::accept::{
-    peek_request_type, PollingAcceptor, RequestType, SidGenerator, WebsocketAcceptor,
-};
-use crate::asynchronous::async_transports::WebsocketTransport;
-use crate::asynchronous::callback::OptionalCallback;
+use super::accept::{peek_request_type, PollingAcceptor, RequestType, WebsocketAcceptor};
+use crate::asynchronous::async_transports::{PollingTransport, WebsocketTransport};
 use crate::asynchronous::transport::AsyncTransportType;
 use crate::asynchronous::{async_socket::Socket, Client};
 use crate::error::Result;
 use crate::packet::HandshakePacket;
+use crate::{asynchronous::callback::OptionalCallback, packet::build_polling_payload};
 use crate::{Packet, PacketId};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use reqwest::Url;
-use std::{collections::HashMap, net::SocketAddr};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{
+    collections::{HashMap, VecDeque},
+    net::SocketAddr,
+};
 use std::{sync::Arc, time::Duration};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
+use tokio::sync::{
+    mpsc::{Receiver, Sender},
+    Mutex, RwLock,
+};
 use tokio::time::{interval, Instant};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::mpsc::channel,
+};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 pub type Sid = Arc<String>;
+pub type PollingHandle = (Sender<Bytes>, Receiver<Bytes>);
 
 #[derive(Clone, Debug)]
 pub struct ServerOption {
     pub ping_timeout: u64,
     pub ping_interval: u64,
+    pub max_payload: usize,
 }
 
 impl Default for ServerOption {
@@ -32,7 +42,20 @@ impl Default for ServerOption {
         Self {
             ping_interval: 25000,
             ping_timeout: 20000,
+            max_payload: 1024,
         }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct SidGenerator {
+    seq: AtomicUsize,
+}
+
+impl SidGenerator {
+    pub fn generate(&self) -> Sid {
+        let seq = self.seq.fetch_add(1, Ordering::SeqCst);
+        Arc::new(base64::encode(format!("{}", seq)))
     }
 }
 
@@ -46,6 +69,7 @@ pub(crate) struct Inner {
     pub(crate) id_generator: SidGenerator,
     pub(crate) server_option: ServerOption,
     pub(crate) clients: RwLock<HashMap<Sid, Client>>,
+    pub(crate) polling_handles: Mutex<HashMap<Sid, PollingHandle>>,
 
     pub(crate) on_open: OptionalCallback<Sid>,
     pub(crate) on_close: OptionalCallback<Sid>,
@@ -84,6 +108,43 @@ impl Server {
         }
     }
 
+    pub async fn store_polling(&self, sid: Sid, peer_addr: &SocketAddr) -> Result<()> {
+        let (send_tx, send_rx) = channel(100);
+        let (recv_tx, recv_rx) = channel(100);
+        let url = Url::parse(&format!("http://{}", peer_addr)).unwrap();
+        let transport = PollingTransport::server_new(url, send_tx, recv_rx);
+
+        let mut polling_handles = self.inner.polling_handles.lock().await;
+        polling_handles.insert(sid.clone(), (recv_tx, send_rx));
+        drop(polling_handles);
+
+        // SAFETY: url is valid to parse
+        let transport: AsyncTransportType = AsyncTransportType::Polling(transport);
+
+        let handshake = self.handshake_packet(vec!["webscocket".to_owned()], Some(sid.clone()));
+        let mut socket = Socket::new(
+            transport,
+            handshake,
+            false, // server no need to pong
+            self.on_close(&sid),
+            self.inner.on_data.clone(),
+            self.inner.on_error.clone(),
+            self.inner.on_open.clone(),
+            self.inner.on_packet.clone(),
+        );
+        socket.set_server();
+
+        let client = Client::new(socket);
+        let mut clients = self.inner.clients.write().await;
+        let _ = clients.insert(sid.clone(), client.clone());
+
+        // socket.io server will receive Sid by on_open callback,
+        // then fetch engine.io client
+        client.connect().await?;
+
+        Ok(())
+    }
+
     pub async fn store_stream(
         &self,
         sid: Sid,
@@ -118,6 +179,39 @@ impl Server {
         client.connect().await?;
         self.start_ping_pong(&sid);
         Ok(())
+    }
+
+    pub(crate) async fn polling_post(&self, sid: &Sid, data: Bytes) {
+        let mut handles = self.inner.polling_handles.lock().await;
+
+        if let Some((ref mut tx, _)) = handles.get_mut(sid) {
+            let _ = tx.send(data).await;
+        }
+    }
+
+    pub(crate) async fn polling_get(&self, sid: &Sid) -> Option<String> {
+        let mut handles = self.inner.polling_handles.lock().await;
+        if let Some((_, rx)) = handles.get_mut(sid) {
+            let mut byte_vec = VecDeque::new();
+            while let Ok(bytes) = rx.try_recv() {
+                byte_vec.push_back(bytes);
+            }
+            match build_polling_payload(byte_vec) {
+                Some(payload) => return Some(payload),
+                None => {
+                    let clients = self.inner.clients.read().await;
+                    if clients.get(sid).is_some() {
+                        return Some(PacketId::Noop.into());
+                    }
+                }
+            };
+        }
+        None
+    }
+
+    pub(crate) async fn close_polling(&self, sid: &Sid) {
+        let mut handles = self.inner.polling_handles.lock().await;
+        handles.remove(sid);
     }
 
     pub async fn client(&self, sid: &Sid) -> Option<Client> {
@@ -162,19 +256,17 @@ impl Server {
 
         tokio::spawn(async move {
             while server.is_connected(&sid).await {
-                if server
-                    .emit(&sid, Packet::new(PacketId::Ping, Bytes::new()))
-                    .await
-                    .is_err()
-                {
+                let ping_packet = Packet {
+                    packet_id: PacketId::Ping,
+                    data: Bytes::new(),
+                };
+                if server.emit(&sid, ping_packet).await.is_err() {
                     break;
                 };
-
-                match server.last_pong(&sid).await {
+                let last_pong = server.last_pong(&sid).await;
+                match last_pong {
                     Some(instant) if instant.elapsed() < timeout => {}
-                    _ => {
-                        break;
-                    }
+                    _ => break,
                 }
                 interval.tick().await;
             }
@@ -186,11 +278,15 @@ impl Server {
         self.inner.server_option.clone()
     }
 
-    pub fn sid(&self) -> Sid {
+    pub fn generate_sid(&self) -> Sid {
         self.inner.id_generator.generate()
     }
 
-    pub async fn last_pong(&self, sid: &Sid) -> Option<Instant> {
+    pub(crate) fn max_payload(&self) -> usize {
+        self.inner.server_option.max_payload
+    }
+
+    pub(crate) async fn last_pong(&self, sid: &Sid) -> Option<Instant> {
         let sockets = self.inner.clients.read().await;
         Some(sockets.get(sid)?.last_pong().await)
     }
@@ -221,6 +317,7 @@ impl Default for Inner {
             id_generator: SidGenerator::default(),
             server_option: ServerOption::default(),
             clients: Default::default(),
+            polling_handles: Default::default(),
 
             on_error: OptionalCallback::default(),
             on_open: OptionalCallback::default(),
@@ -233,11 +330,10 @@ impl Default for Inner {
 
 async fn accept_connection(server: Server, stream: TcpStream, peer_addr: SocketAddr) -> Result<()> {
     // TODO: tls
-    match peek_request_type(&stream, &peer_addr).await {
+    match peek_request_type(&stream, &peer_addr, server.max_payload()).await {
         Some(RequestType::WsUpgrade(sid)) => {
             WebsocketAcceptor::accept(server, sid, MaybeTlsStream::Plain(stream), &peer_addr).await
         }
-        // TODO: polling transport
         _ => PollingAcceptor::accept(server, stream, &peer_addr).await,
     }
 }
@@ -302,6 +398,7 @@ mod test {
         let server_option = ServerOption {
             ping_timeout: 50,
             ping_interval: 50,
+            max_payload: 1024,
         };
         let (builder, rx) = setup(port, server_option);
         let server = builder.build();
@@ -315,7 +412,7 @@ mod test {
     }
 
     fn poll_client(mut client: Client) {
-        tokio::spawn(async move { while let Some(_) = client.next().await {} });
+        tokio::spawn(async move { while client.next().await.is_some() {} });
     }
 
     async fn test_data_transport(
@@ -326,7 +423,7 @@ mod test {
         client.connect().await?;
 
         let mut client_clone = client.clone();
-        tokio::spawn(async move { while let Some(_) = client_clone.next().await {} });
+        tokio::spawn(async move { while client_clone.next().await.is_some() {} });
 
         // Ping
         assert!(matches!(
@@ -385,7 +482,14 @@ mod test {
         client.connect().await?;
 
         let client_clone = client.clone();
-        tokio::spawn(async move { while let Some(_) = client.next().await {} });
+        tokio::spawn(async move {
+            loop {
+                let next = client.next().await;
+                if next.is_none() {
+                    break;
+                }
+            }
+        });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
 
