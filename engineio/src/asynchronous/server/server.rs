@@ -70,6 +70,7 @@ pub(crate) struct Inner {
     pub(crate) server_option: ServerOption,
     pub(crate) clients: RwLock<HashMap<Sid, Client>>,
     pub(crate) polling_handles: Mutex<HashMap<Sid, PollingHandle>>,
+    pub(crate) polling_buffer: usize,
 
     pub(crate) on_open: OptionalCallback<Sid>,
     pub(crate) on_close: OptionalCallback<Sid>,
@@ -109,8 +110,8 @@ impl Server {
     }
 
     pub async fn store_polling(&self, sid: Sid, peer_addr: &SocketAddr) -> Result<()> {
-        let (send_tx, send_rx) = channel(100);
-        let (recv_tx, recv_rx) = channel(100);
+        let (send_tx, send_rx) = channel(self.inner.polling_buffer);
+        let (recv_tx, recv_rx) = channel(self.inner.polling_buffer);
         let url = Url::parse(&format!("http://{}", peer_addr)).unwrap();
         let transport = PollingTransport::server_new(url, send_tx, recv_rx);
 
@@ -318,6 +319,7 @@ impl Default for Inner {
             server_option: ServerOption::default(),
             clients: Default::default(),
             polling_handles: Default::default(),
+            polling_buffer: 100,
 
             on_error: OptionalCallback::default(),
             on_open: OptionalCallback::default(),

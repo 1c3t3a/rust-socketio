@@ -16,6 +16,7 @@ pub struct ServerBuilder {
     on_packet: OptionalCallback<(Sid, Packet)>,
     on_error: OptionalCallback<(Sid, String)>,
     server_option: ServerOption,
+    polling_buffer: usize,
 }
 
 #[allow(dead_code)]
@@ -29,6 +30,7 @@ impl ServerBuilder {
             on_open: OptionalCallback::default(),
             on_packet: OptionalCallback::default(),
             server_option: Default::default(),
+            polling_buffer: 100,
         }
     }
 
@@ -82,6 +84,11 @@ impl ServerBuilder {
         self
     }
 
+    pub fn polling_buffer(mut self, polling_buffer: usize) -> Self {
+        self.polling_buffer = polling_buffer;
+        self
+    }
+
     pub fn build(self) -> Server {
         Server {
             inner: Arc::new(server::Inner {
@@ -95,6 +102,7 @@ impl ServerBuilder {
                 id_generator: Default::default(),
                 clients: Default::default(),
                 polling_handles: Default::default(),
+                polling_buffer: self.polling_buffer,
             }),
         }
     }
