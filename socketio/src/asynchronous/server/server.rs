@@ -183,7 +183,6 @@ impl Server {
                 None => self.handle_connect(socket, &esid).await,
             };
         }
-        println!("done create_client");
     }
 
     async fn esid_nsp(&self, esid: &EngineSid) -> Option<(Sid, String)> {
@@ -207,9 +206,7 @@ impl Server {
 
     async fn handle_connect(self: &Arc<Self>, mut socket: Socket, esid: &EngineSid) {
         let sid = self.sid_generator.generate(esid);
-        println!("handle_connect {}", sid);
         while let Some(Ok(packet)) = socket.next().await {
-            println!("handle_connect {:?}", packet);
             if packet.packet_type == PacketId::Connect {
                 let nsp = packet.nsp.clone();
                 self.insert_clients(socket, nsp, sid).await;
@@ -221,7 +218,6 @@ impl Server {
     }
 
     async fn insert_clients(self: &Arc<Self>, socket: Socket, nsp: String, sid: Sid) {
-        println!("insert_clietns {} {}", nsp, sid);
         if let Some(on) = self.on.get(&nsp) {
             let client = ServerClient::new(
                 socket,

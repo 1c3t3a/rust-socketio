@@ -30,9 +30,15 @@ socket.on("connect", () => {
     // called when the underlying connection is closed
     console.log("close " + reason);
   });
+
+  socket.emit("foo", "bar");
 });
 
 socket.on("disconnect", (reason) => {
   console.log("disconnect " + reason); // false
+});
+
+socket.on("echo", (data) => {
+  console.log("echo", data);
 });
 
