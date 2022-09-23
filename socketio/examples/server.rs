@@ -13,7 +13,6 @@ async fn main() {
             let _ = socket
                 .emit_to(vec!["room 1"], "echo", json!({"got ack": true}))
                 .await;
-            socket.leave(vec!["room 1"]).await;
         }
         .boxed()
     };

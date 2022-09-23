@@ -1,12 +1,3 @@
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
-
 use crate::{
     asynchronous::{
         ack::AckId, callback::Callback, server::client::Client as ServerClient, socket::Socket,
@@ -19,12 +10,21 @@ use crate::{
 use futures_util::{future::BoxFuture, StreamExt};
 use log::trace;
 use rust_engineio::{
-    asynchronous::{server::Server as EngineServer, Sid},
+    asynchronous::{server::Server as EngineServer, Sid as EngineSid},
     PacketId as EnginePacketId,
 };
 use serde_json::json;
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tokio::sync::{mpsc::Receiver, RwLock};
 
+type Sid = Arc<String>;
 type Room = String;
 type Rooms = HashMap<NameSpace, HashMap<Room, HashMap<Sid, ServerClient>>>;
 type On = HashMap<Event, Callback<ServerClient>>;
@@ -43,13 +43,16 @@ impl Server {
         self.engine_server.serve().await
     }
 
-    pub(crate) fn recv_event(self: &Arc<Self>, mut event_rx: Receiver<(Sid, EnginePacketId)>) {
+    pub(crate) fn recv_event(
+        self: &Arc<Self>,
+        mut event_rx: Receiver<(EngineSid, EnginePacketId)>,
+    ) {
         let server = self.to_owned();
         tokio::spawn(async move {
-            while let Some((sid, event)) = event_rx.recv().await {
+            while let Some((esid, event)) = event_rx.recv().await {
                 match event {
-                    EnginePacketId::Open => server.create_client(sid).await,
-                    EnginePacketId::Close => server.drop_client(&sid).await,
+                    EnginePacketId::Open => server.create_client(esid).await,
+                    EnginePacketId::Close => server.drop_client(&esid).await,
                     _ => {}
                 }
             }
@@ -74,7 +77,12 @@ impl Server {
             for room_name in rooms {
                 if let Some(room) = room_clients.get(room_name) {
                     for client in room.values() {
-                        client.emit(event.clone(), payload.clone()).await?;
+                        let client = client.clone();
+                        let event = event.clone();
+                        let payload = payload.clone();
+                        tokio::spawn(async move {
+                            let _ = client.emit(event, payload).await;
+                        });
                     }
                 }
             }
@@ -107,14 +115,14 @@ impl Server {
             for room_name in rooms {
                 if let Some(room) = room_clients.get(room_name) {
                     for client in room.values() {
-                        client
+                        let _ = client
                             .emit_with_ack(
                                 event.clone(),
                                 payload.clone(),
                                 timeout,
                                 callback.clone(),
                             )
-                            .await?;
+                            .await;
                     }
                 }
             }
@@ -153,25 +161,25 @@ impl Server {
         }
     }
 
-    pub(crate) async fn leave(self: &Arc<Self>, nsp: &str, rooms: Vec<&str>, sid: Sid) {
+    pub(crate) async fn leave(self: &Arc<Self>, nsp: &str, rooms: Vec<&str>, sid: &Sid) {
         let mut clients = self.rooms.write().await;
         for room_name in rooms {
             if let Some(room_clients) = clients.get_mut(nsp) {
                 if let Some(clients) = room_clients.get_mut(room_name) {
-                    clients.remove(&sid);
+                    clients.remove(sid);
                 }
             };
         }
     }
 
-    async fn create_client(self: &Arc<Self>, sid: Sid) {
-        if let Some(engine_client) = self.engine_server.client(&sid).await {
+    async fn create_client(self: &Arc<Self>, esid: EngineSid) {
+        if let Some(engine_client) = self.engine_server.client(&esid).await {
             let mut socket = Socket::new_server(engine_client);
             let next = socket.next().await;
             // TODO: support multiple namespace
             // first packet should be Connect
             if let Some(Ok(packet)) = next {
-                self.handle_engine_packet(packet, sid.clone(), socket.clone())
+                self.handle_engine_packet(packet, esid.clone(), socket.clone())
                     .await;
             }
         }
@@ -180,11 +188,11 @@ impl Server {
     async fn handle_engine_packet(
         self: &Arc<Self>,
         packet: Packet,
-        engine_sid: Sid,
+        engine_sid: EngineSid,
         socket: Socket,
     ) {
         if packet.packet_type == PacketId::Connect {
-            let sid = self.sid_generator.generate(engine_sid);
+            let sid = self.sid_generator.generate(&engine_sid);
             let nsp = packet.nsp.clone();
             if let Some(on) = self.on.get(&nsp) {
                 let client = ServerClient::new(
@@ -211,9 +219,18 @@ impl Server {
         }
     }
 
-    async fn drop_client(&self, sid: &Sid) {
+    async fn drop_client(self: &Arc<Self>, esid: &EngineSid) {
         let mut clients = self.clients.write().await;
-        let _ = clients.remove(sid);
+        let _ = clients.remove(esid);
+        drop(clients);
+
+        // FIXME: performance will be low if too many nsp and rooms
+        let mut clients = self.rooms.write().await;
+        for nsp_clients in clients.values_mut() {
+            for room_clients in nsp_clients.values_mut() {
+                room_clients.retain(|sid, _| &SidGenerator::decode(sid) != esid)
+            }
+        }
     }
 }
 
@@ -223,9 +240,17 @@ pub(crate) struct SidGenerator {
 }
 
 impl SidGenerator {
-    pub fn generate(&self, engine_sid: Sid) -> Sid {
+    pub fn generate(&self, engine_sid: &EngineSid) -> Sid {
         let seq = self.seq.fetch_add(1, Ordering::SeqCst);
         Arc::new(base64::encode(format!("{}-{}", engine_sid, seq)))
+    }
+
+    pub fn decode(sid: &Sid) -> EngineSid {
+        // SAFETY: base64 decode valid
+        let sid_vec = base64::decode(sid.as_bytes()).unwrap();
+        let esid_sid = std::str::from_utf8(&sid_vec).unwrap();
+        let tokens: Vec<&str> = esid_sid.split('-').collect();
+        Arc::new(tokens[0].to_owned())
     }
 }
 
@@ -265,8 +290,18 @@ mod test {
         Event, Payload,
     };
 
+    use super::SidGenerator;
     use futures_util::FutureExt;
     use serde_json::json;
+
+    #[test]
+    fn test_sid_generator() {
+        let generator = SidGenerator::default();
+        let engine_sid = Arc::new("engine_sid".to_owned());
+        let sid = generator.generate(&engine_sid);
+
+        assert_eq!(SidGenerator::decode(&sid), engine_sid);
+    }
 
     #[tokio::test]
     async fn test_server() {

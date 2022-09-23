@@ -56,9 +56,7 @@ impl Client {
     }
 
     pub async fn leave(&self, rooms: Vec<&str>) {
-        self.server
-            .leave(&self.client.nsp, rooms, self.sid.clone())
-            .await;
+        self.server.leave(&self.client.nsp, rooms, &self.sid).await;
     }
 
     pub async fn emit_to<E, D>(&self, rooms: Vec<&str>, event: E, data: D) -> Result<()>
