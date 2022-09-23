@@ -4,7 +4,7 @@ use crate::{
         NameSpace,
     },
     error::Result,
-    packet::{Packet, PacketId},
+    packet::PacketId,
     Error, Event, Payload,
 };
 use futures_util::{future::BoxFuture, StreamExt};
@@ -174,47 +174,74 @@ impl Server {
 
     async fn create_client(self: &Arc<Self>, esid: EngineSid) {
         if let Some(engine_client) = self.engine_server.client(&esid).await {
-            let mut socket = Socket::new_server(engine_client);
-            let next = socket.next().await;
+            let socket = Socket::new_server(engine_client);
+
             // TODO: support multiple namespace
-            // first packet should be Connect
-            if let Some(Ok(packet)) = next {
-                self.handle_engine_packet(packet, esid.clone(), socket.clone())
-                    .await;
+
+            match self.esid_nsp(&esid).await {
+                Some((sid, nsp)) => self.insert_clients(socket, nsp, sid).await,
+                None => self.handle_connect(socket, &esid).await,
+            };
+        }
+        println!("done create_client");
+    }
+
+    async fn esid_nsp(&self, esid: &EngineSid) -> Option<(Sid, String)> {
+        // TODO: support multiple nsp
+        // currently one esid mapping to one sid,
+        // one sid mapping one nsp
+        let clients = self.clients.read().await;
+        for sid in clients.keys() {
+            if &SidGenerator::decode(sid) == esid {
+                if let Some(nsp_clients) = clients.get(sid) {
+                    // currently only one nsp per sid
+                    if let Some(nsp) = nsp_clients.keys().next() {
+                        return Some((sid.to_owned(), nsp.to_owned()));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    async fn handle_connect(self: &Arc<Self>, mut socket: Socket, esid: &EngineSid) {
+        let sid = self.sid_generator.generate(esid);
+        println!("handle_connect {}", sid);
+        while let Some(Ok(packet)) = socket.next().await {
+            println!("handle_connect {:?}", packet);
+            if packet.packet_type == PacketId::Connect {
+                let nsp = packet.nsp.clone();
+                self.insert_clients(socket, nsp, sid).await;
+                break;
+            } else {
+                continue;
             }
         }
     }
 
-    async fn handle_engine_packet(
-        self: &Arc<Self>,
-        packet: Packet,
-        engine_sid: EngineSid,
-        socket: Socket,
-    ) {
-        if packet.packet_type == PacketId::Connect {
-            let sid = self.sid_generator.generate(&engine_sid);
-            let nsp = packet.nsp.clone();
-            if let Some(on) = self.on.get(&nsp) {
-                let client = ServerClient::new(
-                    socket,
-                    nsp.clone(),
-                    sid.clone(),
-                    on.to_owned(),
-                    self.clone(),
-                );
+    async fn insert_clients(self: &Arc<Self>, socket: Socket, nsp: String, sid: Sid) {
+        println!("insert_clietns {} {}", nsp, sid);
+        if let Some(on) = self.on.get(&nsp) {
+            let client = ServerClient::new(
+                socket,
+                nsp.clone(),
+                sid.clone(),
+                on.to_owned(),
+                self.clone(),
+            );
 
-                poll_client(client.clone());
+            poll_client(client.clone());
 
-                if client
-                    .handshake(json!({ "sid": sid.clone() }).to_string())
-                    .await
-                    .is_ok()
-                {
-                    let mut clients = self.clients.write().await;
-                    let mut ns_clients = HashMap::new();
-                    ns_clients.insert(nsp, client);
-                    clients.insert(sid, ns_clients);
-                }
+            if client
+                .handshake(json!({ "sid": sid.clone() }).to_string())
+                .await
+                .is_ok()
+            {
+                let mut clients = self.clients.write().await;
+                let mut ns_clients = HashMap::new();
+                ns_clients.insert(nsp, client);
+                clients.insert(sid, ns_clients);
             }
         }
     }
