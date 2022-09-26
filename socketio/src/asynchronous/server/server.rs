@@ -15,7 +15,7 @@ use rust_engineio::{
 };
 use serde_json::json;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -26,7 +26,7 @@ use tokio::sync::{mpsc::Receiver, RwLock};
 
 type Sid = Arc<String>;
 type Room = String;
-type Rooms = HashMap<NameSpace, HashMap<Room, HashMap<Sid, ServerClient>>>;
+type Rooms = HashMap<NameSpace, HashMap<Room, HashSet<Sid>>>;
 type On = HashMap<Event, Callback<ServerClient>>;
 
 pub struct Server {
@@ -76,18 +76,28 @@ impl Server {
         if let Some(room_clients) = clients.get(nsp) {
             for room_name in rooms {
                 if let Some(room) = room_clients.get(room_name) {
-                    for client in room.values() {
-                        let client = client.clone();
-                        let event = event.clone();
-                        let payload = payload.clone();
-                        tokio::spawn(async move {
-                            let _ = client.emit(event, payload).await;
-                        });
+                    for sid in room {
+                        if let Some(client) = self.client(sid, nsp).await {
+                            let event = event.clone();
+                            let payload = payload.clone();
+
+                            tokio::spawn(async move {
+                                let _ = client.emit(event, payload).await;
+                            });
+                        }
                     }
                 }
             }
         }
         Ok(())
+    }
+
+    pub(crate) async fn client(&self, sid: &Sid, nsp: &str) -> Option<ServerClient> {
+        let clients = self.clients.read().await;
+        if let Some(nsp_clients) = clients.get(sid) {
+            return nsp_clients.get(nsp).cloned();
+        }
+        None
     }
 
     pub async fn emit_to_with_ack<F, E, D>(
@@ -114,15 +124,17 @@ impl Server {
         if let Some(room_clients) = clients.get(nsp) {
             for room_name in rooms {
                 if let Some(room) = room_clients.get(room_name) {
-                    for client in room.values() {
-                        let _ = client
-                            .emit_with_ack(
-                                event.clone(),
-                                payload.clone(),
-                                timeout,
-                                callback.clone(),
-                            )
-                            .await;
+                    for sid in room {
+                        if let Some(client) = self.client(sid, nsp).await {
+                            let _ = client
+                                .emit_with_ack(
+                                    event.clone(),
+                                    payload.clone(),
+                                    timeout,
+                                    callback.clone(),
+                                )
+                                .await;
+                        }
                     }
                 }
             }
@@ -135,26 +147,25 @@ impl Server {
         nsp: &str,
         rooms: Vec<T>,
         sid: Sid,
-        client: ServerClient,
     ) {
-        let mut clients = self.rooms.write().await;
+        let mut _rooms = self.rooms.write().await;
         for room_name in rooms {
             let room_name = room_name.into();
-            match clients.get_mut(nsp) {
+            match _rooms.get_mut(nsp) {
                 None => {
-                    let mut room_clients = HashMap::new();
-                    room_clients.insert(sid.clone(), client.clone());
+                    let mut room_sids = HashSet::new();
+                    room_sids.insert(sid.clone());
                     let mut rooms = HashMap::new();
-                    rooms.insert(room_name, room_clients);
-                    clients.insert(nsp.to_owned(), rooms);
+                    rooms.insert(room_name, room_sids);
+                    _rooms.insert(nsp.to_owned(), rooms);
                 }
                 Some(rooms) => {
-                    if let Some(room_clients) = rooms.get_mut(&room_name) {
-                        let _ = room_clients.insert(sid.clone(), client.clone());
+                    if let Some(room_sids) = rooms.get_mut(&room_name) {
+                        let _ = room_sids.insert(sid.clone());
                     } else {
-                        let mut room_clients = HashMap::new();
-                        room_clients.insert(sid.clone(), client.clone());
-                        rooms.insert(room_name, room_clients);
+                        let mut room_sids = HashSet::new();
+                        room_sids.insert(sid.clone());
+                        rooms.insert(room_name, room_sids);
                     }
                 }
             };
@@ -162,11 +173,11 @@ impl Server {
     }
 
     pub(crate) async fn leave(self: &Arc<Self>, nsp: &str, rooms: Vec<&str>, sid: &Sid) {
-        let mut clients = self.rooms.write().await;
+        let mut all_rooms = self.rooms.write().await;
         for room_name in rooms {
-            if let Some(room_clients) = clients.get_mut(nsp) {
-                if let Some(clients) = room_clients.get_mut(room_name) {
-                    clients.remove(sid);
+            if let Some(nsp_rooms) = all_rooms.get_mut(nsp) {
+                if let Some(room_sids) = nsp_rooms.get_mut(room_name) {
+                    room_sids.remove(sid);
                 }
             };
         }
@@ -178,17 +189,17 @@ impl Server {
 
             // TODO: support multiple namespace
 
-            match self.esid_nsp(&esid).await {
-                Some((sid, nsp)) => self.insert_clients(socket, nsp, sid).await,
+            match self.polling_transport_info(&esid).await {
+                Some((sid, nsp)) => self.insert_clients(socket, nsp, sid, false).await,
                 None => self.handle_connect(socket, &esid).await,
             };
         }
     }
 
-    async fn esid_nsp(&self, esid: &EngineSid) -> Option<(Sid, String)> {
-        // TODO: support multiple nsp
-        // currently one esid mapping to one sid,
-        // one sid mapping one nsp
+    // TODO: support multiple nsp
+    // currently one esid mapping to one sid,
+    // one sid mapping one nsp
+    async fn polling_transport_info(&self, esid: &EngineSid) -> Option<(Sid, String)> {
         let clients = self.clients.read().await;
         for sid in clients.keys() {
             if &SidGenerator::decode(sid) == esid {
@@ -209,7 +220,7 @@ impl Server {
         while let Some(Ok(packet)) = socket.next().await {
             if packet.packet_type == PacketId::Connect {
                 let nsp = packet.nsp.clone();
-                self.insert_clients(socket, nsp, sid).await;
+                self.insert_clients(socket, nsp, sid, true).await;
                 break;
             } else {
                 continue;
@@ -217,7 +228,13 @@ impl Server {
         }
     }
 
-    async fn insert_clients(self: &Arc<Self>, socket: Socket, nsp: String, sid: Sid) {
+    async fn insert_clients(
+        self: &Arc<Self>,
+        socket: Socket,
+        nsp: String,
+        sid: Sid,
+        handshake: bool,
+    ) {
         if let Some(on) = self.on.get(&nsp) {
             let client = ServerClient::new(
                 socket,
@@ -229,16 +246,16 @@ impl Server {
 
             poll_client(client.clone());
 
-            if client
-                .handshake(json!({ "sid": sid.clone() }).to_string())
-                .await
-                .is_ok()
-            {
-                let mut clients = self.clients.write().await;
-                let mut ns_clients = HashMap::new();
-                ns_clients.insert(nsp, client);
-                clients.insert(sid, ns_clients);
+            if handshake {
+                let _ = client
+                    .handshake(json!({ "sid": sid.clone() }).to_string())
+                    .await;
             }
+
+            let mut clients = self.clients.write().await;
+            let mut ns_clients = HashMap::new();
+            ns_clients.insert(nsp, client);
+            clients.insert(sid, ns_clients);
         }
     }
 
@@ -251,7 +268,7 @@ impl Server {
         let mut clients = self.rooms.write().await;
         for nsp_clients in clients.values_mut() {
             for room_clients in nsp_clients.values_mut() {
-                room_clients.retain(|sid, _| &SidGenerator::decode(sid) != esid)
+                room_clients.retain(|sid| &SidGenerator::decode(sid) != esid)
             }
         }
     }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Deref, pin::Pin, sync::Arc, time::Duration};
+use std::{collections::HashMap, fmt::Debug, ops::Deref, pin::Pin, sync::Arc, time::Duration};
 
 use futures_util::{future::BoxFuture, Stream, StreamExt};
 use rust_engineio::asynchronous::Sid;
@@ -19,6 +19,12 @@ pub struct Client {
     client: CommonClient<Self>,
     server: Arc<Server>,
     sid: Sid,
+}
+
+impl Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("sid").field(&self.sid).finish()
+    }
 }
 
 impl Client {
@@ -51,7 +57,7 @@ impl Client {
 
     pub async fn join<T: Into<String>>(&self, rooms: Vec<T>) {
         self.server
-            .join(&self.client.nsp, rooms, self.sid.clone(), self.clone())
+            .join(&self.client.nsp, rooms, self.sid.clone())
             .await;
     }
 
