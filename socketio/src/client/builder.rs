@@ -226,6 +226,7 @@ impl ClientBuilder {
     /// # Example
     /// ```rust
     /// use rust_socketio::{ClientBuilder, TransportType};
+    /// use serde_json::json;
     ///
     /// let socket = ClientBuilder::new("http://localhost:4200/")
     ///     // Use websockets to handshake and connect.
