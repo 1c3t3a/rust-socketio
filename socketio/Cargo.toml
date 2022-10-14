@@ -22,7 +22,7 @@ regex = "1.6.0"
 byte = "0.2.4"
 thiserror = "1.0"
 native-tls = "0.2.10"
-url = "2.2.2"
+url = "2.3.0"
 
 [dev-dependencies]
 cargo-tarpaulin = "0.18.5"

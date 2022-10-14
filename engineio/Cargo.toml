@@ -27,7 +27,7 @@ async-trait = "0.1.57"
 async-stream = "0.3.3"
 thiserror = "1.0"
 native-tls = "0.2.10"
-url = "2.2.2"
+url = "2.3.0"
 
 [dev-dependencies]
 cargo-tarpaulin = "0.18.5"
