@@ -1,7 +1,7 @@
 use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
-use super::reconnect::ReconnectClient;
-use crate::Client;
+use super::client::Client;
+use crate::RawClient;
 use native_tls::TlsConnector;
 use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
 use rust_engineio::header::{HeaderMap, HeaderValue};
@@ -55,11 +55,11 @@ impl ClientBuilder {
     /// will be used.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{ClientBuilder, Payload, Client};
+    /// use rust_socketio::{ClientBuilder, Payload, RawClient};
     /// use serde_json::json;
     ///
     ///
-    /// let callback = |payload: Payload, socket: Client| {
+    /// let callback = |payload: Payload, socket: RawClient| {
     ///            match payload {
     ///                Payload::String(str) => println!("Received: {}", str),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -149,7 +149,7 @@ impl ClientBuilder {
     #[allow(unused_mut)]
     pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
-        F: for<'a> FnMut(Payload, Client) + 'static + Sync + Send,
+        F: for<'a> FnMut(Payload, RawClient) + 'static + Sync + Send,
     {
         let callback = Callback::<SocketCallback>::new(callback);
         // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
@@ -177,7 +177,7 @@ impl ClientBuilder {
     #[allow(unused_mut)]
     pub fn on_any<F>(mut self, callback: F) -> Self
     where
-        F: for<'a> FnMut(Event, Payload, Client) + 'static + Sync + Send,
+        F: for<'a> FnMut(Event, Payload, RawClient) + 'static + Sync + Send,
     {
         let callback = Some(Callback::<SocketAnyCallback>::new(callback));
         // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
@@ -299,12 +299,11 @@ impl ClientBuilder {
     ///
     /// assert!(result.is_ok());
     /// ```
-    pub fn connect(self) -> Result<ReconnectClient> {
-        ReconnectClient::new(self)
+    pub fn connect(self) -> Result<Client> {
+        Client::new(self)
     }
 
-    //TODO: 0.3.X stabilize
-    pub(crate) fn connect_manual(self) -> Result<Client> {
+    pub fn connect_raw(self) -> Result<RawClient> {
         // Parse url here rather than in new to keep new returning Self.
         let mut url = Url::parse(&self.address)?;
 
@@ -330,7 +329,7 @@ impl ClientBuilder {
 
         let inner_socket = InnerSocket::new(engine_client)?;
 
-        let socket = Client::new(
+        let socket = RawClient::new(
             inner_socket,
             &self.namespace,
             self.on,

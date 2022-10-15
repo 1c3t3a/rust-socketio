@@ -198,7 +198,7 @@ impl ClientBuilder {
     /// Build socket with only a websocket transport
     pub fn build_websocket(mut self) -> Result<Client> {
         // SAFETY: Already a Url
-        let url = url::Url::parse(&self.url.to_string())?;
+        let url = url::Url::parse(self.url.as_ref())?;
 
         let headers: Option<http::HeaderMap> = if let Some(map) = self.headers.clone() {
             Some(map.try_into()?)
