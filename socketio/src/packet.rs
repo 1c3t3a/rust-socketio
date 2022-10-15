@@ -217,7 +217,7 @@ impl TryFrom<&Bytes> for Packet {
         };
 
         loop {
-            if !next_utf8.is_digit(10) {
+            if !next_utf8.is_ascii_digit() {
                 break;
             }
             char_buf.push(utf8_iter.next().unwrap()); // SAFETY: already peeked

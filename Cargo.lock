@@ -1405,7 +1405,7 @@ dependencies = [
 
 [[package]]
 name = "rust_socketio"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "adler32",
  "backoff",
