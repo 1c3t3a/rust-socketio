@@ -607,7 +607,7 @@ mod test {
             packet,
             Packet::new(
                 PacketId::Event,
-                nsp.clone(),
+                nsp,
                 Some("[\"auth\",\"success\"]".to_owned()),
                 None,
                 0,
@@ -621,7 +621,7 @@ mod test {
     #[test]
     fn socketio_polling_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
-        let socket = ClientBuilder::new(url.clone())
+        let socket = ClientBuilder::new(url)
             .transport_type(TransportType::Polling)
             .connect_raw()?;
         test_socketio_socket(socket, "/".to_owned())
@@ -630,7 +630,7 @@ mod test {
     #[test]
     fn socket_io_websocket_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
-        let socket = ClientBuilder::new(url.clone())
+        let socket = ClientBuilder::new(url)
             .transport_type(TransportType::Websocket)
             .connect_raw()?;
         test_socketio_socket(socket, "/".to_owned())
@@ -718,7 +718,7 @@ mod test {
             packet,
             Packet::new(
                 PacketId::BinaryEvent,
-                nsp.clone(),
+                nsp,
                 Some("\"test\"".to_owned()),
                 None,
                 1,
@@ -744,5 +744,5 @@ mod test {
         Ok(())
     }
 
-    // TODO: 0.3.X add secure socketio server
+    // TODO: add secure socketio server
 }
