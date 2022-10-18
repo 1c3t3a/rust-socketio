@@ -287,7 +287,7 @@ mod test {
 
         let utf8_data = "{\"token™\":\"123\"}".to_owned();
         let utf8_payload = format!("0/admin™,{}", utf8_data);
-        let payload = Bytes::from(utf8_payload.clone());
+        let payload = Bytes::from(utf8_payload);
         let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 

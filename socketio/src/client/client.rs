@@ -1,7 +1,5 @@
-#![allow(unused)]
 use std::{
-    ops::Deref,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, RwLock},
     time::Duration,
 };
 
@@ -37,6 +35,31 @@ impl Client {
         Ok(s)
     }
 
+    /// Sends a message to the server using the underlying `engine.io` protocol.
+    /// This message takes an event, which could either be one of the common
+    /// events like "message" or "error" or a custom event like "foo". But be
+    /// careful, the data string needs to be valid JSON. It's recommended to use
+    /// a library like `serde_json` to serialize the data properly.
+    ///
+    /// # Example
+    /// ```
+    /// use rust_socketio::{ClientBuilder, RawClient, Payload};
+    /// use serde_json::json;
+    ///
+    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///     .on("test", |payload: Payload, socket: RawClient| {
+    ///         println!("Received: {:#?}", payload);
+    ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
+    ///      })
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    /// let json_payload = json!({"token": 123});
+    ///
+    /// let result = socket.emit("foo", json_payload);
+    ///
+    /// assert!(result.is_ok());
+    /// ```
     pub fn emit<E, D>(&self, event: E, data: D) -> Result<()>
     where
         E: Into<Event>,
@@ -47,6 +70,41 @@ impl Client {
         client.emit(event, data)
     }
 
+    /// Sends a message to the server but `alloc`s an `ack` to check whether the
+    /// server responded in a given time span. This message takes an event, which
+    /// could either be one of the common events like "message" or "error" or a
+    /// custom event like "foo", as well as a data parameter. But be careful,
+    /// in case you send a [`Payload::String`], the string needs to be valid JSON.
+    /// It's even recommended to use a library like serde_json to serialize the data properly.
+    /// It also requires a timeout `Duration` in which the client needs to answer.
+    /// If the ack is acked in the correct time span, the specified callback is
+    /// called. The callback consumes a [`Payload`] which represents the data send
+    /// by the server.
+    ///
+    /// # Example
+    /// ```
+    /// use rust_socketio::{ClientBuilder, Payload, RawClient};
+    /// use serde_json::json;
+    /// use std::time::Duration;
+    /// use std::thread::sleep;
+    ///
+    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    /// let ack_callback = |message: Payload, socket: RawClient| {
+    ///     match message {
+    ///         Payload::String(str) => println!("{}", str),
+    ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
+    ///    }
+    /// };
+    ///
+    /// let payload = json!({"token": 123});
+    /// socket.emit_with_ack("foo", payload, Duration::from_secs(2), ack_callback).unwrap();
+    ///
+    /// sleep(Duration::from_secs(2));
+    /// ```
     pub fn emit_with_ack<F, E, D>(
         &self,
         event: E,
@@ -64,6 +122,31 @@ impl Client {
         client.emit_with_ack(event, data, timeout, callback)
     }
 
+    /// Disconnects this client from the server by sending a `socket.io` closing
+    /// packet.
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{ClientBuilder, Payload, RawClient};
+    /// use serde_json::json;
+    ///
+    /// fn handle_test(payload: Payload, socket: RawClient) {
+    ///     println!("Received: {:#?}", payload);
+    ///     socket.emit("test", json!({"hello": true})).expect("Server unreachable");
+    /// }
+    ///
+    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///     .on("test", handle_test)
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    /// let json_payload = json!({"token": 123});
+    ///
+    /// socket.emit("foo", json_payload);
+    ///
+    /// // disconnect from the server
+    /// socket.disconnect();
+    ///
+    /// ```
     pub fn disconnect(&self) -> Result<()> {
         let client = self.client.read()?;
         client.disconnect()
@@ -114,7 +197,7 @@ impl Client {
             // `Result::Ok`, the server receives a close frame so it's safe to
             // terminate
             for packet in self_clone.iter() {
-                if let e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
+                if let _e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
                     //TODO: 0.3.X handle errors
                     //TODO: logging error
                     let _ = self_clone.disconnect();
@@ -153,16 +236,12 @@ impl Iterator for Iter {
 #[cfg(test)]
 mod test {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::mpsc;
-    use std::thread::sleep;
 
     use super::*;
     use crate::error::Result;
-    use crate::{client::TransportType, payload::Payload, ClientBuilder};
-    use bytes::Bytes;
-    use native_tls::TlsConnector;
+    use crate::ClientBuilder;
     use serde_json::json;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     #[test]
     fn socket_io_reconnect_integration() -> Result<()> {
@@ -193,7 +272,7 @@ mod test {
             .on(Event::Close, move |_, _| {
                 close_num_clone.fetch_add(1, Ordering::SeqCst);
             })
-            .on("message", move |_, socket| {
+            .on("message", move |_, _socket| {
                 // test the iterator implementation and make sure there is a constant
                 // stream of packets, even when reconnecting
                 message_num_clone.fetch_add(1, Ordering::SeqCst);
@@ -204,14 +283,7 @@ mod test {
         let socket = socket.unwrap();
 
         // waiting for server to emit message
-        for _ in 0..10 {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            {
-                if load(&message_num) == 1 {
-                    break;
-                }
-            }
-        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
 
         assert_eq!(load(&connect_num), 1, "should connect once");
         assert_eq!(load(&message_num), 1, "should receive one");
@@ -266,22 +338,19 @@ mod test {
 
         // waiting for client to emit messages
         std::thread::sleep(Duration::from_millis(100));
-        let mut pre_num = 0;
-        {
-            let packets = packets.read().unwrap();
-            pre_num = packets.len();
-        }
+        let _packets = packets.read().unwrap();
+        let pre_num = _packets.len();
+        drop(_packets);
 
-        socket.disconnect();
+        let _ = socket.disconnect();
         socket.reconnect();
 
         // waiting for client to emit messages
         std::thread::sleep(Duration::from_millis(100));
-        let mut post_num = 0;
-        {
-            let packets = packets.read().unwrap();
-            post_num = packets.len();
-        }
+
+        let _packets = packets.read().unwrap();
+        let post_num = _packets.len();
+        drop(_packets);
 
         assert!(
             pre_num < post_num,
