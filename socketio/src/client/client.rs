@@ -338,9 +338,9 @@ mod test {
 
         // waiting for client to emit messages
         std::thread::sleep(Duration::from_millis(100));
-        let _packets = packets.read().unwrap();
-        let pre_num = _packets.len();
-        drop(_packets);
+        let lock = packets.read().unwrap();
+        let pre_num = lock.len();
+        drop(lock);
 
         let _ = socket.disconnect();
         socket.reconnect();
@@ -348,9 +348,9 @@ mod test {
         // waiting for client to emit messages
         std::thread::sleep(Duration::from_millis(100));
 
-        let _packets = packets.read().unwrap();
-        let post_num = _packets.len();
-        drop(_packets);
+        let lock = packets.read().unwrap();
+        let post_num = lock.len();
+        drop(lock);
 
         assert!(
             pre_num < post_num,
