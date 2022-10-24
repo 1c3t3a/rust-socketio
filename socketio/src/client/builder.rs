@@ -63,6 +63,7 @@ impl ClientBuilder {
     ///            match payload {
     ///                Payload::String(str) => println!("Received: {}", str),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///                Payload::Number(num) => println!("Received number: {}", num),
     ///            }
     /// };
     ///
@@ -139,6 +140,7 @@ impl ClientBuilder {
     ///            match payload {
     ///                Payload::String(str) => println!("Received: {}", str),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///                Payload::Number(num) => println!("Received number: {}", num),
     ///            }
     ///     })
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))

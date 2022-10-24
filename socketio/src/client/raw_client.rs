@@ -114,6 +114,41 @@ impl RawClient {
         self.socket.emit(&self.nsp, event.into(), data.into())
     }
 
+    /// Sends a message to the server using the underlying `engine.io` protocol.
+    /// This message takes an event, which could either be one of the common
+    /// events like "message" or "error" or a custom event like "foo". But be
+    /// careful, the data string needs to be valid JSON. It's recommended to use
+    /// a library like `serde_json` to serialize the data properly.
+    ///
+    /// # Example
+    /// ```
+    /// use rust_socketio::{ClientBuilder, RawClient, Payload};
+    /// use serde_json::json;
+    ///
+    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///     .on("test", |payload: Payload, socket: RawClient| {
+    ///         println!("Received: {:#?}", payload);
+    ///         socket.emit_multi("test", vec![json!({"hello": true})]).expect("Server unreachable");
+    ///      })
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    /// let payload = vec![json!({"token": 123})];
+    ///
+    /// let result = socket.emit_multi("foo", payload);
+    ///
+    /// assert!(result.is_ok());
+    /// ```
+    #[inline]
+    pub fn emit_multi<E, D>(&self, event: E, data: Vec<D>) -> Result<()>
+    where
+        E: Into<Event>,
+        D: Into<Payload>,
+    {
+        let data: Vec<Payload> = data.into_iter().map(|d| d.into()).collect();
+        self.socket.emit_multi(&self.nsp, event.into(), data)
+    }
+
     /// Disconnects this client from the server by sending a `socket.io` closing
     /// packet.
     /// # Example
@@ -178,6 +213,7 @@ impl RawClient {
     ///     match message {
     ///         Payload::String(str) => println!("{}", str),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
+    ///         Payload::Number(num) => println!("Received number {}", num),
     ///    }
     /// };
     ///
@@ -200,9 +236,86 @@ impl RawClient {
         D: Into<Payload>,
     {
         let id = thread_rng().gen_range(0..999);
-        let socket_packet =
-            self.socket
-                .build_packet_for_payload(data.into(), event.into(), &self.nsp, Some(id))?;
+        let socket_packet = InnerSocket::build_packet_for_payloads(
+            vec![data.into()],
+            Some(event.into()),
+            &self.nsp,
+            Some(id),
+            false,
+        )?;
+
+        let ack = Ack {
+            id,
+            time_started: Instant::now(),
+            timeout,
+            callback: Callback::<SocketCallback>::new(callback),
+        };
+
+        // add the ack to the tuple of outstanding acks
+        self.outstanding_acks.write()?.push(ack);
+
+        self.socket.send(socket_packet)?;
+        Ok(())
+    }
+
+    /// Sends a message to the server but `alloc`s an `ack` to check whether the
+    /// server responded in a given time span. This message takes an event, which
+    /// could either be one of the common events like "message" or "error" or a
+    /// custom event like "foo", as well as a data parameter. But be careful,
+    /// in case you send a [`Payload::String`], the string needs to be valid JSON.
+    /// It's even recommended to use a library like serde_json to serialize the data properly.
+    /// It also requires a timeout `Duration` in which the client needs to answer.
+    /// If the ack is acked in the correct time span, the specified callback is
+    /// called. The callback consumes a [`Payload`] which represents the data send
+    /// by the server.
+    ///
+    /// # Example
+    /// ```
+    /// use rust_socketio::{ClientBuilder, Payload, RawClient};
+    /// use serde_json::json;
+    /// use std::time::Duration;
+    /// use std::thread::sleep;
+    ///
+    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    /// let ack_callback = |message: Payload, socket: RawClient| {
+    ///     match message {
+    ///         Payload::String(str) => println!("{}", str),
+    ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
+    ///         Payload::Number(num) => println!("Received number: {}", num),
+    ///    }
+    /// };
+    ///
+    /// let payload = json!({"token": 123});
+    /// socket.emit_with_ack("foo", payload, Duration::from_secs(2), ack_callback).unwrap();
+    ///
+    /// sleep(Duration::from_secs(2));
+    /// ```
+    #[inline]
+    pub fn emit_multi_with_ack<F, E, D>(
+        &self,
+        event: E,
+        data: Vec<D>,
+        timeout: Duration,
+        callback: F,
+    ) -> Result<()>
+    where
+        F: for<'a> FnMut(Payload, RawClient) + 'static + Sync + Send,
+        E: Into<Event>,
+        D: Into<Payload>,
+    {
+        let id = thread_rng().gen_range(0..999);
+        let data: Vec<Payload> = data.into_iter().map(|d| d.into()).collect();
+        let socket_packet = InnerSocket::build_packet_for_payloads(
+            data,
+            Some(event.into()),
+            &self.nsp,
+            Some(id),
+            false,
+        )?;
 
         let ack = Ack {
             id,
@@ -434,6 +547,7 @@ mod test {
             .on("test", |msg, _| match msg {
                 Payload::String(str) => println!("Received string: {}", str),
                 Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
+                Payload::Number(num) => println!("Received number data: {:#?}", num),
             })
             .connect()?;
 

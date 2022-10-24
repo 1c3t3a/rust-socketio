@@ -118,24 +118,8 @@ impl From<&Packet> for Bytes {
 
         let mut buffer = BytesMut::new();
         buffer.put(string.as_ref());
-        if packet.attachments.as_ref().is_some() {
-            // check if an event type is present
-            let placeholder = if let Some(event_type) = packet.data.as_ref() {
-                format!(
-                    "[{},{{\"_placeholder\":true,\"num\":{}}}]",
-                    event_type,
-                    packet.attachment_count - 1,
-                )
-            } else {
-                format!(
-                    "[{{\"_placeholder\":true,\"num\":{}}}]",
-                    packet.attachment_count - 1,
-                )
-            };
 
-            // build the buffers
-            buffer.put(placeholder.as_ref());
-        } else if let Some(data) = packet.data.as_ref() {
+        if let Some(data) = packet.data.as_ref() {
             buffer.put(data.as_ref());
         }
 
@@ -540,7 +524,9 @@ mod test {
         let packet = Packet::new(
             PacketId::BinaryEvent,
             "/".to_owned(),
-            Some(String::from("\"hello\"")),
+            Some(String::from(
+                "[\"hello\",{\"_placeholder\":true,\"num\":0}]",
+            )),
             None,
             1,
             Some(vec![Bytes::from_static(&[1, 2, 3])]),
@@ -556,7 +542,9 @@ mod test {
         let packet = Packet::new(
             PacketId::BinaryEvent,
             "/admin".to_owned(),
-            Some(String::from("\"project:delete\"")),
+            Some(String::from(
+                "[\"project:delete\",{\"_placeholder\":true,\"num\":0}]",
+            )),
             Some(456),
             1,
             Some(vec![Bytes::from_static(&[1, 2, 3])]),
@@ -572,7 +560,7 @@ mod test {
         let packet = Packet::new(
             PacketId::BinaryAck,
             "/admin".to_owned(),
-            None,
+            Some(String::from("[{\"_placeholder\":true,\"num\":0}]")),
             Some(456),
             1,
             Some(vec![Bytes::from_static(&[3, 2, 1])]),

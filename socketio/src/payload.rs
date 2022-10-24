@@ -9,6 +9,7 @@ use bytes::Bytes;
 pub enum Payload {
     Binary(Bytes),
     String(String),
+    Number(usize),
 }
 
 impl From<&str> for Payload {

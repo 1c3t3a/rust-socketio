@@ -70,10 +70,14 @@ impl Socket {
         Ok(())
     }
 
-    /// Emits to certain event with given data. The data needs to be JSON,
-    /// otherwise this returns an `InvalidJson` error.
+    /// Emits to certain event with given data.
     pub fn emit(&self, nsp: &str, event: Event, data: Payload) -> Result<()> {
-        let socket_packet = self.build_packet_for_payload(data, event, nsp, None)?;
+        self.emit_multi(nsp, event, vec![data])
+    }
+
+    /// Emits to certain event with given vector of data.
+    pub fn emit_multi(&self, nsp: &str, event: Event, data: Vec<Payload>) -> Result<()> {
+        let socket_packet = Self::build_packet_for_payloads(data, Some(event), nsp, None, false)?;
 
         self.send(socket_packet)
     }
@@ -81,43 +85,62 @@ impl Socket {
     /// Returns a packet for a payload, could be used for bot binary and non binary
     /// events and acks. Convenance method.
     #[inline]
-    pub(crate) fn build_packet_for_payload<'a>(
-        &'a self,
-        payload: Payload,
-        event: Event,
-        nsp: &'a str,
+    pub(crate) fn build_packet_for_payloads(
+        payloads: Vec<Payload>,
+        event: Option<Event>,
+        nsp: &str,
         id: Option<i32>,
+        is_ack: bool,
     ) -> Result<Packet> {
-        match payload {
-            Payload::Binary(bin_data) => Ok(Packet::new(
-                if id.is_some() {
-                    PacketId::BinaryAck
-                } else {
-                    PacketId::BinaryEvent
-                },
-                nsp.to_owned(),
-                Some(serde_json::Value::String(event.into()).to_string()),
-                id,
-                1,
-                Some(vec![bin_data]),
-            )),
-            Payload::String(str_data) => {
-                let payload = if serde_json::from_str::<serde_json::Value>(&str_data).is_ok() {
-                    format!("[\"{}\",{}]", String::from(event), str_data)
-                } else {
-                    format!("[\"{}\",\"{}\"]", String::from(event), str_data)
-                };
+        let mut attachments = vec![];
 
-                Ok(Packet::new(
-                    PacketId::Event,
-                    nsp.to_owned(),
-                    Some(payload),
-                    id,
-                    0,
-                    None,
-                ))
+        let mut data = "[".to_owned();
+        if let Some(event) = event {
+            data += &format!("\"{}\"", String::from(event));
+            if !payloads.is_empty() {
+                data += ","
             }
         }
+
+        for (index, payload) in payloads.iter().enumerate() {
+            match payload {
+                Payload::Binary(bin_data) => {
+                    data += "{\"_placeholder\":true,\"num\":";
+                    data += &format!("{}", attachments.len());
+                    data += "}";
+                    attachments.push(bin_data.to_owned());
+                }
+                Payload::Number(num) => data += &format!("{}", num),
+                Payload::String(str_data) => {
+                    if serde_json::from_str::<serde_json::Value>(str_data).is_ok() {
+                        data += str_data
+                    } else {
+                        data += &format!("\"{}\"", str_data)
+                    };
+                }
+            };
+
+            if index < payloads.len() - 1 {
+                data += ",";
+            }
+        }
+        data += "]";
+
+        let packet_type = match attachments.is_empty() {
+            true if is_ack => PacketId::Ack,
+            true => PacketId::Event,
+            false if is_ack => PacketId::BinaryAck,
+            false => PacketId::BinaryEvent,
+        };
+
+        Ok(Packet::new(
+            packet_type,
+            nsp.to_owned(),
+            Some(data),
+            id,
+            attachments.len() as u8,
+            Some(attachments),
+        ))
     }
 
     pub(crate) fn poll(&self) -> Result<Option<Packet>> {
@@ -196,5 +219,111 @@ impl Socket {
 
     fn is_engineio_connected(&self) -> Result<bool> {
         Ok(self.engine_client.is_connected()?)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_build_multiple_payloads_packet() {
+        let packet = Socket::build_packet_for_payloads(
+            vec![crate::Payload::Binary(Bytes::from_static(&[1, 2, 3]))],
+            Some("hello".into()),
+            "/",
+            None,
+            false,
+        );
+
+        assert_eq!(
+            Bytes::from(&packet.unwrap()),
+            "51-[\"hello\",{\"_placeholder\":true,\"num\":0}]"
+                .to_string()
+                .into_bytes()
+        );
+
+        let packet = Socket::build_packet_for_payloads(
+            vec![crate::Payload::Binary(Bytes::from_static(&[1, 2, 3]))],
+            Some("project:delete".into()),
+            "/admin",
+            Some(456),
+            false,
+        );
+
+        assert_eq!(
+            Bytes::from(&packet.unwrap()),
+            "51-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0}]"
+                .to_string()
+                .into_bytes()
+        );
+
+        let packet = Socket::build_packet_for_payloads(
+            vec![crate::Payload::Binary(Bytes::from_static(&[3, 2, 1]))],
+            None,
+            "/admin",
+            Some(456),
+            true,
+        );
+
+        assert_eq!(
+            Bytes::from(&packet.unwrap()),
+            "61-/admin,456[{\"_placeholder\":true,\"num\":0}]"
+                .to_string()
+                .into_bytes()
+        );
+
+        let packet =
+            Socket::build_packet_for_payloads(vec![], Some("hello".into()), "/", None, false);
+        assert_eq!(
+            Bytes::from(&packet.unwrap()),
+            "2[\"hello\"]".to_string().into_bytes()
+        );
+
+        let payloads = vec![
+            crate::Payload::Binary(Bytes::from_static(&[1, 2, 3])),
+            "1".into(),
+        ];
+        let packet =
+            Socket::build_packet_for_payloads(payloads, Some("hello".into()), "/", None, false);
+
+        assert_eq!(
+            Bytes::from(&packet.unwrap()),
+            "51-[\"hello\",{\"_placeholder\":true,\"num\":0},1]"
+                .to_string()
+                .into_bytes()
+        );
+
+        let payloads = vec![
+            crate::Payload::Binary(Bytes::from_static(&[1, 2, 3])),
+            crate::Payload::Binary(Bytes::from_static(&[1, 2, 3])),
+        ];
+        let packet = Socket::build_packet_for_payloads(
+            payloads,
+            Some("project:delete".into()),
+            "/admin",
+            Some(456),
+            false,
+        );
+
+        assert_eq!(
+            Bytes::from(&packet.unwrap()),
+            "52-/admin,456[\"project:delete\",{\"_placeholder\":true,\"num\":0},{\"_placeholder\":true,\"num\":1}]"
+                .to_string()
+                .into_bytes()
+        );
+
+        let payloads = vec![
+            crate::Payload::Number(4),
+            crate::Payload::Binary(Bytes::from_static(&[3, 2, 1])),
+        ];
+        let packet = Socket::build_packet_for_payloads(payloads, None, "/admin", Some(456), true);
+
+        assert_eq!(
+            Bytes::from(&packet.unwrap()),
+            "61-/admin,456[4,{\"_placeholder\":true,\"num\":0}]"
+                .to_string()
+                .into_bytes()
+        );
     }
 }
