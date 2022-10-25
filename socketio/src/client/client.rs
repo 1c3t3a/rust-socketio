@@ -132,7 +132,6 @@ impl Client {
     ///     match message {
     ///         Payload::String(str) => println!("{}", str),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
-    ///         Payload::Number(num) => println!("Received number: {}", num),
     ///    }
     /// };
     ///
@@ -185,7 +184,6 @@ impl Client {
     ///     match message {
     ///         Payload::String(str) => println!("{}", str),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
-    ///         Payload::Number(num) => println!("Received number: {}", num),
     ///    }
     /// };
     ///

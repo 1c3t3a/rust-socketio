@@ -13,7 +13,6 @@ fn main() {
         match payload {
             Payload::String(str) => println!("Received string: {}", str),
             Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
-            Payload::Number(num) => println!("Received number: {}", num),
         }
         socket
             .emit_multi("test", vec![json!({"got ack": true})])

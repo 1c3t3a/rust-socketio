@@ -213,7 +213,6 @@ impl RawClient {
     ///     match message {
     ///         Payload::String(str) => println!("{}", str),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
-    ///         Payload::Number(num) => println!("Received number {}", num),
     ///    }
     /// };
     ///
@@ -285,7 +284,6 @@ impl RawClient {
     ///     match message {
     ///         Payload::String(str) => println!("{}", str),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
-    ///         Payload::Number(num) => println!("Received number: {}", num),
     ///    }
     /// };
     ///
@@ -547,7 +545,6 @@ mod test {
             .on("test", |msg, _| match msg {
                 Payload::String(str) => println!("Received string: {}", str),
                 Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
-                Payload::Number(num) => println!("Received number data: {:#?}", num),
             })
             .connect()?;
 

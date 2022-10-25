@@ -9,7 +9,6 @@ use bytes::Bytes;
 pub enum Payload {
     Binary(Bytes),
     String(String),
-    Number(usize),
 }
 
 impl From<&str> for Payload {
@@ -74,5 +73,11 @@ mod tests {
 
         let sut = Payload::from(Bytes::from_static(&[1, 2, 3]));
         assert_eq!(Payload::Binary(Bytes::from_static(&[1, 2, 3])), sut);
+
+        let sut = Payload::from(json!(5));
+        assert_eq!(Payload::String("5".to_owned()), sut);
+
+        let sut = Payload::from(json!("5"));
+        assert_eq!(Payload::String("\"5\"".to_owned()), sut);
     }
 }

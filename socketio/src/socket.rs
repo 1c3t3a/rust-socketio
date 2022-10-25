@@ -132,7 +132,6 @@ impl Socket {
     fn encode_payloads(data: &mut String, payloads: Vec<Payload>, attachments: &mut Vec<Bytes>) {
         for (index, payload) in payloads.iter().enumerate() {
             match payload {
-                Payload::Number(num) => *data += &format!("{}", num),
                 Payload::Binary(bin_data) => {
                     *data += "{\"_placeholder\":true,\"num\":";
                     *data += &format!("{}", attachments.len());
@@ -235,6 +234,8 @@ impl Socket {
 
 #[cfg(test)]
 mod test {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
@@ -325,14 +326,15 @@ mod test {
         );
 
         let payloads = vec![
-            crate::Payload::Number(4),
+            crate::Payload::String(json!(3).to_string()),
+            crate::Payload::String(json!("4").to_string()),
             crate::Payload::Binary(Bytes::from_static(&[3, 2, 1])),
         ];
         let packet = Socket::build_packet_for_payloads(payloads, None, "/admin", Some(456), true);
 
         assert_eq!(
             Bytes::from(&packet.unwrap()),
-            "61-/admin,456[4,{\"_placeholder\":true,\"num\":0}]"
+            "61-/admin,456[3,\"4\",{\"_placeholder\":true,\"num\":0}]"
                 .to_string()
                 .into_bytes()
         );
