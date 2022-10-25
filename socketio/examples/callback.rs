@@ -15,7 +15,7 @@ fn main() {
             Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
         }
         socket
-            .emit_multi("test", vec![json!({"got ack": true})])
+            .emit("test", json!({"got ack": true}))
             .expect("Server unreachable")
     };
 
