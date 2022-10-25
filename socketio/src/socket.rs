@@ -92,39 +92,7 @@ impl Socket {
         id: Option<i32>,
         is_ack: bool,
     ) -> Result<Packet> {
-        let mut attachments = vec![];
-
-        let mut data = "[".to_owned();
-        if let Some(event) = event {
-            data += &format!("\"{}\"", String::from(event));
-            if !payloads.is_empty() {
-                data += ","
-            }
-        }
-
-        for (index, payload) in payloads.iter().enumerate() {
-            match payload {
-                Payload::Binary(bin_data) => {
-                    data += "{\"_placeholder\":true,\"num\":";
-                    data += &format!("{}", attachments.len());
-                    data += "}";
-                    attachments.push(bin_data.to_owned());
-                }
-                Payload::Number(num) => data += &format!("{}", num),
-                Payload::String(str_data) => {
-                    if serde_json::from_str::<serde_json::Value>(str_data).is_ok() {
-                        data += str_data
-                    } else {
-                        data += &format!("\"{}\"", str_data)
-                    };
-                }
-            };
-
-            if index < payloads.len() - 1 {
-                data += ",";
-            }
-        }
-        data += "]";
+        let (data, attachments) = Self::encode_data(event, payloads);
 
         let packet_type = match attachments.is_empty() {
             true if is_ack => PacketId::Ack,
@@ -141,6 +109,49 @@ impl Socket {
             attachments.len() as u8,
             Some(attachments),
         ))
+    }
+
+    fn encode_data(event: Option<Event>, payloads: Vec<Payload>) -> (String, Vec<Bytes>) {
+        let mut attachments = vec![];
+        let mut data = "[".to_owned();
+
+        if let Some(event) = event {
+            data += &format!("\"{}\"", String::from(event));
+            if !payloads.is_empty() {
+                data += ","
+            }
+        }
+
+        Self::encode_payloads(&mut data, payloads, &mut attachments);
+
+        data += "]";
+
+        (data, attachments)
+    }
+
+    fn encode_payloads(data: &mut String, payloads: Vec<Payload>, attachments: &mut Vec<Bytes>) {
+        for (index, payload) in payloads.iter().enumerate() {
+            match payload {
+                Payload::Number(num) => *data += &format!("{}", num),
+                Payload::Binary(bin_data) => {
+                    *data += "{\"_placeholder\":true,\"num\":";
+                    *data += &format!("{}", attachments.len());
+                    *data += "}";
+                    attachments.push(bin_data.to_owned());
+                }
+                Payload::String(str_data) => {
+                    if serde_json::from_str::<serde_json::Value>(str_data).is_ok() {
+                        *data += str_data
+                    } else {
+                        *data += &format!("\"{}\"", str_data)
+                    };
+                }
+            };
+
+            if index < payloads.len() - 1 {
+                *data += ",";
+            }
+        }
     }
 
     pub(crate) fn poll(&self) -> Result<Option<Packet>> {
