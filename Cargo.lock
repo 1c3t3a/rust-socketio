@@ -1418,6 +1418,7 @@ dependencies = [
  "rand",
  "regex",
  "rust_engineio",
+ "serde",
  "serde_json",
  "thiserror",
  "url",

@@ -70,48 +70,11 @@ impl Client {
         client.emit(event, data)
     }
 
-    /// Sends a message to the server using the underlying `engine.io` protocol.
-    /// This message takes an event, which could either be one of the common
-    /// events like "message" or "error" or a custom event like "foo". But be
-    /// careful, the data string needs to be valid JSON. It's recommended to use
-    /// a library like `serde_json` to serialize the data properly.
-    ///
-    /// # Example
-    /// ```
-    /// use rust_socketio::{ClientBuilder, RawClient, Payload};
-    /// use serde_json::json;
-    ///
-    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, socket: RawClient| {
-    ///         println!("Received: {:#?}", payload);
-    ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
-    ///      })
-    ///     .connect()
-    ///     .expect("connection failed");
-    ///
-    /// let payload = vec![json!({"token": 123})];
-    ///
-    /// let result = socket.emit_multi("foo", payload);
-    ///
-    /// assert!(result.is_ok());
-    /// ```
-    pub fn emit_multi<E, D>(&self, event: E, data: Vec<D>) -> Result<()>
-    where
-        E: Into<Event>,
-        D: Into<Payload>,
-    {
-        let client = self.client.read()?;
-        // TODO(#230): like js client, buffer emit, resend after reconnect
-        client.emit_multi(event, data)
-    }
-
     /// Sends a message to the server but `alloc`s an `ack` to check whether the
     /// server responded in a given time span. This message takes an event, which
     /// could either be one of the common events like "message" or "error" or a
-    /// custom event like "foo", as well as a data parameter. But be careful,
-    /// in case you send a [`Payload::String`], the string needs to be valid JSON.
-    /// It's even recommended to use a library like serde_json to serialize the data properly.
-    /// It also requires a timeout `Duration` in which the client needs to answer.
+    /// custom event like "foo", as well as a data parameter.
+    /// It requires a timeout `Duration` in which the client needs to answer.
     /// If the ack is acked in the correct time span, the specified callback is
     /// called. The callback consumes a [`Payload`] which represents the data send
     /// by the server.
@@ -130,8 +93,10 @@ impl Client {
     ///
     /// let ack_callback = |message: Payload, socket: RawClient| {
     ///     match message {
-    ///         Payload::String(str) => println!("{}", str),
+    ///         Payload::Json(data) => println!("{:?}", data),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
+    ///         Payload::Multi(vec) => println!("Received multi: {:?}", vec),
+    ///         _ => {}
     ///    }
     /// };
     ///
@@ -155,58 +120,6 @@ impl Client {
         let client = self.client.read()?;
         // TODO(#230): like js client, buffer emit, resend after reconnect
         client.emit_with_ack(event, data, timeout, callback)
-    }
-
-    /// Sends a message to the server but `alloc`s an `ack` to check whether the
-    /// server responded in a given time span. This message takes an event, which
-    /// could either be one of the common events like "message" or "error" or a
-    /// custom event like "foo", as well as a data parameter. But be careful,
-    /// in case you send a [`Payload::String`], the string needs to be valid JSON.
-    /// It's even recommended to use a library like serde_json to serialize the data properly.
-    /// It also requires a timeout `Duration` in which the client needs to answer.
-    /// If the ack is acked in the correct time span, the specified callback is
-    /// called. The callback consumes a [`Payload`] which represents the data send
-    /// by the server.
-    ///
-    /// # Example
-    /// ```
-    /// use rust_socketio::{ClientBuilder, Payload, RawClient};
-    /// use serde_json::json;
-    /// use std::time::Duration;
-    /// use std::thread::sleep;
-    ///
-    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
-    ///     .connect()
-    ///     .expect("connection failed");
-    ///
-    /// let ack_callback = |message: Payload, socket: RawClient| {
-    ///     match message {
-    ///         Payload::String(str) => println!("{}", str),
-    ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
-    ///    }
-    /// };
-    ///
-    /// let payload = vec![json!({"token": 123})];
-    /// socket.emit_multi_with_ack("foo", payload, Duration::from_secs(2), ack_callback).unwrap();
-    ///
-    /// sleep(Duration::from_secs(2));
-    /// ```
-    pub fn emit_multi_with_ack<F, E, D>(
-        &self,
-        event: E,
-        data: Vec<D>,
-        timeout: Duration,
-        callback: F,
-    ) -> Result<()>
-    where
-        F: for<'a> FnMut(Payload, RawClient) + 'static + Sync + Send,
-        E: Into<Event>,
-        D: Into<Payload>,
-    {
-        let client = self.client.read()?;
-        // TODO(#230): like js client, buffer emit, resend after reconnect
-        client.emit_multi_with_ack(event, data, timeout, callback)
     }
 
     /// Disconnects this client from the server by sending a `socket.io` closing

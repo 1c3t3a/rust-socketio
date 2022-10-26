@@ -1,10 +1,16 @@
 use super::callback::Callback;
-use crate::packet::{Packet, PacketId};
 pub(crate) use crate::{event::Event, payload::Payload};
+use crate::{
+    packet::{Packet, PacketId},
+    payload::RawPayload,
+    Error,
+};
+use bytes::Bytes;
 use rand::{thread_rng, Rng};
 
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
 use crate::error::Result;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::{Arc, RwLock};
@@ -70,10 +76,15 @@ impl RawClient {
         // Connect the underlying socket
         self.socket.connect()?;
 
-        let auth = self.auth.as_ref().map(|data| data.to_string());
-
         // construct the opening packet
-        let open_packet = Packet::new(PacketId::Connect, self.nsp.clone(), auth, None, 0, None);
+        let open_packet = Packet::new(
+            PacketId::Connect,
+            self.nsp.clone(),
+            self.auth.clone(),
+            None,
+            0,
+            None,
+        );
 
         self.socket.send(open_packet)?;
 
@@ -114,41 +125,6 @@ impl RawClient {
         self.socket.emit(&self.nsp, event.into(), data.into())
     }
 
-    /// Sends a message to the server using the underlying `engine.io` protocol.
-    /// This message takes an event, which could either be one of the common
-    /// events like "message" or "error" or a custom event like "foo". But be
-    /// careful, the data string needs to be valid JSON. It's recommended to use
-    /// a library like `serde_json` to serialize the data properly.
-    ///
-    /// # Example
-    /// ```
-    /// use rust_socketio::{ClientBuilder, RawClient, Payload};
-    /// use serde_json::json;
-    ///
-    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, socket: RawClient| {
-    ///         println!("Received: {:#?}", payload);
-    ///         socket.emit_multi("test", vec![json!({"hello": true})]).expect("Server unreachable");
-    ///      })
-    ///     .connect()
-    ///     .expect("connection failed");
-    ///
-    /// let payload = vec![json!({"token": 123})];
-    ///
-    /// let result = socket.emit_multi("foo", payload);
-    ///
-    /// assert!(result.is_ok());
-    /// ```
-    #[inline]
-    pub fn emit_multi<E, D>(&self, event: E, data: Vec<D>) -> Result<()>
-    where
-        E: Into<Event>,
-        D: Into<Payload>,
-    {
-        let data: Vec<Payload> = data.into_iter().map(|d| d.into()).collect();
-        self.socket.emit_multi(&self.nsp, event.into(), data)
-    }
-
     /// Disconnects this client from the server by sending a `socket.io` closing
     /// packet.
     /// # Example
@@ -182,7 +158,7 @@ impl RawClient {
         let _ = self.socket.send(disconnect_packet);
         self.socket.disconnect()?;
 
-        let _ = self.callback(&Event::Close, ""); // trigger on_close
+        let _ = self.callback(&Event::Close, json!("")); // trigger on_close
         Ok(())
     }
 
@@ -190,8 +166,8 @@ impl RawClient {
     /// server responded in a given time span. This message takes an event, which
     /// could either be one of the common events like "message" or "error" or a
     /// custom event like "foo", as well as a data parameter. But be careful,
-    /// in case you send a [`Payload::String`], the string needs to be valid JSON.
-    /// It's even recommended to use a library like serde_json to serialize the data properly.
+    /// in case you send a [`Payload::Json`], the value needs to be valid JSON.
+    /// It's serde_json::Value.
     /// It also requires a timeout `Duration` in which the client needs to answer.
     /// If the ack is acked in the correct time span, the specified callback is
     /// called. The callback consumes a [`Payload`] which represents the data send
@@ -211,8 +187,9 @@ impl RawClient {
     ///
     /// let ack_callback = |message: Payload, socket: RawClient| {
     ///     match message {
-    ///         Payload::String(str) => println!("{}", str),
+    ///         Payload::Json(data) => println!("{:?}", data),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
+    ///         _ => {}
     ///    }
     /// };
     ///
@@ -235,80 +212,8 @@ impl RawClient {
         D: Into<Payload>,
     {
         let id = thread_rng().gen_range(0..999);
-        let socket_packet = InnerSocket::build_packet_for_payloads(
-            vec![data.into()],
-            Some(event.into()),
-            &self.nsp,
-            Some(id),
-            false,
-        )?;
-
-        let ack = Ack {
-            id,
-            time_started: Instant::now(),
-            timeout,
-            callback: Callback::<SocketCallback>::new(callback),
-        };
-
-        // add the ack to the tuple of outstanding acks
-        self.outstanding_acks.write()?.push(ack);
-
-        self.socket.send(socket_packet)?;
-        Ok(())
-    }
-
-    /// Sends a message to the server but `alloc`s an `ack` to check whether the
-    /// server responded in a given time span. This message takes an event, which
-    /// could either be one of the common events like "message" or "error" or a
-    /// custom event like "foo", as well as a data parameter. But be careful,
-    /// in case you send a [`Payload::String`], the string needs to be valid JSON.
-    /// It's even recommended to use a library like serde_json to serialize the data properly.
-    /// It also requires a timeout `Duration` in which the client needs to answer.
-    /// If the ack is acked in the correct time span, the specified callback is
-    /// called. The callback consumes a [`Payload`] which represents the data send
-    /// by the server.
-    ///
-    /// # Example
-    /// ```
-    /// use rust_socketio::{ClientBuilder, Payload, RawClient};
-    /// use serde_json::json;
-    /// use std::time::Duration;
-    /// use std::thread::sleep;
-    ///
-    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
-    ///     .connect()
-    ///     .expect("connection failed");
-    ///
-    /// let ack_callback = |message: Payload, socket: RawClient| {
-    ///     match message {
-    ///         Payload::String(str) => println!("{}", str),
-    ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
-    ///    }
-    /// };
-    ///
-    /// let payload = json!({"token": 123});
-    /// socket.emit_with_ack("foo", payload, Duration::from_secs(2), ack_callback).unwrap();
-    ///
-    /// sleep(Duration::from_secs(2));
-    /// ```
-    #[inline]
-    pub fn emit_multi_with_ack<F, E, D>(
-        &self,
-        event: E,
-        data: Vec<D>,
-        timeout: Duration,
-        callback: F,
-    ) -> Result<()>
-    where
-        F: for<'a> FnMut(Payload, RawClient) + 'static + Sync + Send,
-        E: Into<Event>,
-        D: Into<Payload>,
-    {
-        let id = thread_rng().gen_range(0..999);
-        let data: Vec<Payload> = data.into_iter().map(|d| d.into()).collect();
-        let socket_packet = InnerSocket::build_packet_for_payloads(
-            data,
+        let socket_packet = InnerSocket::build_packet_for_payload(
+            data.into(),
             Some(event.into()),
             &self.nsp,
             Some(id),
@@ -333,7 +238,7 @@ impl RawClient {
         loop {
             match self.socket.poll() {
                 Err(err) => {
-                    self.callback(&Event::Error, err.to_string())?;
+                    self.callback(&Event::Error, json!(err.to_string()))?;
                     return Err(err);
                 }
                 Ok(Some(packet)) => {
@@ -388,12 +293,9 @@ impl RawClient {
                     to_be_removed.push(index);
 
                     if ack.time_started.elapsed() < ack.timeout {
-                        if let Some(ref payload) = socket_packet.data {
-                            ack.callback.deref_mut()(
-                                Payload::String(payload.to_owned()),
-                                self.clone(),
-                            );
-                        }
+                        let data = socket_packet.data.clone();
+                        ack.callback.deref_mut()(data.into(), self.clone());
+
                         if let Some(ref attachments) = socket_packet.attachments {
                             if let Some(payload) = attachments.get(0) {
                                 ack.callback.deref_mut()(
@@ -417,51 +319,95 @@ impl RawClient {
     /// Handles a binary event.
     #[inline]
     fn handle_binary_event(&self, packet: &Packet) -> Result<()> {
-        let event = if let Some(string_data) = &packet.data {
-            string_data.replace('\"', "").into()
-        } else {
-            Event::Message
+        let event = match &packet.data {
+            Some(Value::String(e)) => Event::from(e.to_owned()),
+            Some(Value::Array(array)) => match array.first() {
+                Some(Value::String(e)) => Event::from(e.to_owned()),
+                _ => Event::Message,
+            },
+            _ => Event::Message,
         };
 
-        if let Some(attachments) = &packet.attachments {
-            if let Some(binary_payload) = attachments.get(0) {
-                self.callback(&event, Payload::Binary(binary_payload.to_owned()))?;
+        let payload = match &packet.data {
+            Some(Value::Array(vec)) if vec.len() == 1 => {
+                let value = vec.get(0).unwrap();
+                Self::binary_payload(value, &packet.attachments)?
+            }
+            Some(Value::Array(vec)) => Self::binary_payloads(vec, &packet.attachments)?,
+            _ => Payload::Multi(vec![]),
+        };
+
+        self.callback(&event, payload)?;
+        Ok(())
+    }
+
+    fn binary_payload(value: &Value, attachments: &Option<Vec<Bytes>>) -> Result<Payload> {
+        if value.get("_placeholder").is_some() {
+            if let Some(atts) = attachments {
+                let b = atts.get(0).ok_or(Error::InvalidPacket())?.to_owned();
+                Ok(Payload::Binary(b))
+            } else {
+                Err(Error::InvalidPacket())
+            }
+        } else {
+            Ok(Payload::Json(value.to_owned()))
+        }
+    }
+
+    fn binary_payloads(vec: &Vec<Value>, attachments: &Option<Vec<Bytes>>) -> Result<Payload> {
+        let mut vec_payload = vec![];
+        for value in vec {
+            if value.get("_placeholder").is_some() {
+                let index = value
+                    .get("num")
+                    .ok_or(Error::InvalidPacket())?
+                    .as_u64()
+                    .ok_or(Error::InvalidPacket())? as usize;
+                if let Some(atts) = attachments {
+                    let b = atts.get(index).ok_or(Error::InvalidPacket())?.to_owned();
+                    vec_payload.push(RawPayload::Binary(b));
+                } else {
+                    return Err(Error::InvalidPacket());
+                }
+            } else {
+                vec_payload.push(RawPayload::Json(value.to_owned()))
             }
         }
-        Ok(())
+        Ok(Payload::Multi(vec_payload))
     }
 
     /// A method for handling the Event Client Packets.
     // this could only be called with an event
     fn handle_event(&self, packet: &Packet) -> Result<()> {
-        // unwrap the potential data
-        if let Some(data) = &packet.data {
-            // the string must be a valid json array with the event at index 0 and the
-            // payload at index 1. if no event is specified, the message callback is used
-            if let Ok(serde_json::Value::Array(contents)) =
-                serde_json::from_str::<serde_json::Value>(data)
-            {
-                let event: Event = if contents.len() > 1 {
-                    contents
-                        .get(0)
-                        .map(|value| match value {
-                            serde_json::Value::String(ev) => ev,
-                            _ => "message",
-                        })
-                        .unwrap_or("message")
-                        .into()
-                } else {
-                    Event::Message
-                };
-                self.callback(
-                    &event,
+        // the string must be a valid json array with the event at index 0 and the
+        // payload at index 1. if no event is specified, the message callback is used
+        if let Some(serde_json::Value::Array(contents)) = &packet.data {
+            let event: Event = if contents.len() > 1 {
+                contents
+                    .get(0)
+                    .map(|value| match value {
+                        serde_json::Value::String(ev) => ev,
+                        _ => "message",
+                    })
+                    .unwrap_or("message")
+                    .into()
+            } else {
+                Event::Message
+            };
+
+            let payload = if contents.len() > 1 {
+                Payload::Multi(contents[1..].iter().map(|v| v.to_owned().into()).collect())
+            } else {
+                Payload::Json(
                     contents
                         .get(1)
                         .unwrap_or_else(|| contents.get(0).unwrap())
-                        .to_string(),
-                )?;
-            }
+                        .clone(),
+                )
+            };
+            self.callback(&event, payload)?;
         }
+
         Ok(())
     }
 
@@ -474,34 +420,27 @@ impl RawClient {
             match packet.packet_type {
                 PacketId::Ack | PacketId::BinaryAck => {
                     if let Err(err) = self.handle_ack(packet) {
-                        self.callback(&Event::Error, err.to_string())?;
+                        self.callback(&Event::Error, json!(err.to_string()))?;
                         return Err(err);
                     }
                 }
                 PacketId::BinaryEvent => {
                     if let Err(err) = self.handle_binary_event(packet) {
-                        self.callback(&Event::Error, err.to_string())?;
+                        self.callback(&Event::Error, json!(err.to_string()))?;
                     }
                 }
                 PacketId::Connect => {
-                    self.callback(&Event::Connect, "")?;
+                    self.callback(&Event::Connect, json!(""))?;
                 }
                 PacketId::Disconnect => {
-                    self.callback(&Event::Close, "")?;
+                    self.callback(&Event::Close, json!(""))?;
                 }
                 PacketId::ConnectError => {
-                    self.callback(
-                        &Event::Error,
-                        String::from("Received an ConnectError frame: ")
-                            + &packet
-                                .clone()
-                                .data
-                                .unwrap_or_else(|| String::from("\"No error message provided\"")),
-                    )?;
+                    self.callback(&Event::Error, json!("ConnectError"))?;
                 }
                 PacketId::Event => {
                     if let Err(err) = self.handle_event(packet) {
-                        self.callback(&Event::Error, err.to_string())?;
+                        self.callback(&Event::Error, json!(err.to_string()))?;
                     }
                 }
             }
@@ -543,36 +482,29 @@ mod test {
 
         let socket = ClientBuilder::new(url)
             .on("test", |msg, _| match msg {
-                Payload::String(str) => println!("Received string: {}", str),
+                Payload::Json(data) => println!("Received string: {}", data),
                 Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
+                _ => {}
             })
             .connect()?;
 
         let payload = json!({"token": 123});
-        let result = socket.emit("test", Payload::String(payload.to_string()));
+        let result = socket.emit("test", json!(payload.to_string()));
 
         assert!(result.is_ok());
 
         let ack_callback = move |message: Payload, socket: RawClient| {
-            let result = socket.emit(
-                "test",
-                Payload::String(json!({"got ack": true}).to_string()),
-            );
+            let result = socket.emit("test", json!({"got ack": true}));
             assert!(result.is_ok());
 
             println!("Yehaa! My ack got acked?");
-            if let Payload::String(str) = message {
+            if let Payload::Json(data) = message {
                 println!("Received string Ack");
-                println!("Ack data: {}", str);
+                println!("Ack data: {}", data);
             }
         };
 
-        let ack = socket.emit_with_ack(
-            "test",
-            Payload::String(payload.to_string()),
-            Duration::from_secs(1),
-            ack_callback,
-        );
+        let ack = socket.emit_with_ack("test", payload, Duration::from_secs(1), ack_callback);
         assert!(ack.is_ok());
 
         sleep(Duration::from_secs(2));
@@ -672,13 +604,13 @@ mod test {
             .namespace("/")
             .auth(json!({ "password": "123" }))
             .on("auth", |payload, _client| {
-                if let Payload::String(msg) = payload {
-                    println!("{}", msg);
+                if let Payload::Json(data) = payload {
+                    println!("{}", data);
                 }
             })
             .on_any(move |event, payload, _client| {
-                if let Payload::String(str) = payload {
-                    println!("{} {}", String::from(event.clone()), str);
+                if let Payload::Json(data) = payload {
+                    println!("{} {}", String::from(event.clone()), data);
                 }
                 tx.send(String::from(event)).unwrap();
             })
@@ -719,7 +651,7 @@ mod test {
             Packet::new(
                 PacketId::Event,
                 nsp,
-                Some("[\"auth\",\"success\"]".to_owned()),
+                Some(json!(["auth", "success"])),
                 None,
                 0,
                 None
@@ -781,7 +713,7 @@ mod test {
             Packet::new(
                 PacketId::Event,
                 nsp.clone(),
-                Some("[\"Hello from the message event!\"]".to_owned()),
+                Some(json!(["Hello from the message event!"])),
                 None,
                 0,
                 None,
@@ -798,7 +730,7 @@ mod test {
             Packet::new(
                 PacketId::Event,
                 nsp.clone(),
-                Some("[\"test\",\"Hello from the test event!\"]".to_owned()),
+                Some(json!(["test", "Hello from the test event!"])),
                 None,
                 0,
                 None
@@ -814,7 +746,7 @@ mod test {
             Packet::new(
                 PacketId::BinaryEvent,
                 nsp.clone(),
-                None,
+                Some(json!([{"_placeholder": true, "num":0}])),
                 None,
                 1,
                 Some(vec![Bytes::from_static(&[4, 5, 6])]),
@@ -830,23 +762,28 @@ mod test {
             Packet::new(
                 PacketId::BinaryEvent,
                 nsp,
-                Some("\"test\"".to_owned()),
+                Some(
+                    json!(["test", {"_placeholder": true, "num":0}, "4", {"_placeholder": true, "num":1}])
+                ),
                 None,
-                1,
-                Some(vec![Bytes::from_static(&[1, 2, 3])]),
+                2,
+                Some(vec![
+                    Bytes::from_static(&[1, 2, 3]),
+                    Bytes::from_static(&[5, 6])
+                ]),
             )
         );
 
         assert!(socket
             .emit_with_ack(
                 "test",
-                Payload::String("123".to_owned()),
+                Payload::Json(json!("123")),
                 Duration::from_secs(10),
                 |message: Payload, _| {
                     println!("Yehaa! My ack got acked?");
-                    if let Payload::String(str) = message {
+                    if let Payload::Json(data) = message {
                         println!("Received string ack");
-                        println!("Ack data: {}", str);
+                        println!("Ack data: {}", data);
                     }
                 }
             )

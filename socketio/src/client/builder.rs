@@ -61,8 +61,10 @@ impl ClientBuilder {
     ///
     /// let callback = |payload: Payload, socket: RawClient| {
     ///            match payload {
-    ///                Payload::String(str) => println!("Received: {}", str),
+    ///                Payload::Json(data) => println!("Received: {:?}", data),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///                Payload::Multi(vec_data) => println!("Received multi: {:?}", vec_data),
+    ///                _ => {}
     ///            }
     /// };
     ///
@@ -137,8 +139,10 @@ impl ClientBuilder {
     ///     .namespace("/admin")
     ///     .on("test", |payload: Payload, _| {
     ///            match payload {
-    ///                Payload::String(str) => println!("Received: {}", str),
+    ///                Payload::Json(data) => println!("Received: {:?}", data),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///                Payload::Multi(vec_data) => println!("Received multi: {:?}", vec_data),
+    ///                _ => {}
     ///            }
     ///     })
     ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
@@ -166,8 +170,8 @@ impl ClientBuilder {
     /// let client = ClientBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
     ///     .on_any(|event, payload, _client| {
-    ///         if let Payload::String(str) = payload {
-    ///           println!("{} {}", String::from(event), str);
+    ///         if let Payload::Json(data) = payload {
+    ///           println!("{} {}", String::from(event), data);
     ///         }
     ///     })
     ///     .connect();

@@ -8,8 +8,10 @@ fn main() {
     // socket to communicate with the server
     let callback = |payload: Payload, socket: RawClient| {
         match payload {
-            Payload::String(str) => println!("Received: {}", str),
+            Payload::Json(data) => println!("Received: {:?}", data),
             Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+            Payload::Multi(vec_data) => println!("Received vec: {:?}", vec_data),
+            _ => {}
         }
         socket
             .emit("test", json!({"got ack": true}))

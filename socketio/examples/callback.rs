@@ -11,8 +11,10 @@ fn main() {
     // socket to communicate with the server
     let handle_test = |payload: Payload, socket: RawClient| {
         match payload {
-            Payload::String(str) => println!("Received string: {}", str),
+            Payload::Json(json) => println!("Received string: {:?}", json),
             Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+            Payload::Multi(vec_data) => println!("Received vec: {:?}", vec_data),
+            _ => {}
         }
         socket
             .emit("test", json!({"got ack": true}))

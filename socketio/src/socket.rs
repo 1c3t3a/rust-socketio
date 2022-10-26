@@ -2,11 +2,13 @@ use crate::error::{Error, Result};
 use crate::packet::{Packet, PacketId};
 use bytes::Bytes;
 use rust_engineio::{Client as EngineClient, Packet as EnginePacket, PacketId as EnginePacketId};
+use serde::Serialize;
+use serde_json::{json, Value};
 use std::convert::TryFrom;
 use std::sync::{atomic::AtomicBool, Arc};
 use std::{fmt::Debug, sync::atomic::Ordering};
 
-use super::{event::Event, payload::Payload};
+use super::{event::Event, payload::Payload, payload::RawPayload};
 
 /// Handles communication in the `socket.io` protocol.
 #[derive(Clone, Debug)]
@@ -14,6 +16,21 @@ pub(crate) struct Socket {
     //TODO: 0.4.0 refactor this
     engine_client: Arc<EngineClient>,
     connected: Arc<AtomicBool>,
+}
+
+#[derive(Serialize)]
+struct BinaryPlaceHolder {
+    _placeholder: bool,
+    num: usize,
+}
+
+impl BinaryPlaceHolder {
+    fn new(num: usize) -> Self {
+        Self {
+            _placeholder: true,
+            num,
+        }
+    }
 }
 
 impl Socket {
@@ -72,27 +89,21 @@ impl Socket {
 
     /// Emits to certain event with given data.
     pub fn emit(&self, nsp: &str, event: Event, data: Payload) -> Result<()> {
-        self.emit_multi(nsp, event, vec![data])
-    }
-
-    /// Emits to certain event with given vector of data.
-    pub fn emit_multi(&self, nsp: &str, event: Event, data: Vec<Payload>) -> Result<()> {
-        let socket_packet = Self::build_packet_for_payloads(data, Some(event), nsp, None, false)?;
-
+        let socket_packet = Self::build_packet_for_payload(data, Some(event), nsp, None, false)?;
         self.send(socket_packet)
     }
 
     /// Returns a packet for a payload, could be used for bot binary and non binary
     /// events and acks. Convenance method.
     #[inline]
-    pub(crate) fn build_packet_for_payloads(
-        payloads: Vec<Payload>,
+    pub(crate) fn build_packet_for_payload(
+        payload: Payload,
         event: Option<Event>,
         nsp: &str,
         id: Option<i32>,
         is_ack: bool,
     ) -> Result<Packet> {
-        let (data, attachments) = Self::encode_data(event, payloads);
+        let (data, attachments) = Self::encode_data(event, payload);
 
         let packet_type = match attachments.is_empty() {
             true if is_ack => PacketId::Ack,
@@ -111,46 +122,40 @@ impl Socket {
         ))
     }
 
-    fn encode_data(event: Option<Event>, payloads: Vec<Payload>) -> (String, Vec<Bytes>) {
+    fn encode_data(event: Option<Event>, payload: Payload) -> (Value, Vec<Bytes>) {
         let mut attachments = vec![];
-        let mut data = "[".to_owned();
+        let mut data: Vec<Value> = vec![];
 
         if let Some(event) = event {
-            data += &format!("\"{}\"", String::from(event));
-            if !payloads.is_empty() {
-                data += ","
-            }
+            data.push(json!(String::from(event)));
         }
 
-        Self::encode_payloads(&mut data, payloads, &mut attachments);
+        Self::process_payload(&mut data, payload, &mut attachments);
 
-        data += "]";
+        let data = Value::Array(data);
 
         (data, attachments)
     }
 
-    fn encode_payloads(data: &mut String, payloads: Vec<Payload>, attachments: &mut Vec<Bytes>) {
-        for (index, payload) in payloads.iter().enumerate() {
-            match payload {
-                Payload::Binary(bin_data) => {
-                    *data += "{\"_placeholder\":true,\"num\":";
-                    *data += &format!("{}", attachments.len());
-                    *data += "}";
-                    attachments.push(bin_data.to_owned());
+    fn process_payload(data: &mut Vec<Value>, payload: Payload, attachments: &mut Vec<Bytes>) {
+        match payload {
+            Payload::Binary(bin_data) => Self::process_binary(data, bin_data, attachments),
+            Payload::Json(value) => data.push(value),
+            Payload::Multi(payloads) => {
+                for payload in payloads {
+                    match payload {
+                        RawPayload::Binary(bin) => Self::process_binary(data, bin, attachments),
+                        RawPayload::Json(value) => data.push(value),
+                    }
                 }
-                Payload::String(str_data) => {
-                    if serde_json::from_str::<serde_json::Value>(str_data).is_ok() {
-                        *data += str_data
-                    } else {
-                        *data += &format!("\"{}\"", str_data)
-                    };
-                }
-            };
-
-            if index < payloads.len() - 1 {
-                *data += ",";
             }
-        }
+        };
+    }
+
+    fn process_binary(data: &mut Vec<Value>, bin_data: Bytes, attachments: &mut Vec<Bytes>) {
+        let place_holder = BinaryPlaceHolder::new(attachments.len());
+        data.push(json!(&place_holder));
+        attachments.push(bin_data);
     }
 
     pub(crate) fn poll(&self) -> Result<Option<Packet>> {
@@ -240,13 +245,9 @@ mod test {
 
     #[test]
     fn test_build_multiple_payloads_packet() {
-        let packet = Socket::build_packet_for_payloads(
-            vec![crate::Payload::Binary(Bytes::from_static(&[1, 2, 3]))],
-            Some("hello".into()),
-            "/",
-            None,
-            false,
-        );
+        let payload = Payload::Multi(vec![Bytes::from_static(&[1, 2, 3]).into()]);
+        let packet =
+            Socket::build_packet_for_payload(payload, Some("hello".into()), "/", None, false);
 
         assert_eq!(
             Bytes::from(&packet.unwrap()),
@@ -255,8 +256,9 @@ mod test {
                 .into_bytes()
         );
 
-        let packet = Socket::build_packet_for_payloads(
-            vec![crate::Payload::Binary(Bytes::from_static(&[1, 2, 3]))],
+        let payload = Payload::Multi(vec![Bytes::from_static(&[1, 2, 3]).into()]);
+        let packet = Socket::build_packet_for_payload(
+            payload,
             Some("project:delete".into()),
             "/admin",
             Some(456),
@@ -270,13 +272,8 @@ mod test {
                 .into_bytes()
         );
 
-        let packet = Socket::build_packet_for_payloads(
-            vec![crate::Payload::Binary(Bytes::from_static(&[3, 2, 1]))],
-            None,
-            "/admin",
-            Some(456),
-            true,
-        );
+        let payload = Payload::Multi(vec![Bytes::from_static(&[3, 2, 1]).into()]);
+        let packet = Socket::build_packet_for_payload(payload, None, "/admin", Some(456), true);
 
         assert_eq!(
             Bytes::from(&packet.unwrap()),
@@ -285,19 +282,17 @@ mod test {
                 .into_bytes()
         );
 
+        let payload = Payload::Multi(vec![]);
         let packet =
-            Socket::build_packet_for_payloads(vec![], Some("hello".into()), "/", None, false);
+            Socket::build_packet_for_payload(payload, Some("hello".into()), "/", None, false);
         assert_eq!(
             Bytes::from(&packet.unwrap()),
             "2[\"hello\"]".to_string().into_bytes()
         );
 
-        let payloads = vec![
-            crate::Payload::Binary(Bytes::from_static(&[1, 2, 3])),
-            "1".into(),
-        ];
+        let payloads = Payload::Multi(vec![Bytes::from_static(&[1, 2, 3]).into(), json!(1).into()]);
         let packet =
-            Socket::build_packet_for_payloads(payloads, Some("hello".into()), "/", None, false);
+            Socket::build_packet_for_payload(payloads, Some("hello".into()), "/", None, false);
 
         assert_eq!(
             Bytes::from(&packet.unwrap()),
@@ -306,11 +301,11 @@ mod test {
                 .into_bytes()
         );
 
-        let payloads = vec![
-            crate::Payload::Binary(Bytes::from_static(&[1, 2, 3])),
-            crate::Payload::Binary(Bytes::from_static(&[1, 2, 3])),
-        ];
-        let packet = Socket::build_packet_for_payloads(
+        let payloads = Payload::Multi(vec![
+            Bytes::from_static(&[1, 2, 3]).into(),
+            Bytes::from_static(&[1, 2, 3]).into(),
+        ]);
+        let packet = Socket::build_packet_for_payload(
             payloads,
             Some("project:delete".into()),
             "/admin",
@@ -325,12 +320,12 @@ mod test {
                 .into_bytes()
         );
 
-        let payloads = vec![
-            crate::Payload::String(json!(3).to_string()),
-            crate::Payload::String(json!("4").to_string()),
-            crate::Payload::Binary(Bytes::from_static(&[3, 2, 1])),
-        ];
-        let packet = Socket::build_packet_for_payloads(payloads, None, "/admin", Some(456), true);
+        let payloads = Payload::Multi(vec![
+            json!(3).into(),
+            json!("4").into(),
+            Bytes::from_static(&[3, 2, 1]).into(),
+        ]);
+        let packet = Socket::build_packet_for_payload(payloads, None, "/admin", Some(456), true);
 
         assert_eq!(
             Bytes::from(&packet.unwrap()),
