@@ -224,7 +224,6 @@ impl TryFrom<&Bytes> for Packet {
 
         packet.data = match json_data {
             Value::Array(vec) if vec.is_empty() => None,
-            // Value::Array(vec) if vec.len() == 1 => vec.get(0).map(|v| v.to_owned()),
             _ => Some(json_data),
         };
 

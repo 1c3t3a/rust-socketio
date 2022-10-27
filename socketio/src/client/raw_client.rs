@@ -3,9 +3,7 @@ pub(crate) use crate::{event::Event, payload::Payload};
 use crate::{
     packet::{Packet, PacketId},
     payload::RawPayload,
-    Error,
 };
-use bytes::Bytes;
 use rand::{thread_rng, Rng};
 
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
@@ -328,52 +326,10 @@ impl RawClient {
             _ => Event::Message,
         };
 
-        let payload = match &packet.data {
-            Some(Value::Array(vec)) if vec.len() == 1 => {
-                let value = vec.get(0).unwrap();
-                Self::binary_payload(value, &packet.attachments)?
-            }
-            Some(Value::Array(vec)) => Self::binary_payloads(vec, &packet.attachments)?,
-            _ => Payload::Multi(vec![]),
-        };
+        let payload = InnerSocket::decode_binary_payload(&packet.data, &packet.attachments)?;
 
         self.callback(&event, payload)?;
         Ok(())
-    }
-
-    fn binary_payload(value: &Value, attachments: &Option<Vec<Bytes>>) -> Result<Payload> {
-        if value.get("_placeholder").is_some() {
-            if let Some(atts) = attachments {
-                let b = atts.get(0).ok_or(Error::InvalidPacket())?.to_owned();
-                Ok(Payload::Binary(b))
-            } else {
-                Err(Error::InvalidPacket())
-            }
-        } else {
-            Ok(Payload::Json(value.to_owned()))
-        }
-    }
-
-    fn binary_payloads(vec: &Vec<Value>, attachments: &Option<Vec<Bytes>>) -> Result<Payload> {
-        let mut vec_payload = vec![];
-        for value in vec {
-            if value.get("_placeholder").is_some() {
-                let index = value
-                    .get("num")
-                    .ok_or(Error::InvalidPacket())?
-                    .as_u64()
-                    .ok_or(Error::InvalidPacket())? as usize;
-                if let Some(atts) = attachments {
-                    let b = atts.get(index).ok_or(Error::InvalidPacket())?.to_owned();
-                    vec_payload.push(RawPayload::Binary(b));
-                } else {
-                    return Err(Error::InvalidPacket());
-                }
-            } else {
-                vec_payload.push(RawPayload::Json(value.to_owned()))
-            }
-        }
-        Ok(Payload::Multi(vec_payload))
     }
 
     /// A method for handling the Event Client Packets.
@@ -384,7 +340,7 @@ impl RawClient {
         if let Some(serde_json::Value::Array(contents)) = &packet.data {
             let event: Event = if contents.len() > 1 {
                 contents
-                    .get(0)
+                    .first()
                     .map(|value| match value {
                         serde_json::Value::String(ev) => ev,
                         _ => "message",
@@ -396,7 +352,14 @@ impl RawClient {
             };
 
             let payload = if contents.len() > 1 {
-                Payload::Multi(contents[1..].iter().map(|v| v.to_owned().into()).collect())
+                Payload::Multi(
+                    contents
+                        .iter()
+                        .skip(1)
+                        .cloned()
+                        .map(RawPayload::from)
+                        .collect(),
+                )
             } else {
                 Payload::Json(
                     contents

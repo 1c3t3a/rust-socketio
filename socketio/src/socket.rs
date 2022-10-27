@@ -158,6 +158,47 @@ impl Socket {
         attachments.push(bin_data);
     }
 
+    pub(crate) fn decode_binary_payload(
+        data: &Option<Value>,
+        attachments: &Option<Vec<Bytes>>,
+    ) -> Result<Payload> {
+        Ok(match &data {
+            Some(Value::Array(vec)) => Self::do_decode_binary_payload(vec, attachments)?,
+            _ => Payload::Multi(vec![]),
+        })
+    }
+
+    pub(crate) fn do_decode_binary_payload(
+        vec: &Vec<Value>,
+        attachments: &Option<Vec<Bytes>>,
+    ) -> Result<Payload> {
+        let mut vec_payload = vec![];
+        for value in vec {
+            if value.get("_placeholder").is_some() {
+                let index = value
+                    .get("num")
+                    .ok_or(Error::InvalidPacket())?
+                    .as_u64()
+                    .ok_or(Error::InvalidPacket())? as usize;
+                if let Some(atts) = attachments {
+                    let b = atts.get(index).ok_or(Error::InvalidPacket())?.to_owned();
+                    vec_payload.push(RawPayload::Binary(b));
+                } else {
+                    return Err(Error::InvalidPacket());
+                }
+            } else {
+                vec_payload.push(RawPayload::Json(value.to_owned()))
+            }
+        }
+
+        if vec_payload.len() == 1 {
+            // SAFETY: len checked before
+            let payload = vec_payload.pop().unwrap();
+            return Ok(payload.into());
+        }
+        Ok(Payload::Multi(vec_payload))
+    }
+
     pub(crate) fn poll(&self) -> Result<Option<Packet>> {
         loop {
             match self.engine_client.poll() {
