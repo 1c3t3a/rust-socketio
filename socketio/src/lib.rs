@@ -239,4 +239,19 @@ pub(crate) mod test {
 
         url
     }
+
+    // The socket.io restart url auth server for testing runs on port 4206
+    const RESTART_URL_AUTH_SERVER_URL: &str = "http://localhost:4206";
+
+    pub(crate) fn socket_io_restart_url_auth_server() -> Url {
+        let url = std::env::var("SOCKET_IO_RESTART_URL_AUTH_SERVER")
+            .unwrap_or_else(|_| RESTART_URL_AUTH_SERVER_URL.to_owned());
+        let mut url = Url::parse(&url).unwrap();
+
+        if url.path() == "/" {
+            url.set_path("/socket.io/");
+        }
+
+        url
+    }
 }

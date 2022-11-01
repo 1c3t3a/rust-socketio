@@ -36,6 +36,8 @@ node engine-io-polling.js
 node engine-io-secure.js
 node socket-io.js
 node socket-io-auth.js 
+node socket-io-restart.js
+node socket-io-restart-url-auth.js
 ```
 
 If you'd like to see debug log as well, export this environment variable beforehand:
@@ -63,7 +65,7 @@ docker build -t test_suite:latest ci
 Then you can run the container and forward all the needed ports with the following command:
 
 ```
-docker run -d --name test_suite -p 4200:4200 -p 4201:4201 -p 4202:4202 -p 4203:4203 -p 4204:4204 test_suite:latest
+docker run -d --name test_suite -p 4200:4200 -p 4201:4201 -p 4202:4202 -p 4203:4203 -p 4204:4204 -p 4205:4205 -p 4206:4206 test_suite:latest
 ```
 
 The docker container runs a shell script that starts the two servers in the background and checks if the processes are

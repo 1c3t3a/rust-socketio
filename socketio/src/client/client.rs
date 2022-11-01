@@ -1,5 +1,5 @@
 use std::{
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
     time::Duration,
 };
 
@@ -15,7 +15,7 @@ use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 
 #[derive(Clone)]
 pub struct Client {
-    builder: ClientBuilder,
+    builder: Arc<Mutex<ClientBuilder>>,
     client: Arc<RwLock<RawClient>>,
     backoff: ExponentialBackoff,
 }
@@ -30,13 +30,17 @@ impl Client {
             .build();
 
         let s = Self {
-            builder,
+            builder: Arc::new(Mutex::new(builder)),
             client: Arc::new(RwLock::new(client)),
             backoff,
         };
         s.poll_callback();
 
         Ok(s)
+    }
+
+    pub fn set_reconnect_url<T: Into<String>>(&self, address: T) {
+        self.builder.lock().unwrap().address = address.into();
     }
 
     /// Sends a message to the server using the underlying `engine.io` protocol.
@@ -158,9 +162,14 @@ impl Client {
 
     fn reconnect(&mut self) {
         let mut reconnect_attempts = 0;
-        if self.builder.reconnect {
+        let (reconnect, max_reconnect_attempts) = {
+            let builder = self.builder.lock().unwrap();
+            (builder.reconnect, builder.max_reconnect_attempts)
+        };
+
+        if reconnect {
             loop {
-                if let Some(max_reconnect_attempts) = self.builder.max_reconnect_attempts {
+                if let Some(max_reconnect_attempts) = max_reconnect_attempts {
                     if reconnect_attempts > max_reconnect_attempts {
                         break;
                     }
@@ -179,7 +188,8 @@ impl Client {
     }
 
     fn do_reconnect(&self) -> Result<()> {
-        let new_client = self.builder.clone().connect_raw()?;
+        let builder = self.builder.lock().unwrap();
+        let new_client = builder.clone().connect_raw()?;
         let mut client = self.client.write()?;
         *client = new_client;
 
@@ -249,13 +259,17 @@ impl Iterator for Iter {
 
 #[cfg(test)]
 mod test {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        time::UNIX_EPOCH,
+    };
 
     use super::*;
     use crate::error::Result;
     use crate::ClientBuilder;
     use serde_json::json;
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
+    use url::Url;
 
     #[test]
     fn socket_io_reconnect_integration() -> Result<()> {
@@ -323,6 +337,84 @@ mod test {
     }
 
     #[test]
+    fn socket_io_reconnect_url_auth_integration() -> Result<()> {
+        fn get_url() -> Url {
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            let mut url = crate::test::socket_io_restart_url_auth_server();
+            url.set_query(Some(&format!("timestamp={timestamp}")));
+            url
+        }
+
+        let connect_num = Arc::new(AtomicUsize::new(0));
+        let close_num = Arc::new(AtomicUsize::new(0));
+        let message_num = Arc::new(AtomicUsize::new(0));
+
+        let connect_num_clone = Arc::clone(&connect_num);
+        let close_num_clone = Arc::clone(&close_num);
+        let message_num_clone = Arc::clone(&message_num);
+
+        let socket = ClientBuilder::new(get_url())
+            .reconnect(true)
+            .max_reconnect_attempts(100)
+            .reconnect_delay(100, 100)
+            .on(Event::Connect, move |_, socket| {
+                connect_num_clone.fetch_add(1, Ordering::SeqCst);
+                let r = socket.emit_with_ack(
+                    "message",
+                    json!(""),
+                    Duration::from_millis(100),
+                    |_, _| {},
+                );
+                assert!(r.is_ok(), "should emit message success");
+            })
+            .on(Event::Close, move |_, _| {
+                close_num_clone.fetch_add(1, Ordering::SeqCst);
+            })
+            .on("message", move |_, _socket| {
+                // test the iterator implementation and make sure there is a constant
+                // stream of packets, even when reconnecting
+                message_num_clone.fetch_add(1, Ordering::SeqCst);
+            })
+            .connect();
+
+        assert!(socket.is_ok(), "should connect success");
+        let socket = socket.unwrap();
+
+        // waiting for server to emit message
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        assert_eq!(load(&connect_num), 1, "should connect once");
+        assert_eq!(load(&message_num), 1, "should receive one");
+        assert_eq!(load(&close_num), 0, "should not close");
+
+        // waiting for timestamp in url to expire
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        socket.set_reconnect_url(get_url());
+
+        let r = socket.emit("restart_server", json!(""));
+        assert!(r.is_ok(), "should emit restart success");
+
+        // waiting for server to restart
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            if load(&connect_num) == 2 && load(&message_num) == 2 {
+                break;
+            }
+        }
+
+        assert_eq!(load(&connect_num), 2, "should connect twice");
+        assert_eq!(load(&message_num), 2, "should receive two messages");
+        assert_eq!(load(&close_num), 1, "should close once");
+
+        socket.disconnect()?;
+        Ok(())
+    }
+
+    #[test]
     fn socket_io_iterator_integration() -> Result<()> {
         let url = crate::test::socket_io_server();
         let builder = ClientBuilder::new(url);
@@ -330,7 +422,7 @@ mod test {
 
         let client = Arc::new(RwLock::new(builder_clone.connect_raw()?));
         let mut socket = Client {
-            builder,
+            builder: Arc::new(Mutex::new(builder)),
             client,
             backoff: Default::default(),
         };
