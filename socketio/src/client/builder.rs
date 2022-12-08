@@ -42,6 +42,7 @@ pub struct ClientBuilder {
     transport_type: TransportType,
     auth: Option<serde_json::Value>,
     pub(crate) reconnect: bool,
+    pub(crate) reconnect_on_disconnect: bool,
     // None reconnect attempts represent infinity.
     pub(crate) max_reconnect_attempts: Option<u8>,
     pub(crate) reconnect_delay_min: u64,
@@ -90,6 +91,7 @@ impl ClientBuilder {
             transport_type: TransportType::Any,
             auth: None,
             reconnect: true,
+            reconnect_on_disconnect: false,
             // None means infinity
             max_reconnect_attempts: None,
             reconnect_delay_min: 1000,
@@ -110,6 +112,11 @@ impl ClientBuilder {
 
     pub fn reconnect(mut self, reconnect: bool) -> Self {
         self.reconnect = reconnect;
+        self
+    }
+
+    pub fn reconnect_on_disconnect(mut self, reconnect_on_disconnect: bool) -> Self {
+        self.reconnect_on_disconnect = reconnect_on_disconnect;
         self
     }
 
