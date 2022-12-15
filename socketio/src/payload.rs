@@ -47,6 +47,15 @@ impl From<Bytes> for Payload {
     }
 }
 
+impl AsRef<[u8]> for Payload {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            Payload::Binary(b) => b.as_ref(),
+            Payload::String(s) => s.as_ref(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
