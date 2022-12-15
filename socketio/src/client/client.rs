@@ -113,7 +113,7 @@ impl Client {
         callback: F,
     ) -> Result<()>
     where
-        F: for<'a> FnMut(Payload, RawClient) + 'static + Sync + Send,
+        F: FnMut(Payload, RawClient) + 'static + Send,
         E: Into<Event>,
         D: Into<Payload>,
     {
