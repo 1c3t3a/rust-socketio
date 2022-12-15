@@ -10,7 +10,7 @@ use url::Url;
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
 use crate::error::Result;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 
 use crate::socket::Socket as InnerSocket;
 
@@ -34,8 +34,8 @@ pub enum TransportType {
 #[derive(Clone)]
 pub struct ClientBuilder {
     address: String,
-    on: Arc<RwLock<HashMap<Event, Callback<SocketCallback>>>>,
-    on_any: Arc<RwLock<Option<Callback<SocketAnyCallback>>>>,
+    on: Arc<Mutex<HashMap<Event, Callback<SocketCallback>>>>,
+    on_any: Arc<Mutex<Option<Callback<SocketAnyCallback>>>>,
     namespace: String,
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
@@ -82,8 +82,8 @@ impl ClientBuilder {
     pub fn new<T: Into<String>>(address: T) -> Self {
         Self {
             address: address.into(),
-            on: Arc::new(RwLock::new(HashMap::new())),
-            on_any: Arc::new(RwLock::new(None)),
+            on: Arc::new(Mutex::new(HashMap::new())),
+            on_any: Arc::new(Mutex::new(None)),
             namespace: "/".to_owned(),
             tls_config: None,
             opening_headers: None,
@@ -149,11 +149,11 @@ impl ClientBuilder {
     #[allow(unused_mut)]
     pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
-        F: for<'a> FnMut(Payload, RawClient) + 'static + Sync + Send,
+        F: FnMut(Payload, RawClient) + 'static + Send,
     {
         let callback = Callback::<SocketCallback>::new(callback);
         // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
-        self.on.write().unwrap().insert(event.into(), callback);
+        self.on.lock().unwrap().insert(event.into(), callback);
         self
     }
 
@@ -177,11 +177,11 @@ impl ClientBuilder {
     #[allow(unused_mut)]
     pub fn on_any<F>(mut self, callback: F) -> Self
     where
-        F: for<'a> FnMut(Event, Payload, RawClient) + 'static + Sync + Send,
+        F: FnMut(Event, Payload, RawClient) + 'static + Send,
     {
         let callback = Some(Callback::<SocketAnyCallback>::new(callback));
         // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
-        *self.on_any.write().unwrap() = callback;
+        *self.on_any.lock().unwrap() = callback;
         self
     }
 

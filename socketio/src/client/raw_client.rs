@@ -7,7 +7,7 @@ use crate::client::callback::{SocketAnyCallback, SocketCallback};
 use crate::error::Result;
 use std::collections::HashMap;
 use std::ops::DerefMut;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -32,9 +32,9 @@ pub struct Ack {
 pub struct RawClient {
     /// The inner socket client to delegate the methods to.
     socket: InnerSocket,
-    on: Arc<RwLock<HashMap<Event, Callback<SocketCallback>>>>,
-    on_any: Arc<RwLock<Option<Callback<SocketAnyCallback>>>>,
-    outstanding_acks: Arc<RwLock<Vec<Ack>>>,
+    on: Arc<Mutex<HashMap<Event, Callback<SocketCallback>>>>,
+    on_any: Arc<Mutex<Option<Callback<SocketAnyCallback>>>>,
+    outstanding_acks: Arc<Mutex<Vec<Ack>>>,
     // namespace, for multiplexing messages
     nsp: String,
     // Data sent in opening header
@@ -49,8 +49,8 @@ impl RawClient {
     pub(crate) fn new<T: Into<String>>(
         socket: InnerSocket,
         namespace: T,
-        on: Arc<RwLock<HashMap<Event, Callback<SocketCallback>>>>,
-        on_any: Arc<RwLock<Option<Callback<SocketAnyCallback>>>>,
+        on: Arc<Mutex<HashMap<Event, Callback<SocketCallback>>>>,
+        on_any: Arc<Mutex<Option<Callback<SocketAnyCallback>>>>,
         auth: Option<serde_json::Value>,
     ) -> Result<Self> {
         Ok(RawClient {
@@ -58,7 +58,7 @@ impl RawClient {
             nsp: namespace.into(),
             on,
             on_any,
-            outstanding_acks: Arc::new(RwLock::new(Vec::new())),
+            outstanding_acks: Arc::new(Mutex::new(Vec::new())),
             auth,
         })
     }
@@ -195,7 +195,7 @@ impl RawClient {
         callback: F,
     ) -> Result<()>
     where
-        F: for<'a> FnMut(Payload, RawClient) + 'static + Sync + Send,
+        F: FnMut(Payload, RawClient) + 'static + Send,
         E: Into<Event>,
         D: Into<Payload>,
     {
@@ -212,7 +212,7 @@ impl RawClient {
         };
 
         // add the ack to the tuple of outstanding acks
-        self.outstanding_acks.write()?.push(ack);
+        self.outstanding_acks.lock()?.push(ack);
 
         self.socket.send(socket_packet)?;
         Ok(())
@@ -244,8 +244,8 @@ impl RawClient {
     }
 
     fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {
-        let mut on = self.on.write()?;
-        let mut on_any = self.on_any.write()?;
+        let mut on = self.on.lock()?;
+        let mut on_any = self.on_any.lock()?;
         let lock = on.deref_mut();
         let on_any_lock = on_any.deref_mut();
 
@@ -272,7 +272,7 @@ impl RawClient {
     fn handle_ack(&self, socket_packet: &Packet) -> Result<()> {
         let mut to_be_removed = Vec::new();
         if let Some(id) = socket_packet.id {
-            for (index, ack) in self.outstanding_acks.write()?.iter_mut().enumerate() {
+            for (index, ack) in self.outstanding_acks.lock()?.iter_mut().enumerate() {
                 if ack.id == id {
                     to_be_removed.push(index);
 
@@ -297,7 +297,7 @@ impl RawClient {
                 }
             }
             for index in to_be_removed {
-                self.outstanding_acks.write()?.remove(index);
+                self.outstanding_acks.lock()?.remove(index);
             }
         }
         Ok(())
