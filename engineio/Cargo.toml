@@ -1,6 +1,6 @@
 [package]
 name = "rust_engineio"
-version = "0.4.1"
+version = "0.4.1-alpha.1"
 authors = ["Bastian Kersting <bastian@cmbt.de>"]
 edition = "2021"
 description = "An implementation of a engineio client written in rust."
@@ -34,6 +34,7 @@ criterion = { version = "0.4.0", features = ["async_tokio"] }
 lazy_static = "1.4.0"
 
 [dev-dependencies.tokio]
+version = "*"
 # we need the `#[tokio::test]` macro
 features = ["macros"]
 
@@ -48,6 +49,6 @@ harness = false
 bench = false
 
 [features]
-default = []
+default = ["async"]
 async-callbacks = []
-async = []
+async = ["async-callbacks"]
