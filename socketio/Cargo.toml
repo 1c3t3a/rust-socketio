@@ -33,7 +33,7 @@ log = "0.4.16"
 cargo-tarpaulin = "0.18.5"
 
 [dev-dependencies.tokio]
-version = "*"
+version = "1.16.1"
 # we need the `#[tokio::test]` macro
 features = ["macros"]
 
