@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.4.0`](#041) - _2023.01.15_
 * [`0.4.0`](#040) - _2022.10.20_
 * [`0.3.1`](#031) - _2022.03.19_
 * [`0.3.0`](#030) - _2021.12.16_
@@ -29,6 +30,13 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## _[Unreleased]_
 
 _nothing new to show for… yet!_
+
+## <a name="041">[0.4.1] - _Minor enhancements_ </a>
+
+- As of [#264](https://github.com/1c3t3a/rust-socketio/pull/264), the callbacks
+  are now allowed to be `?Sync`.
+- As of [#265](https://github.com/1c3t3a/rust-socketio/pull/265), the `Payload`
+  type now implements `AsRef<u8>`.
 
 ## <a name="040">[0.4.0] - _Bugfixes and Reconnection feature_ </a>
 
