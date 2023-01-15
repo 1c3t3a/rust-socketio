@@ -102,9 +102,11 @@ impl Socket {
                 Some(vec![bin_data]),
             )),
             Payload::String(str_data) => {
-                serde_json::from_str::<serde_json::Value>(&str_data)?;
-
-                let payload = format!("[\"{}\",{}]", String::from(event), str_data);
+                let payload = if serde_json::from_str::<serde_json::Value>(&str_data).is_ok() {
+                    format!("[\"{}\",{}]", String::from(event), str_data)
+                } else {
+                    format!("[\"{}\",\"{}\"]", String::from(event), str_data)
+                };
 
                 Ok(Packet::new(
                     PacketId::Event,
@@ -159,12 +161,8 @@ impl Socket {
 
     /// Handles new incoming engineio packets
     fn handle_engineio_packet(&self, packet: EnginePacket) -> Result<Packet> {
-        let socket_packet = Packet::try_from(&packet.data);
-        if let Err(err) = socket_packet {
-            return Err(err);
-        }
-        // SAFETY: checked above to see if it was Err
-        let mut socket_packet = socket_packet.unwrap();
+        let mut socket_packet = Packet::try_from(&packet.data)?;
+
         // Only handle attachments if there are any
         if socket_packet.attachment_count > 0 {
             let mut attachments_left = socket_packet.attachment_count;

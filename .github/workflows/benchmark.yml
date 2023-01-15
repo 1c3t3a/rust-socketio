@@ -41,7 +41,7 @@ jobs:
         if: steps.check.outputs.triggered == 'true'
         run: |
           cd ci && docker build -t test_suite:latest .
-          docker run -d -p 4200:4200 -p 4201:4201 -p 4202:4202 -p 4203:4203 -p 4204:4204 test_suite:latest
+          docker run -d -p 4200:4200 -p 4201:4201 -p 4202:4202 -p 4203:4203 -p 4204:4204 -p 4205:4205 test_suite:latest
       - name: Extract branch name
         if: steps.check.outputs.triggered == 'true'
         shell: bash

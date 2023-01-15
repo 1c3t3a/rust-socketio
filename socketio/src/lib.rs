@@ -2,14 +2,14 @@
 //! ## Example usage
 //!
 //! ``` rust
-//! use rust_socketio::{ClientBuilder, Payload, Client};
+//! use rust_socketio::{ClientBuilder, Payload, RawClient};
 //! use serde_json::json;
 //! use std::time::Duration;
 //!
 //! // define a callback which is called when a payload is received
 //! // this callback gets the payload as well as an instance of the
 //! // socket to communicate with the server
-//! let callback = |payload: Payload, socket: Client| {
+//! let callback = |payload: Payload, socket: RawClient| {
 //!        match payload {
 //!            Payload::String(str) => println!("Received: {}", str),
 //!            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -31,7 +31,7 @@
 //! socket.emit("foo", json_payload).expect("Server unreachable");
 //!
 //! // define a callback, that's executed when the ack got acked
-//! let ack_callback = |message: Payload, _: Client| {
+//! let ack_callback = |message: Payload, _: RawClient| {
 //!     println!("Yehaa! My ack got acked?");
 //!     println!("Ack data: {:#?}", message);
 //! };
@@ -186,7 +186,11 @@ pub use error::Error;
 
 pub use {event::Event, payload::Payload};
 
-pub use client::{Client, ClientBuilder, TransportType};
+pub use client::{ClientBuilder, RawClient, TransportType};
+
+// TODO: 0.4.0 remove
+#[deprecated(since = "0.3.0-alpha-2", note = "Socket renamed to Client")]
+pub use client::{ClientBuilder as SocketBuilder, RawClient as Socket};
 
 #[cfg(test)]
 pub(crate) mod test {
@@ -212,6 +216,21 @@ pub(crate) mod test {
     pub(crate) fn socket_io_auth_server() -> Url {
         let url =
             std::env::var("SOCKET_IO_AUTH_SERVER").unwrap_or_else(|_| AUTH_SERVER_URL.to_owned());
+        let mut url = Url::parse(&url).unwrap();
+
+        if url.path() == "/" {
+            url.set_path("/socket.io/");
+        }
+
+        url
+    }
+
+    // The socket.io restart server for testing runs on port 4205
+    const RESTART_SERVER_URL: &str = "http://localhost:4205";
+
+    pub(crate) fn socket_io_restart_server() -> Url {
+        let url = std::env::var("SOCKET_IO_RESTART_SERVER")
+            .unwrap_or_else(|_| RESTART_SERVER_URL.to_owned());
         let mut url = Url::parse(&url).unwrap();
 
         if url.path() == "/" {

@@ -108,13 +108,13 @@ impl TryFrom<Bytes> for Packet {
             return Err(Error::IncompletePacket());
         }
 
-        let is_base64 = *bytes.get(0).ok_or(Error::IncompletePacket())? == b'b';
+        let is_base64 = *bytes.first().ok_or(Error::IncompletePacket())? == b'b';
 
         // only 'messages' packets could be encoded
         let packet_id = if is_base64 {
             PacketId::MessageBinary
         } else {
-            (*bytes.get(0).ok_or(Error::IncompletePacket())? as u8).try_into()?
+            (*bytes.first().ok_or(Error::IncompletePacket())? as u8).try_into()?
         };
 
         if bytes.len() == 1 && packet_id == PacketId::Message {

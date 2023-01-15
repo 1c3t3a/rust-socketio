@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use byte::{ctx::Str, BytesExt};
+use crate::Error::{InvalidJson, InvalidUtf8};
 use bytes::{BufMut, Bytes, BytesMut};
 use regex::Regex;
 use std::convert::TryFrom;
@@ -27,10 +27,30 @@ pub struct Packet {
     pub attachments: Option<Vec<Bytes>>,
 }
 
+impl Default for Packet {
+    fn default() -> Self {
+        Self {
+            packet_type: PacketId::Event,
+            nsp: String::from("/"),
+            data: None,
+            id: None,
+            attachment_count: 0,
+            attachments: None,
+        }
+    }
+}
+
 impl TryFrom<u8> for PacketId {
     type Error = Error;
     fn try_from(b: u8) -> Result<Self> {
-        match b as char {
+        PacketId::try_from(b as char)
+    }
+}
+
+impl TryFrom<char> for PacketId {
+    type Error = Error;
+    fn try_from(b: char) -> Result<Self> {
+        match b {
             '0' => Ok(PacketId::Connect),
             '1' => Ok(PacketId::Disconnect),
             '2' => Ok(PacketId::Event),
@@ -140,127 +160,104 @@ impl TryFrom<&Bytes> for Packet {
     /// this member. This is done because the attachment is usually
     /// send in another packet.
     fn try_from(payload: &Bytes) -> Result<Packet> {
-        let mut i = 0;
-        let packet_id = PacketId::try_from(*payload.first().ok_or(Error::IncompletePacket())?)?;
+        let mut packet: Packet = Default::default();
+        let payload_utf8 =
+            String::from_utf8(payload.to_vec()).map_err(|e| InvalidUtf8(e.utf8_error()))?;
+        let mut utf8_iter = payload_utf8.chars().into_iter().peekable();
+        let mut next_utf8;
+        let mut char_buf: Vec<char> = vec![];
 
-        let attachment_count = if let PacketId::BinaryAck | PacketId::BinaryEvent = packet_id {
-            let start = i + 1;
+        // packet_type
+        packet.packet_type =
+            PacketId::try_from(utf8_iter.next().ok_or(Error::IncompletePacket())?)?;
 
-            while payload.get(i).ok_or(Error::IncompletePacket())? != &b'-' && i < payload.len() {
-                i += 1;
-            }
-            payload
-                .iter()
-                .skip(start)
-                .take(i - start)
-                .map(|byte| *byte as char)
-                .collect::<String>()
-                .parse::<u8>()?
-        } else {
-            0
-        };
-
-        let nsp: &str = if payload.get(i + 1).ok_or(Error::IncompletePacket())? == &b'/' {
-            let mut start = i + 1;
-            while payload.get(i).ok_or(Error::IncompletePacket())? != &b',' && i < payload.len() {
-                i += 1;
-            }
-            let len = i - start;
-            payload
-                .read_with(&mut start, Str::Len(len))
-                .map_err(|_| Error::IncompletePacket())?
-        } else {
-            "/"
-        };
-
-        let next = payload.get(i + 1).unwrap_or(&b'_');
-        let id = if (*next as char).is_digit(10) && i < payload.len() {
-            let start = i + 1;
-            i += 1;
-            while (*payload.get(i).ok_or(Error::IncompletePacket())? as char).is_digit(10)
-                && i < payload.len()
-            {
-                i += 1;
-            }
-
-            Some(
-                payload
-                    .iter()
-                    .skip(start)
-                    .take(i - start)
-                    .map(|byte| *byte as char)
-                    .collect::<String>()
-                    .parse::<i32>()?,
-            )
-        } else {
-            None
-        };
-
-        let data = if payload.get(i + 1).is_some() {
-            let start = if id.is_some() { i } else { i + 1 };
-
-            let mut json_data = serde_json::Value::Null;
-
-            let mut end = payload.len();
-            while serde_json::from_str::<serde_json::Value>(
-                &payload
-                    .iter()
-                    .skip(start)
-                    .take(end - start)
-                    .map(|byte| *byte as char)
-                    .collect::<String>(),
-            )
-            .is_err()
-            {
-                end -= 1;
-            }
-
-            if end != start {
-                // unwrapping here is in fact safe as we checked for errors in the
-                // condition of the loop
-                json_data = serde_json::from_str(
-                    &payload
-                        .iter()
-                        .skip(start)
-                        .take(end - start)
-                        .map(|byte| *byte as char)
-                        .collect::<String>(),
-                )
-                .unwrap();
-            }
-
-            match packet_id {
-                PacketId::BinaryAck | PacketId::BinaryEvent => {
-                    let re_close = Regex::new(r",]$|]$").unwrap();
-                    let mut str = json_data
-                        .to_string()
-                        .replace("{\"_placeholder\":true,\"num\":0}", "");
-
-                    if str.starts_with('[') {
-                        str.remove(0);
-                    }
-                    str = re_close.replace(&str, "").to_string();
-
-                    if str.is_empty() {
-                        None
-                    } else {
-                        Some(str)
-                    }
+        // attachment_count
+        if let PacketId::BinaryAck | PacketId::BinaryEvent = packet.packet_type {
+            loop {
+                next_utf8 = utf8_iter.peek().ok_or(Error::IncompletePacket())?;
+                if *next_utf8 == '-' {
+                    let _ = utf8_iter.next(); // consume '-' char
+                    break;
                 }
-                _ => Some(json_data.to_string()),
+                char_buf.push(utf8_iter.next().unwrap()); // SAFETY: already peeked
             }
-        } else {
-            None
+        }
+        let count_str: String = char_buf.iter().collect();
+        if let Ok(count) = count_str.parse::<u8>() {
+            packet.attachment_count = count;
+        }
+
+        // namespace
+        char_buf.clear();
+        next_utf8 = match utf8_iter.peek() {
+            Some(c) => c,
+            None => return Ok(packet),
         };
 
-        Ok(Packet::new(
-            packet_id,
-            nsp.to_owned(),
-            data,
-            id,
-            attachment_count,
-            None,
-        ))
+        if *next_utf8 == '/' {
+            char_buf.push(utf8_iter.next().unwrap()); // SAFETY: already peeked
+            loop {
+                next_utf8 = utf8_iter.peek().ok_or(Error::IncompletePacket())?;
+                if *next_utf8 == ',' {
+                    let _ = utf8_iter.next(); // consume ','
+                    break;
+                }
+                char_buf.push(utf8_iter.next().unwrap()); // SAFETY: already peeked
+            }
+        }
+        if !char_buf.is_empty() {
+            packet.nsp = char_buf.iter().collect();
+        }
+
+        // id
+        char_buf.clear();
+        next_utf8 = match utf8_iter.peek() {
+            None => return Ok(packet),
+            Some(c) => c,
+        };
+
+        loop {
+            if !next_utf8.is_ascii_digit() {
+                break;
+            }
+            char_buf.push(utf8_iter.next().unwrap()); // SAFETY: already peeked
+            next_utf8 = match utf8_iter.peek() {
+                None => return Ok(packet),
+                Some(c) => c,
+            };
+        }
+
+        let count_str: String = char_buf.iter().collect();
+        if let Ok(count) = count_str.parse::<i32>() {
+            packet.id = Some(count);
+        }
+
+        // data
+        let json_str: String = utf8_iter.into_iter().collect();
+        let json_data: serde_json::Value = serde_json::from_str(&json_str).map_err(InvalidJson)?;
+
+        match packet.packet_type {
+            PacketId::BinaryAck | PacketId::BinaryEvent => {
+                let re_close = Regex::new(r",]$|]$").unwrap();
+                let mut str = json_data
+                    .to_string()
+                    .replace("{\"_placeholder\":true,\"num\":0}", "");
+
+                if str.starts_with('[') {
+                    str.remove(0);
+                }
+                str = re_close.replace(&str, "").to_string();
+
+                if str.is_empty() {
+                    packet.data = None
+                } else {
+                    packet.data = Some(str)
+                }
+            }
+            _ => packet.data = Some(json_data.to_string()),
+        };
+
+        Ok(packet)
     }
 }
 
@@ -288,15 +285,17 @@ mod test {
             packet.unwrap()
         );
 
-        let payload = Bytes::from_static(b"0/admin,{\"token\":\"123\"}");
+        let utf8_data = "{\"token™\":\"123\"}".to_owned();
+        let utf8_payload = format!("0/admin™,{}", utf8_data);
+        let payload = Bytes::from(utf8_payload);
         let packet = Packet::try_from(&payload);
         assert!(packet.is_ok());
 
         assert_eq!(
             Packet::new(
                 PacketId::Connect,
-                "/admin".to_owned(),
-                Some(String::from("{\"token\":\"123\"}")),
+                "/admin™".to_owned(),
+                Some(utf8_data),
                 None,
                 0,
                 None,
@@ -590,6 +589,6 @@ mod test {
     #[test]
     fn test_illegal_packet_id() {
         let _sut = PacketId::try_from(42).expect_err("error!");
-        assert!(matches!(Error::InvalidPacketId(42), _sut))
+        assert!(matches!(Error::InvalidPacketId(42 as char), _sut))
     }
 }

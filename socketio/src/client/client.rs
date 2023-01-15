@@ -1,83 +1,38 @@
-pub use super::super::{event::Event, payload::Payload};
-use super::callback::Callback;
-use crate::packet::{Packet, PacketId};
-use rand::{thread_rng, Rng};
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 
-use crate::client::callback::{SocketAnyCallback, SocketCallback};
-use crate::error::Result;
-use std::collections::HashMap;
-use std::ops::DerefMut;
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
-use std::time::Instant;
+use super::{ClientBuilder, RawClient};
+use crate::{error::Result, packet::Packet, Error};
+pub(crate) use crate::{event::Event, payload::Payload};
+use backoff::ExponentialBackoff;
+use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 
-use crate::socket::Socket as InnerSocket;
-
-/// Represents an `Ack` as given back to the caller. Holds the internal `id` as
-/// well as the current ack'ed state. Holds data which will be accessible as
-/// soon as the ack'ed state is set to true. An `Ack` that didn't get ack'ed
-/// won't contain data.
-#[derive(Debug)]
-pub struct Ack {
-    pub id: i32,
-    timeout: Duration,
-    time_started: Instant,
-    callback: Callback<SocketCallback>,
-}
-
-/// A socket which handles communication with the server. It's initialized with
-/// a specific address as well as an optional namespace to connect to. If `None`
-/// is given the server will connect to the default namespace `"/"`.
 #[derive(Clone)]
 pub struct Client {
-    /// The inner socket client to delegate the methods to.
-    socket: InnerSocket,
-    on: Arc<RwLock<HashMap<Event, Callback<SocketCallback>>>>,
-    on_any: Arc<RwLock<Option<Callback<SocketAnyCallback>>>>,
-    outstanding_acks: Arc<RwLock<Vec<Ack>>>,
-    // namespace, for multiplexing messages
-    nsp: String,
-    // Data sent in opening header
-    auth: Option<serde_json::Value>,
+    builder: ClientBuilder,
+    client: Arc<RwLock<RawClient>>,
+    backoff: ExponentialBackoff,
 }
 
 impl Client {
-    /// Creates a socket with a certain address to connect to as well as a
-    /// namespace. If `None` is passed in as namespace, the default namespace
-    /// `"/"` is taken.
-    /// ```
-    pub(crate) fn new<T: Into<String>>(
-        socket: InnerSocket,
-        namespace: T,
-        on: HashMap<Event, Callback<SocketCallback>>,
-        on_any: Option<Callback<SocketAnyCallback>>,
-        auth: Option<serde_json::Value>,
-    ) -> Result<Self> {
-        Ok(Client {
-            socket,
-            nsp: namespace.into(),
-            on: Arc::new(RwLock::new(on)),
-            on_any: Arc::new(RwLock::new(on_any)),
-            outstanding_acks: Arc::new(RwLock::new(Vec::new())),
-            auth,
-        })
-    }
+    pub(crate) fn new(builder: ClientBuilder) -> Result<Self> {
+        let builder_clone = builder.clone();
+        let client = builder_clone.connect_raw()?;
+        let backoff = ExponentialBackoffBuilder::new()
+            .with_initial_interval(Duration::from_millis(builder.reconnect_delay_min))
+            .with_max_interval(Duration::from_millis(builder.reconnect_delay_max))
+            .build();
 
-    /// Connects the client to a server. Afterwards the `emit_*` methods can be
-    /// called to interact with the server. Attention: it's not allowed to add a
-    /// callback after a call to this method.
-    pub(crate) fn connect(&self) -> Result<()> {
-        // Connect the underlying socket
-        self.socket.connect()?;
+        let s = Self {
+            builder,
+            client: Arc::new(RwLock::new(client)),
+            backoff,
+        };
+        s.poll_callback();
 
-        let auth = self.auth.as_ref().map(|data| data.to_string());
-
-        // construct the opening packet
-        let open_packet = Packet::new(PacketId::Connect, self.nsp.clone(), auth, None, 0, None);
-
-        self.socket.send(open_packet)?;
-
-        Ok(())
+        Ok(s)
     }
 
     /// Sends a message to the server using the underlying `engine.io` protocol.
@@ -88,11 +43,11 @@ impl Client {
     ///
     /// # Example
     /// ```
-    /// use rust_socketio::{ClientBuilder, Client, Payload};
+    /// use rust_socketio::{ClientBuilder, RawClient, Payload};
     /// use serde_json::json;
     ///
     /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, socket: Client| {
+    ///     .on("test", |payload: Payload, socket: RawClient| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     ///      })
@@ -105,23 +60,76 @@ impl Client {
     ///
     /// assert!(result.is_ok());
     /// ```
-    #[inline]
     pub fn emit<E, D>(&self, event: E, data: D) -> Result<()>
     where
         E: Into<Event>,
         D: Into<Payload>,
     {
-        self.socket.emit(&self.nsp, event.into(), data.into())
+        let client = self.client.read()?;
+        // TODO(#230): like js client, buffer emit, resend after reconnect
+        client.emit(event, data)
+    }
+
+    /// Sends a message to the server but `alloc`s an `ack` to check whether the
+    /// server responded in a given time span. This message takes an event, which
+    /// could either be one of the common events like "message" or "error" or a
+    /// custom event like "foo", as well as a data parameter. But be careful,
+    /// in case you send a [`Payload::String`], the string needs to be valid JSON.
+    /// It's even recommended to use a library like serde_json to serialize the data properly.
+    /// It also requires a timeout `Duration` in which the client needs to answer.
+    /// If the ack is acked in the correct time span, the specified callback is
+    /// called. The callback consumes a [`Payload`] which represents the data send
+    /// by the server.
+    ///
+    /// # Example
+    /// ```
+    /// use rust_socketio::{ClientBuilder, Payload, RawClient};
+    /// use serde_json::json;
+    /// use std::time::Duration;
+    /// use std::thread::sleep;
+    ///
+    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    /// let ack_callback = |message: Payload, socket: RawClient| {
+    ///     match message {
+    ///         Payload::String(str) => println!("{}", str),
+    ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
+    ///    }
+    /// };
+    ///
+    /// let payload = json!({"token": 123});
+    /// socket.emit_with_ack("foo", payload, Duration::from_secs(2), ack_callback).unwrap();
+    ///
+    /// sleep(Duration::from_secs(2));
+    /// ```
+    pub fn emit_with_ack<F, E, D>(
+        &self,
+        event: E,
+        data: D,
+        timeout: Duration,
+        callback: F,
+    ) -> Result<()>
+    where
+        F: FnMut(Payload, RawClient) + 'static + Send,
+        E: Into<Event>,
+        D: Into<Payload>,
+    {
+        let client = self.client.read()?;
+        // TODO(#230): like js client, buffer emit, resend after reconnect
+        client.emit_with_ack(event, data, timeout, callback)
     }
 
     /// Disconnects this client from the server by sending a `socket.io` closing
     /// packet.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{ClientBuilder, Payload, Client};
+    /// use rust_socketio::{ClientBuilder, Payload, RawClient};
     /// use serde_json::json;
     ///
-    /// fn handle_test(payload: Payload, socket: Client) {
+    /// fn handle_test(payload: Payload, socket: RawClient) {
     ///     println!("Received: {:#?}", payload);
     ///     socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     /// }
@@ -140,606 +148,221 @@ impl Client {
     ///
     /// ```
     pub fn disconnect(&self) -> Result<()> {
-        let disconnect_packet =
-            Packet::new(PacketId::Disconnect, self.nsp.clone(), None, None, 0, None);
-
-        self.socket.send(disconnect_packet)?;
-        self.socket.disconnect()?;
-
-        Ok(())
+        let client = self.client.read()?;
+        client.disconnect()
     }
 
-    /// Sends a message to the server but `alloc`s an `ack` to check whether the
-    /// server responded in a given time span. This message takes an event, which
-    /// could either be one of the common events like "message" or "error" or a
-    /// custom event like "foo", as well as a data parameter. But be careful,
-    /// in case you send a [`Payload::String`], the string needs to be valid JSON.
-    /// It's even recommended to use a library like serde_json to serialize the data properly.
-    /// It also requires a timeout `Duration` in which the client needs to answer.
-    /// If the ack is acked in the correct time span, the specified callback is
-    /// called. The callback consumes a [`Payload`] which represents the data send
-    /// by the server.
-    ///
-    /// # Example
-    /// ```
-    /// use rust_socketio::{ClientBuilder, Payload, Client};
-    /// use serde_json::json;
-    /// use std::time::Duration;
-    /// use std::thread::sleep;
-    ///
-    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
-    ///     .connect()
-    ///     .expect("connection failed");
-    ///
-    /// let ack_callback = |message: Payload, socket: Client| {
-    ///     match message {
-    ///         Payload::String(str) => println!("{}", str),
-    ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
-    ///    }    
-    /// };
-    ///
-    /// let payload = json!({"token": 123});
-    /// socket.emit_with_ack("foo", payload, Duration::from_secs(2), ack_callback).unwrap();
-    ///
-    /// sleep(Duration::from_secs(2));
-    /// ```
-    #[inline]
-    pub fn emit_with_ack<F, E, D>(
-        &self,
-        event: E,
-        data: D,
-        timeout: Duration,
-        callback: F,
-    ) -> Result<()>
-    where
-        F: for<'a> FnMut(Payload, Client) + 'static + Sync + Send,
-        E: Into<Event>,
-        D: Into<Payload>,
-    {
-        let id = thread_rng().gen_range(0..999);
-        let socket_packet =
-            self.socket
-                .build_packet_for_payload(data.into(), event.into(), &self.nsp, Some(id))?;
-
-        let ack = Ack {
-            id,
-            time_started: Instant::now(),
-            timeout,
-            callback: Callback::<SocketCallback>::new(callback),
-        };
-
-        // add the ack to the tuple of outstanding acks
-        self.outstanding_acks.write()?.push(ack);
-
-        self.socket.send(socket_packet)?;
-        Ok(())
-    }
-
-    pub(crate) fn poll(&self) -> Result<Option<Packet>> {
-        loop {
-            match self.socket.poll() {
-                Err(err) => {
-                    self.callback(&Event::Error, err.to_string())?;
-                    return Err(err);
-                }
-                Ok(Some(packet)) => {
-                    if packet.nsp == self.nsp {
-                        self.handle_socketio_packet(&packet)?;
-                        return Ok(Some(packet));
-                    } else {
-                        // Not our namespace continue polling
+    fn reconnect(&mut self) {
+        let mut reconnect_attempts = 0;
+        if self.builder.reconnect {
+            loop {
+                if let Some(max_reconnect_attempts) = self.builder.max_reconnect_attempts {
+                    if reconnect_attempts > max_reconnect_attempts {
+                        break;
                     }
                 }
-                Ok(None) => return Ok(None),
+                reconnect_attempts += 1;
+
+                if let Some(backoff) = self.backoff.next_backoff() {
+                    std::thread::sleep(backoff);
+                }
+
+                if self.do_reconnect().is_ok() {
+                    break;
+                }
             }
         }
+    }
+
+    fn do_reconnect(&self) -> Result<()> {
+        let new_client = self.builder.clone().connect_raw()?;
+        let mut client = self.client.write()?;
+        *client = new_client;
+
+        Ok(())
     }
 
     pub(crate) fn iter(&self) -> Iter {
-        Iter { socket: self }
+        Iter {
+            socket: self.client.clone(),
+        }
     }
 
-    fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {
-        let mut on = self.on.write()?;
-        let mut on_any = self.on_any.write()?;
-        let lock = on.deref_mut();
-        let on_any_lock = on_any.deref_mut();
-
-        let payload = payload.into();
-
-        if let Some(callback) = lock.get_mut(event) {
-            callback(payload.clone(), self.clone());
-        }
-        match event.clone() {
-            Event::Message | Event::Custom(_) => {
-                if let Some(callback) = on_any_lock {
-                    callback(event.clone(), payload, self.clone())
+    fn poll_callback(&self) {
+        let mut self_clone = self.clone();
+        // Use thread to consume items in iterator in order to call callbacks
+        std::thread::spawn(move || {
+            // tries to restart a poll cycle whenever a 'normal' error occurs,
+            // it just panics on network errors, in case the poll cycle returned
+            // `Result::Ok`, the server receives a close frame so it's safe to
+            // terminate
+            for packet in self_clone.iter() {
+                if let _e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
+                    //TODO: 0.3.X handle errors
+                    //TODO: logging error
+                    let _ = self_clone.disconnect();
+                    self_clone.reconnect();
                 }
             }
-            _ => {}
-        }
-        drop(on);
-        drop(on_any);
-        Ok(())
-    }
-
-    /// Handles the incoming acks and classifies what callbacks to call and how.
-    #[inline]
-    fn handle_ack(&self, socket_packet: &Packet) -> Result<()> {
-        let mut to_be_removed = Vec::new();
-        if let Some(id) = socket_packet.id {
-            for (index, ack) in self.outstanding_acks.write()?.iter_mut().enumerate() {
-                if ack.id == id {
-                    to_be_removed.push(index);
-
-                    if ack.time_started.elapsed() < ack.timeout {
-                        if let Some(ref payload) = socket_packet.data {
-                            ack.callback.deref_mut()(
-                                Payload::String(payload.to_owned()),
-                                self.clone(),
-                            );
-                        }
-                        if let Some(ref attachments) = socket_packet.attachments {
-                            if let Some(payload) = attachments.get(0) {
-                                ack.callback.deref_mut()(
-                                    Payload::Binary(payload.to_owned()),
-                                    self.clone(),
-                                );
-                            }
-                        }
-                    } else {
-                        // Do something with timed out acks?
-                    }
-                }
-            }
-            for index in to_be_removed {
-                self.outstanding_acks.write()?.remove(index);
-            }
-        }
-        Ok(())
-    }
-
-    /// Handles a binary event.
-    #[inline]
-    fn handle_binary_event(&self, packet: &Packet) -> Result<()> {
-        let event = if let Some(string_data) = &packet.data {
-            string_data.replace('\"', "").into()
-        } else {
-            Event::Message
-        };
-
-        if let Some(attachments) = &packet.attachments {
-            if let Some(binary_payload) = attachments.get(0) {
-                self.callback(&event, Payload::Binary(binary_payload.to_owned()))?;
-            }
-        }
-        Ok(())
-    }
-
-    /// A method for handling the Event Client Packets.
-    // this could only be called with an event
-    fn handle_event(&self, packet: &Packet) -> Result<()> {
-        // unwrap the potential data
-        if let Some(data) = &packet.data {
-            // the string must be a valid json array with the event at index 0 and the
-            // payload at index 1. if no event is specified, the message callback is used
-            if let Ok(serde_json::Value::Array(contents)) =
-                serde_json::from_str::<serde_json::Value>(data)
-            {
-                let event: Event = if contents.len() > 1 {
-                    contents
-                        .get(0)
-                        .map(|value| match value {
-                            serde_json::Value::String(ev) => ev,
-                            _ => "message",
-                        })
-                        .unwrap_or("message")
-                        .into()
-                } else {
-                    Event::Message
-                };
-                self.callback(
-                    &event,
-                    contents
-                        .get(1)
-                        .unwrap_or_else(|| contents.get(0).unwrap())
-                        .to_string(),
-                )?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Handles the incoming messages and classifies what callbacks to call and how.
-    /// This method is later registered as the callback for the `on_data` event of the
-    /// engineio client.
-    #[inline]
-    fn handle_socketio_packet(&self, packet: &Packet) -> Result<()> {
-        if packet.nsp == self.nsp {
-            match packet.packet_type {
-                PacketId::Ack | PacketId::BinaryAck => {
-                    if let Err(err) = self.handle_ack(packet) {
-                        self.callback(&Event::Error, err.to_string())?;
-                        return Err(err);
-                    }
-                }
-                PacketId::BinaryEvent => {
-                    if let Err(err) = self.handle_binary_event(packet) {
-                        self.callback(&Event::Error, err.to_string())?;
-                    }
-                }
-                PacketId::Connect => {
-                    self.callback(&Event::Connect, "")?;
-                }
-                PacketId::Disconnect => {
-                    self.callback(&Event::Close, "")?;
-                }
-                PacketId::ConnectError => {
-                    self.callback(
-                        &Event::Error,
-                        String::from("Received an ConnectError frame: ")
-                            + &packet
-                                .clone()
-                                .data
-                                .unwrap_or_else(|| String::from("\"No error message provided\"")),
-                    )?;
-                }
-                PacketId::Event => {
-                    if let Err(err) = self.handle_event(packet) {
-                        self.callback(&Event::Error, err.to_string())?;
-                    }
-                }
-            }
-        }
-        Ok(())
+        });
     }
 }
 
-pub struct Iter<'a> {
-    socket: &'a Client,
+pub(crate) struct Iter {
+    socket: Arc<RwLock<RawClient>>,
 }
 
-impl<'a> Iterator for Iter<'a> {
+impl Iterator for Iter {
     type Item = Result<Packet>;
-    fn next(&mut self) -> std::option::Option<<Self as std::iter::Iterator>::Item> {
-        match self.socket.poll() {
-            Err(err) => Some(Err(err)),
-            Ok(Some(packet)) => Some(Ok(packet)),
-            Ok(None) => None,
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let socket = self.socket.read();
+        match socket {
+            Ok(socket) => match socket.poll() {
+                Err(err) => Some(Err(err)),
+                Ok(Some(packet)) => Some(Ok(packet)),
+                // If the underlying engineIO connection is closed,
+                // throw an error so we know to reconnect
+                Ok(None) => Some(Err(Error::StoppedEngineIoSocket)),
+            },
+            Err(_) => {
+                // Lock is poisoned, our iterator is useless.
+                None
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::sync::mpsc;
-    use std::thread::sleep;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use crate::{client::TransportType, payload::Payload, ClientBuilder};
-    use bytes::Bytes;
-    use native_tls::TlsConnector;
+    use crate::error::Result;
+    use crate::ClientBuilder;
     use serde_json::json;
     use std::time::Duration;
 
     #[test]
-    fn socket_io_integration() -> Result<()> {
-        let url = crate::test::socket_io_server();
+    fn socket_io_reconnect_integration() -> Result<()> {
+        let url = crate::test::socket_io_restart_server();
+
+        let connect_num = Arc::new(AtomicUsize::new(0));
+        let close_num = Arc::new(AtomicUsize::new(0));
+        let message_num = Arc::new(AtomicUsize::new(0));
+
+        let connect_num_clone = Arc::clone(&connect_num);
+        let close_num_clone = Arc::clone(&close_num);
+        let message_num_clone = Arc::clone(&message_num);
 
         let socket = ClientBuilder::new(url)
-            .on("test", |msg, _| match msg {
-                Payload::String(str) => println!("Received string: {}", str),
-                Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
+            .reconnect(true)
+            .max_reconnect_attempts(100)
+            .reconnect_delay(100, 100)
+            .on(Event::Connect, move |_, socket| {
+                connect_num_clone.fetch_add(1, Ordering::SeqCst);
+                let r = socket.emit_with_ack(
+                    "message",
+                    json!(""),
+                    Duration::from_millis(100),
+                    |_, _| {},
+                );
+                assert!(r.is_ok(), "should emit message success");
             })
-            .connect()?;
+            .on(Event::Close, move |_, _| {
+                close_num_clone.fetch_add(1, Ordering::SeqCst);
+            })
+            .on("message", move |_, _socket| {
+                // test the iterator implementation and make sure there is a constant
+                // stream of packets, even when reconnecting
+                message_num_clone.fetch_add(1, Ordering::SeqCst);
+            })
+            .connect();
 
-        let payload = json!({"token": 123});
-        let result = socket.emit("test", Payload::String(payload.to_string()));
+        assert!(socket.is_ok(), "should connect success");
+        let socket = socket.unwrap();
 
-        assert!(result.is_ok());
+        // waiting for server to emit message
+        std::thread::sleep(std::time::Duration::from_millis(500));
 
-        let ack_callback = move |message: Payload, socket: Client| {
-            let result = socket.emit(
-                "test",
-                Payload::String(json!({"got ack": true}).to_string()),
-            );
-            assert!(result.is_ok());
+        assert_eq!(load(&connect_num), 1, "should connect once");
+        assert_eq!(load(&message_num), 1, "should receive one");
+        assert_eq!(load(&close_num), 0, "should not close");
 
-            println!("Yehaa! My ack got acked?");
-            if let Payload::String(str) = message {
-                println!("Received string Ack");
-                println!("Ack data: {}", str);
+        let r = socket.emit("restart_server", json!(""));
+        assert!(r.is_ok(), "should emit restart success");
+
+        // waiting for server to restart
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            if load(&connect_num) == 2 && load(&message_num) == 2 {
+                break;
             }
+        }
+
+        assert_eq!(load(&connect_num), 2, "should connect twice");
+        assert_eq!(load(&message_num), 2, "should receive two messages");
+        assert_eq!(load(&close_num), 1, "should close once");
+
+        socket.disconnect()?;
+        Ok(())
+    }
+
+    #[test]
+    fn socket_io_iterator_integration() -> Result<()> {
+        let url = crate::test::socket_io_server();
+        let builder = ClientBuilder::new(url);
+        let builder_clone = builder.clone();
+
+        let client = Arc::new(RwLock::new(builder_clone.connect_raw()?));
+        let mut socket = Client {
+            builder,
+            client,
+            backoff: Default::default(),
         };
+        let socket_clone = socket.clone();
 
-        let ack = socket.emit_with_ack(
-            "test",
-            Payload::String(payload.to_string()),
-            Duration::from_secs(1),
-            ack_callback,
-        );
-        assert!(ack.is_ok());
+        let packets: Arc<RwLock<Vec<Packet>>> = Default::default();
+        let packets_clone = packets.clone();
 
-        sleep(Duration::from_secs(2));
-
-        assert!(socket.disconnect().is_ok());
-
-        Ok(())
-    }
-
-    #[test]
-    fn socket_io_builder_integration() -> Result<()> {
-        let url = crate::test::socket_io_server();
-
-        // test socket build logic
-        let socket_builder = ClientBuilder::new(url);
-
-        let tls_connector = TlsConnector::builder()
-            .use_sni(true)
-            .build()
-            .expect("Found illegal configuration");
-
-        let socket = socket_builder
-            .namespace("/admin")
-            .tls_config(tls_connector)
-            .opening_header("accept-encoding", "application/json")
-            .on("test", |str, _| println!("Received: {:#?}", str))
-            .on("message", |payload, _| println!("{:#?}", payload))
-            .connect()?;
-
-        assert!(socket.emit("message", json!("Hello World")).is_ok());
-
-        assert!(socket.emit("binary", Bytes::from_static(&[46, 88])).is_ok());
-
-        assert!(socket
-            .emit_with_ack(
-                "binary",
-                json!("pls ack"),
-                Duration::from_secs(1),
-                |payload, _| {
-                    println!("Yehaa the ack got acked");
-                    println!("With data: {:#?}", payload);
-                }
-            )
-            .is_ok());
-
-        sleep(Duration::from_secs(2));
-
-        Ok(())
-    }
-
-    #[test]
-    fn socket_io_builder_integration_iterator() -> Result<()> {
-        let url = crate::test::socket_io_server();
-
-        // test socket build logic
-        let socket_builder = ClientBuilder::new(url);
-
-        let tls_connector = TlsConnector::builder()
-            .use_sni(true)
-            .build()
-            .expect("Found illegal configuration");
-
-        let socket = socket_builder
-            .namespace("/admin")
-            .tls_config(tls_connector)
-            .opening_header("accept-encoding", "application/json")
-            .on("test", |str, _| println!("Received: {:#?}", str))
-            .on("message", |payload, _| println!("{:#?}", payload))
-            .connect_manual()?;
-
-        assert!(socket.emit("message", json!("Hello World")).is_ok());
-
-        assert!(socket.emit("binary", Bytes::from_static(&[46, 88])).is_ok());
-
-        assert!(socket
-            .emit_with_ack(
-                "binary",
-                json!("pls ack"),
-                Duration::from_secs(1),
-                |payload, _| {
-                    println!("Yehaa the ack got acked");
-                    println!("With data: {:#?}", payload);
-                }
-            )
-            .is_ok());
-
-        test_socketio_socket(socket, "/admin".to_owned())
-    }
-
-    #[test]
-    fn socket_io_on_any_integration() -> Result<()> {
-        let url = crate::test::socket_io_server();
-
-        let (tx, rx) = mpsc::sync_channel(1);
-
-        let _socket = ClientBuilder::new(url)
-            .namespace("/")
-            .auth(json!({ "password": "123" }))
-            .on("auth", |payload, _client| {
-                if let Payload::String(msg) = payload {
-                    println!("{}", msg);
-                }
-            })
-            .on_any(move |event, payload, _client| {
-                if let Payload::String(str) = payload {
-                    println!("{} {}", String::from(event.clone()), str);
-                }
-                tx.send(String::from(event)).unwrap();
-            })
-            .connect()?;
-
-        // Sleep to give server enough time to send 2 events
-        sleep(Duration::from_secs(2));
-
-        let event = rx.recv().unwrap();
-        assert_eq!(event, "message");
-        let event = rx.recv().unwrap();
-        assert_eq!(event, "test");
-
-        Ok(())
-    }
-
-    #[test]
-    fn socket_io_auth_builder_integration() -> Result<()> {
-        let url = crate::test::socket_io_auth_server();
-        let nsp = String::from("/admin");
-        let socket = ClientBuilder::new(url)
-            .namespace(nsp.clone())
-            .auth(json!({ "password": "123" }))
-            .connect_manual()?;
-
-        let mut iter = socket
-            .iter()
-            .map(|packet| packet.unwrap())
-            .filter(|packet| packet.packet_type != PacketId::Connect);
-
-        let packet: Option<Packet> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-
-        assert_eq!(
-            packet,
-            Packet::new(
-                PacketId::Event,
-                nsp.clone(),
-                Some("[\"auth\",\"success\"]".to_owned()),
-                None,
-                0,
-                None
-            )
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn socketio_polling_integration() -> Result<()> {
-        let url = crate::test::socket_io_server();
-        let socket = ClientBuilder::new(url.clone())
-            .transport_type(TransportType::Polling)
-            .connect_manual()?;
-        test_socketio_socket(socket, "/".to_owned())
-    }
-
-    #[test]
-    fn socket_io_websocket_integration() -> Result<()> {
-        let url = crate::test::socket_io_server();
-        let socket = ClientBuilder::new(url.clone())
-            .transport_type(TransportType::Websocket)
-            .connect_manual()?;
-        test_socketio_socket(socket, "/".to_owned())
-    }
-
-    #[test]
-    fn socket_io_websocket_upgrade_integration() -> Result<()> {
-        let url = crate::test::socket_io_server();
-        let socket = ClientBuilder::new(url)
-            .transport_type(TransportType::WebsocketUpgrade)
-            .connect_manual()?;
-        test_socketio_socket(socket, "/".to_owned())
-    }
-
-    #[test]
-    fn socket_io_any_integration() -> Result<()> {
-        let url = crate::test::socket_io_server();
-        let socket = ClientBuilder::new(url)
-            .transport_type(TransportType::Any)
-            .connect_manual()?;
-        test_socketio_socket(socket, "/".to_owned())
-    }
-
-    fn test_socketio_socket(socket: Client, nsp: String) -> Result<()> {
-        let mut iter = socket
-            .iter()
-            .map(|packet| packet.unwrap())
-            .filter(|packet| packet.packet_type != PacketId::Connect);
-
-        let packet: Option<Packet> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-
-        assert_eq!(
-            packet,
-            Packet::new(
-                PacketId::Event,
-                nsp.clone(),
-                Some("[\"Hello from the message event!\"]".to_owned()),
-                None,
-                0,
-                None,
-            )
-        );
-
-        let packet: Option<Packet> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-
-        assert_eq!(
-            packet,
-            Packet::new(
-                PacketId::Event,
-                nsp.clone(),
-                Some("[\"test\",\"Hello from the test event!\"]".to_owned()),
-                None,
-                0,
-                None
-            )
-        );
-
-        let packet: Option<Packet> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-        assert_eq!(
-            packet,
-            Packet::new(
-                PacketId::BinaryEvent,
-                nsp.clone(),
-                None,
-                None,
-                1,
-                Some(vec![Bytes::from_static(&[4, 5, 6])]),
-            )
-        );
-
-        let packet: Option<Packet> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-        assert_eq!(
-            packet,
-            Packet::new(
-                PacketId::BinaryEvent,
-                nsp.clone(),
-                Some("\"test\"".to_owned()),
-                None,
-                1,
-                Some(vec![Bytes::from_static(&[1, 2, 3])]),
-            )
-        );
-
-        assert!(socket
-            .emit_with_ack(
-                "test",
-                Payload::String("123".to_owned()),
-                Duration::from_secs(10),
-                |message: Payload, _| {
-                    println!("Yehaa! My ack got acked?");
-                    if let Payload::String(str) = message {
-                        println!("Received string ack");
-                        println!("Ack data: {}", str);
+        std::thread::spawn(move || {
+            for packet in socket_clone.iter() {
+                {
+                    let mut packets = packets_clone.write().unwrap();
+                    if let Ok(packet) = packet {
+                        (*packets).push(packet);
                     }
                 }
-            )
-            .is_ok());
+            }
+        });
+
+        // waiting for client to emit messages
+        std::thread::sleep(Duration::from_millis(100));
+        let lock = packets.read().unwrap();
+        let pre_num = lock.len();
+        drop(lock);
+
+        let _ = socket.disconnect();
+        socket.reconnect();
+
+        // waiting for client to emit messages
+        std::thread::sleep(Duration::from_millis(100));
+
+        let lock = packets.read().unwrap();
+        let post_num = lock.len();
+        drop(lock);
+
+        assert!(
+            pre_num < post_num,
+            "pre_num {} should less than post_num {}",
+            pre_num,
+            post_num
+        );
 
         Ok(())
     }
 
-    // TODO: 0.3.X add secure socketio server
+    fn load(num: &Arc<AtomicUsize>) -> usize {
+        num.load(Ordering::SeqCst)
+    }
 }

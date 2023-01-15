@@ -1,7 +1,7 @@
-use rust_socketio::{Client, ClientBuilder, Event, Payload};
+use rust_socketio::{ClientBuilder, Event, Payload, RawClient};
 use serde_json::json;
 
-fn handle_foo(payload: Payload, socket: Client) -> () {
+fn handle_foo(payload: Payload, socket: RawClient) -> () {
     socket.emit("bar", payload).expect("Server unreachable")
 }
 
@@ -9,7 +9,7 @@ fn main() {
     // define a callback which is called when a payload is received
     // this callback gets the payload as well as an instance of the
     // socket to communicate with the server
-    let handle_test = |payload: Payload, socket: Client| {
+    let handle_test = |payload: Payload, socket: RawClient| {
         match payload {
             Payload::String(str) => println!("Received string: {}", str),
             Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -26,7 +26,7 @@ fn main() {
         .on("test", handle_test)
         // Inline closure
         .on("error", |err, _| eprintln!("Error: {:#?}", err))
-        // Function call with signature (payload: Payload, socket: Client) -> ()
+        // Function call with signature (payload: Payload, socket: RawClient) -> ()
         .on("foo", handle_foo)
         // Reserved event names are case insensitive
         .on("oPeN", |_, _| println!("Connected"))

@@ -15,7 +15,7 @@ pub enum Error {
     // Conform to https://rust-lang.github.io/api-guidelines/naming.html#names-use-a-consistent-word-order-c-word-order
     // Negative verb-object
     #[error("Invalid packet id: {0}")]
-    InvalidPacketId(u8),
+    InvalidPacketId(char),
     #[error("Error while parsing an incomplete packet")]
     IncompletePacket(),
     #[error("Got an invalid packet which did not follow the protocol format")]
@@ -44,6 +44,8 @@ pub enum Error {
     IncompleteResponseFromEngineIo(#[from] rust_engineio::Error),
     #[error("Invalid packet type while reading attachments")]
     InvalidAttachmentPacketType(u8),
+    #[error("Underlying Engine.IO connection has closed")]
+    StoppedEngineIoSocket,
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;

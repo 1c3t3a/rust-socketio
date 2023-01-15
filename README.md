@@ -14,20 +14,20 @@ Information on the [`async`](#async) version can be found below.
 Add the following to your `Cargo.toml` file:
 
 ```toml
-rust_socketio = "0.3.1"
+rust_socketio = "0.4.0"
 ```
 
 Then you're able to run the following example code:
 
 ``` rust
-use rust_socketio::{ClientBuilder, Payload, Client};
+use rust_socketio::{ClientBuilder, Payload, RawClient};
 use serde_json::json;
 use std::time::Duration;
 
 // define a callback which is called when a payload is received
 // this callback gets the payload as well as an instance of the
 // socket to communicate with the server
-let callback = |payload: Payload, socket: Client| {
+let callback = |payload: Payload, socket: RawClient| {
        match payload {
            Payload::String(str) => println!("Received: {}", str),
            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),

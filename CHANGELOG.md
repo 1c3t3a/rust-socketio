@@ -12,7 +12,9 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
-* [`0.4.0-alpha.1`](#040a1) - _tbd_
+* [`0.4.1-alpha.1`](#041a1) - _tbd_
+* [`0.4.0`](#041) - _2023.01.15_
+* [`0.4.0`](#040) - _2022.10.20_
 * [`0.3.1`](#031) - _2022.03.19_
 * [`0.3.0`](#030) - _2021.12.16_
 * [`0.3.0-alpha.2`](#030a3) - _2021.12.04_
@@ -30,15 +32,37 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 _nothing new to show for… yet!_
 
-## <a name="040a1">[0.4.0-alpha.1] - _Async socket.io version_ </a>
+## <a name="041a1">[0.4.0-alpha.1] - _Async socket.io version_ </a>
 - Remove deprecated compability import of Client as Socket in project root.
+
+## <a name="041">[0.4.1] - _Minor enhancements_ </a>
+
+- As of [#264](https://github.com/1c3t3a/rust-socketio/pull/264), the callbacks
+  are now allowed to be `?Sync`.
+- As of [#265](https://github.com/1c3t3a/rust-socketio/pull/265), the `Payload`
+  type now implements `AsRef<u8>`.
+
+## <a name="040">[0.4.0] - _Bugfixes and Reconnection feature_ </a>
+
+_2022.10.20_
+
+### Changes
+- Fix [#214](https://github.com/1c3t3a/rust-socketio/issues/214).
+- Fix [#215](https://github.com/1c3t3a/rust-socketio/issues/215).
+- Fix [#219](https://github.com/1c3t3a/rust-socketio/issues/219).
+- Fix [#221](https://github.com/1c3t3a/rust-socketio/issues/221).
+- Fix [#222](https://github.com/1c3t3a/rust-socketio/issues/222).
+- BREAKING: The default Client returned by the builder will automatically reconnect to the server unless stopped manually.
+  The new `ReconnectClient` encapsulates this behaviour.
+
+Special thanks to [@SSebo](https://github.com/SSebo) for his major contribution to this release.
 
 ## <a name="031">[0.3.1] - _Bugfix_ </a>
 
 _2022.03.19_
 
 ### Changes
-- Fixes regarding [#166(https://github.com/1c3t3a/rust-socketio/issues/166).
+- Fixes regarding [#166](https://github.com/1c3t3a/rust-socketio/issues/166).
 
 ## <a name="030">[0.3.0] - _Stabilize alpha version_ </a>
 

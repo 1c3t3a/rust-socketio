@@ -1,8 +1,8 @@
 on:
   push:
-    branches: [main, refactoring]
+    branches: [main]
   pull_request:
-    branches: [main, refactoring]
+    branches: [main]
 
 name: generate coverage
 
@@ -21,6 +21,9 @@ jobs:
           toolchain: stable
           override: true
 
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
       - name: Setup docker
         id: buildx
         uses: docker/setup-buildx-action@v1
@@ -31,7 +34,7 @@ jobs:
       - name: Build docker container
         run: |
           cd ci && docker build -t test_suite:latest .
-          docker run -d --name test_suite -p 4200:4200 -p 4201:4201 -p 4202:4202 -p 4203:4203 -p 4204:4204 test_suite:latest
+          docker run -d --name test_suite -p 4200:4200 -p 4201:4201 -p 4202:4202 -p 4203:4203 -p 4204:4204 -p 4205:4205 test_suite:latest
 
       - uses: actions/cache@v2
         with:
@@ -42,22 +45,21 @@ jobs:
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run cargo-tarpaulin
-        uses: actions-rs/tarpaulin@v0.1
-        with:
-          version: "0.18.0-alpha3"
-          out-type: Lcov
+      - name: Generate code coverage
+        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
 
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v1.5.2
         with:
           token: ${{secrets.CODECOV_TOKEN}}
+          files: lcov.info
+          fail_ci_if_error: true
 
       - name: Collect docker logs
         if: always()
         run: docker logs test_suite > my_logs.txt 2>&1
-        
-      - name: Upload docker logs  
+
+      - name: Upload docker logs
         uses: actions/upload-artifact@v2
         if: always()
         with:

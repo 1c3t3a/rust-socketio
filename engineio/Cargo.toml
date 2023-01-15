@@ -1,6 +1,6 @@
 [package]
 name = "rust_engineio"
-version = "0.3.1"
+version = "0.4.1"
 authors = ["Bastian Kersting <bastian@cmbt.de>"]
 edition = "2021"
 description = "An implementation of a engineio client written in rust."
@@ -11,27 +11,26 @@ categories = ["network-programming", "web-programming", "web-programming::websoc
 license = "MIT"
 
 [dependencies]
-base64 = "0.13.0"
+base64 = "0.20.0"
 bytes = "1"
-crossbeam-utils = "0.8.8"
-reqwest = { version = "0.11.10", features = ["blocking", "native-tls", "stream"] }
+crossbeam-utils = "0.8.12"
+reqwest = { version = "0.11.13", features = ["blocking", "native-tls", "stream"] }
 adler32 = "1.2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-http = "0.2.6"
-tokio-tungstenite = { version = "0.17.1", features = ["native-tls"] }
-tungstenite = "0.17.2"
+http = "0.2.8"
+tokio-tungstenite = { version = "0.17.2", features = ["native-tls"] }
+tungstenite = "0.17.3"
 tokio = "1.16.1"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
-async-trait = "0.1.53"
+async-trait = "0.1.59"
 async-stream = "0.3.3"
 thiserror = "1.0"
-native-tls = "0.2.10"
-url = "2.2.2"
+native-tls = "0.2.11"
+url = "2.3.1"
 
 [dev-dependencies]
-cargo-tarpaulin = "0.18.5"
-criterion = { version = "0.3.4", features = ["async_tokio"] }
+criterion = { version = "0.4.0", features = ["async_tokio"] }
 lazy_static = "1.4.0"
 
 [dev-dependencies.tokio]

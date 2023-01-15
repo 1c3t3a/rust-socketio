@@ -62,6 +62,10 @@ impl WebsocketSecureTransport {
     pub(crate) async fn upgrade(&self) -> Result<()> {
         self.inner.upgrade().await
     }
+
+    pub(crate) async fn poll_next(&self) -> Result<Option<Bytes>> {
+        self.inner.poll_next().await
+    }
 }
 
 impl Stream for WebsocketSecureTransport {

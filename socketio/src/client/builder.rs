@@ -1,15 +1,16 @@
 use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
-use crate::Client;
+use super::client::Client;
+use crate::RawClient;
 use native_tls::TlsConnector;
 use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
 use rust_engineio::header::{HeaderMap, HeaderValue};
 use url::Url;
 
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
-use crate::error::{Error, Result};
+use crate::error::Result;
 use std::collections::HashMap;
-use std::thread;
+use std::sync::{Arc, Mutex};
 
 use crate::socket::Socket as InnerSocket;
 
@@ -30,15 +31,21 @@ pub enum TransportType {
 /// configuring the callback, the namespace and metadata of the socket. If no
 /// namespace is specified, the default namespace `/` is taken. The `connect` method
 /// acts the `build` method and returns a connected [`Client`].
+#[derive(Clone)]
 pub struct ClientBuilder {
     address: String,
-    on: HashMap<Event, Callback<SocketCallback>>,
-    on_any: Option<Callback<SocketAnyCallback>>,
+    on: Arc<Mutex<HashMap<Event, Callback<SocketCallback>>>>,
+    on_any: Arc<Mutex<Option<Callback<SocketAnyCallback>>>>,
     namespace: String,
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
     auth: Option<serde_json::Value>,
+    pub(crate) reconnect: bool,
+    // None reconnect attempts represent infinity.
+    pub(crate) max_reconnect_attempts: Option<u8>,
+    pub(crate) reconnect_delay_min: u64,
+    pub(crate) reconnect_delay_max: u64,
 }
 
 impl ClientBuilder {
@@ -48,11 +55,11 @@ impl ClientBuilder {
     /// will be used.
     /// # Example
     /// ```rust
-    /// use rust_socketio::{ClientBuilder, Payload, Client};
+    /// use rust_socketio::{ClientBuilder, Payload, RawClient};
     /// use serde_json::json;
     ///
     ///
-    /// let callback = |payload: Payload, socket: Client| {
+    /// let callback = |payload: Payload, socket: RawClient| {
     ///            match payload {
     ///                Payload::String(str) => println!("Received: {}", str),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -75,13 +82,18 @@ impl ClientBuilder {
     pub fn new<T: Into<String>>(address: T) -> Self {
         Self {
             address: address.into(),
-            on: HashMap::new(),
-            on_any: None,
+            on: Arc::new(Mutex::new(HashMap::new())),
+            on_any: Arc::new(Mutex::new(None)),
             namespace: "/".to_owned(),
             tls_config: None,
             opening_headers: None,
             transport_type: TransportType::Any,
             auth: None,
+            reconnect: true,
+            // None means infinity
+            max_reconnect_attempts: None,
+            reconnect_delay_min: 1000,
+            reconnect_delay_max: 5000,
         }
     }
 
@@ -93,6 +105,23 @@ impl ClientBuilder {
             nsp = "/".to_owned() + &nsp;
         }
         self.namespace = nsp;
+        self
+    }
+
+    pub fn reconnect(mut self, reconnect: bool) -> Self {
+        self.reconnect = reconnect;
+        self
+    }
+
+    pub fn reconnect_delay(mut self, min: u64, max: u64) -> Self {
+        self.reconnect_delay_min = min;
+        self.reconnect_delay_max = max;
+
+        self
+    }
+
+    pub fn max_reconnect_attempts(mut self, reconnect_attempts: u8) -> Self {
+        self.max_reconnect_attempts = Some(reconnect_attempts);
         self
     }
 
@@ -116,12 +145,15 @@ impl ClientBuilder {
     ///     .connect();
     ///
     /// ```
+    // While present implementation doesn't require mut, it's reasonable to require mutability.
+    #[allow(unused_mut)]
     pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
-        F: for<'a> FnMut(Payload, Client) + 'static + Sync + Send,
+        F: FnMut(Payload, RawClient) + 'static + Send,
     {
-        self.on
-            .insert(event.into(), Callback::<SocketCallback>::new(callback));
+        let callback = Callback::<SocketCallback>::new(callback);
+        // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
+        self.on.lock().unwrap().insert(event.into(), callback);
         self
     }
 
@@ -141,11 +173,15 @@ impl ClientBuilder {
     ///     .connect();
     ///
     /// ```
+    // While present implementation doesn't require mut, it's reasonable to require mutability.
+    #[allow(unused_mut)]
     pub fn on_any<F>(mut self, callback: F) -> Self
     where
-        F: for<'a> FnMut(Event, Payload, Client) + 'static + Sync + Send,
+        F: FnMut(Event, Payload, RawClient) + 'static + Send,
     {
-        self.on_any = Some(Callback::<SocketAnyCallback>::new(callback));
+        let callback = Some(Callback::<SocketAnyCallback>::new(callback));
+        // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
+        *self.on_any.lock().unwrap() = callback;
         self
     }
 
@@ -216,8 +252,8 @@ impl ClientBuilder {
     ///     .expect("Connection error");
     ///
     /// ```
-    pub fn auth<T: Into<serde_json::Value>>(mut self, auth: T) -> Self {
-        self.auth = Some(auth.into());
+    pub fn auth(mut self, auth: serde_json::Value) -> Self {
+        self.auth = Some(auth);
 
         self
     }
@@ -226,6 +262,7 @@ impl ClientBuilder {
     /// # Example
     /// ```rust
     /// use rust_socketio::{ClientBuilder, TransportType};
+    /// use serde_json::json;
     ///
     /// let socket = ClientBuilder::new("http://localhost:4200/")
     ///     // Use websockets to handshake and connect.
@@ -234,6 +271,12 @@ impl ClientBuilder {
     ///     .expect("connection failed");
     ///
     /// // use the socket
+    /// let json_payload = json!({"token": 123});
+    ///
+    /// let result = socket.emit("foo", json_payload);
+    ///
+    /// assert!(result.is_ok());
+    /// ```
     pub fn transport_type(mut self, transport_type: TransportType) -> Self {
         self.transport_type = transport_type;
 
@@ -264,28 +307,10 @@ impl ClientBuilder {
     /// assert!(result.is_ok());
     /// ```
     pub fn connect(self) -> Result<Client> {
-        let socket = self.connect_manual()?;
-        let socket_clone = socket.clone();
-
-        // Use thread to consume items in iterator in order to call callbacks
-        thread::spawn(move || {
-            // tries to restart a poll cycle whenever a 'normal' error occurs,
-            // it just panics on network errors, in case the poll cycle returned
-            // `Result::Ok`, the server receives a close frame so it's safe to
-            // terminate
-            for packet in socket_clone.iter() {
-                if let e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
-                    //TODO: 0.3.X handle errors
-                    panic!("{}", e.unwrap_err())
-                }
-            }
-        });
-
-        Ok(socket)
+        Client::new(self)
     }
 
-    //TODO: 0.3.X stabilize
-    pub(crate) fn connect_manual(self) -> Result<Client> {
+    pub fn connect_raw(self) -> Result<RawClient> {
         // Parse url here rather than in new to keep new returning Self.
         let mut url = Url::parse(&self.address)?;
 
@@ -311,7 +336,7 @@ impl ClientBuilder {
 
         let inner_socket = InnerSocket::new(engine_client)?;
 
-        let socket = Client::new(
+        let socket = RawClient::new(
             inner_socket,
             &self.namespace,
             self.on,

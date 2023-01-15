@@ -6,12 +6,12 @@ use reqwest::{
     blocking::{Client, ClientBuilder},
     header::HeaderMap,
 };
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use url::Url;
 
 #[derive(Debug, Clone)]
 pub struct PollingTransport {
-    client: Arc<Mutex<Client>>,
+    client: Arc<Client>,
     base_url: Arc<RwLock<Url>>,
 }
 
@@ -40,7 +40,7 @@ impl PollingTransport {
         url.query_pairs_mut().append_pair("transport", "polling");
 
         PollingTransport {
-            client: Arc::new(Mutex::new(client)),
+            client: Arc::new(client),
             base_url: Arc::new(RwLock::new(url)),
         }
     }
@@ -60,15 +60,13 @@ impl Transport for PollingTransport {
         } else {
             data
         };
-        let client = self.client.lock()?;
-        let status = client
+        let status = self
+            .client
             .post(self.address()?)
             .body(data_to_send)
             .send()?
             .status()
             .as_u16();
-
-        drop(client);
 
         if status != 200 {
             let error = Error::IncompleteHttp(status);
@@ -79,7 +77,7 @@ impl Transport for PollingTransport {
     }
 
     fn poll(&self) -> Result<Bytes> {
-        Ok(self.client.lock()?.get(self.address()?).send()?.bytes()?)
+        Ok(self.client.get(self.address()?).send()?.bytes()?)
     }
 
     fn base_url(&self) -> Result<Url> {

@@ -47,6 +47,15 @@ impl From<Bytes> for Payload {
     }
 }
 
+impl AsRef<[u8]> for Payload {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            Payload::Binary(b) => b.as_ref(),
+            Payload::String(s) => s.as_ref(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -55,15 +64,15 @@ mod tests {
 
     #[test]
     fn test_from() {
-        let sut = Payload::from("foo");
+        let sut = Payload::from("foo ™");
 
-        assert_eq!(Payload::String(String::from("foo")), sut);
+        assert_eq!(Payload::String(String::from("foo ™")), sut);
 
-        let sut = Payload::from(String::from("foo"));
-        assert_eq!(Payload::String(String::from("foo")), sut);
+        let sut = Payload::from(String::from("foo ™"));
+        assert_eq!(Payload::String(String::from("foo ™")), sut);
 
-        let sut = Payload::from(json!("foo"));
-        assert_eq!(Payload::String(String::from("\"foo\"")), sut);
+        let sut = Payload::from(json!("foo ™"));
+        assert_eq!(Payload::String(String::from("\"foo ™\"")), sut);
 
         let sut = Payload::from(vec![1, 2, 3]);
         assert_eq!(Payload::Binary(Bytes::from_static(&[1, 2, 3])), sut);
