@@ -14,7 +14,7 @@ Information on the [`async`](#async) version can be found below.
 Add the following to your `Cargo.toml` file:
 
 ```toml
-rust_socketio = "0.4.0"
+rust_socketio = "0.4.1"
 ```
 
 Then you're able to run the following example code:
@@ -98,7 +98,7 @@ The async `Client` and `ClientBuilder` support a similar interface to the sync v
 in the `asynchronous` module. In order to enable the support, you need to enable the `async`
 feature flag:
 ```toml
-rust_socketio = { version = "0.4.0-alpha.1", features = ["async"] }
+rust_socketio = { version = "0.4.1-alpha.1", features = ["async"] }
 ```
 
 The following code shows the example above in async fashion:
