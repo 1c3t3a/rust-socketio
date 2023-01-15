@@ -8,6 +8,13 @@ use crate::{
 use async_stream::try_stream;
 use futures_util::{Stream, StreamExt};
 
+/// An engine.io client that allows interaction with the connected engine.io
+/// server. This client provides means for connecting, disconnecting and sending
+/// packets to the server.
+///
+/// ## Note:
+/// There is no need to put this Client behind an `Arc`, as the type uses `Arc`
+/// internally and provides a shared state beyond all cloned instances.
 #[derive(Clone)]
 pub struct Client {
     pub(super) socket: InnerSocket,
@@ -56,7 +63,7 @@ impl Client {
     }
 
     /// Check if the underlying transport client is connected.
-    pub fn is_connected(&self) -> Result<bool> {
+    pub fn is_connected(&self) -> bool {
         self.socket.is_connected()
     }
 }
@@ -80,7 +87,7 @@ impl Debug for Client {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test))]
 mod test {
 
     use super::*;
@@ -89,6 +96,47 @@ mod test {
     use futures_util::StreamExt;
     use native_tls::TlsConnector;
     use url::Url;
+
+    /// The purpose of this test is to check whether the Client is properly cloneable or not.
+    /// As the documentation of the engine.io client states, the object needs to maintain it's internal
+    /// state when cloned and the cloned object should reflect the same state throughout the lifetime
+    /// of both objects (initial and cloned).
+    #[tokio::test]
+    async fn test_client_cloneable() -> Result<()> {
+        let url = crate::test::engine_io_server()?;
+
+        let mut sut = builder(url).build().await?;
+        let mut cloned = sut.clone();
+
+        sut.connect().await?;
+
+        // when the underlying socket is connected, the
+        // state should also change on the cloned one
+        assert!(sut.is_connected());
+        assert!(cloned.is_connected());
+
+        // both clients should reflect the same messages.
+        assert_eq!(
+            sut.next().await.unwrap()?,
+            Packet::new(PacketId::Message, "hello client")
+        );
+
+        sut.emit(Packet::new(PacketId::Message, "respond")).await?;
+
+        assert_eq!(
+            cloned.next().await.unwrap()?,
+            Packet::new(PacketId::Message, "Roger Roger")
+        );
+
+        cloned.disconnect().await?;
+
+        // when the underlying socket is disconnected, the
+        // state should also change on the cloned one
+        assert!(!sut.is_connected());
+        assert!(!cloned.is_connected());
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_illegal_actions() -> Result<()> {
@@ -200,7 +248,7 @@ mod test {
 
         socket.disconnect().await?;
 
-        assert!(!socket.is_connected()?);
+        assert!(!socket.is_connected());
 
         Ok(())
     }

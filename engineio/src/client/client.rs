@@ -14,6 +14,13 @@ use std::convert::TryInto;
 use std::fmt::Debug;
 use url::Url;
 
+/// An engine.io client that allows interaction with the connected engine.io
+/// server. This client provides means for connecting, disconnecting and sending
+/// packets to the server.
+///
+/// ## Note:
+/// There is no need to put this Client behind an `Arc`, as the type uses `Arc`
+/// internally and provides a shared state beyond all cloned instances.
 #[derive(Clone, Debug)]
 pub struct Client {
     socket: InnerSocket,
@@ -371,6 +378,57 @@ mod test {
     use crate::packet::PacketId;
 
     use super::*;
+
+    /// The purpose of this test is to check whether the Client is properly cloneable or not.
+    /// As the documentation of the engine.io client states, the object needs to maintain it's internal
+    /// state when cloned and the cloned object should reflect the same state throughout the lifetime
+    /// of both objects (initial and cloned).
+    #[test]
+    fn test_client_cloneable() -> Result<()> {
+        let url = crate::test::engine_io_server()?;
+        let sut = builder(url).build()?;
+
+        let cloned = sut.clone();
+
+        sut.connect()?;
+
+        // when the underlying socket is connected, the
+        // state should also change on the cloned one
+        assert!(sut.is_connected()?);
+        assert!(cloned.is_connected()?);
+
+        // both clients should reflect the same messages.
+        let mut iter = sut
+            .iter()
+            .map(|packet| packet.unwrap())
+            .filter(|packet| packet.packet_id != PacketId::Ping);
+
+        let mut iter_cloned = cloned
+            .iter()
+            .map(|packet| packet.unwrap())
+            .filter(|packet| packet.packet_id != PacketId::Ping);
+
+        assert_eq!(
+            iter.next(),
+            Some(Packet::new(PacketId::Message, "hello client"))
+        );
+
+        sut.emit(Packet::new(PacketId::Message, "respond"))?;
+
+        assert_eq!(
+            iter_cloned.next(),
+            Some(Packet::new(PacketId::Message, "Roger Roger"))
+        );
+
+        cloned.disconnect()?;
+
+        // when the underlying socket is disconnected, the
+        // state should also change on the cloned one
+        assert!(!sut.is_connected()?);
+        assert!(!cloned.is_connected()?);
+
+        Ok(())
+    }
 
     #[test]
     fn test_illegal_actions() -> Result<()> {

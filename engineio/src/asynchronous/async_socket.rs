@@ -194,8 +194,8 @@ impl Socket {
     }
 
     // Check if the underlying transport client is connected.
-    pub(crate) fn is_connected(&self) -> Result<bool> {
-        Ok(self.connected.load(Ordering::Acquire))
+    pub(crate) fn is_connected(&self) -> bool {
+        self.connected.load(Ordering::Acquire)
     }
 
     pub(crate) async fn pinged(&self) {

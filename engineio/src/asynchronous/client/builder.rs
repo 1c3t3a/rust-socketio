@@ -66,6 +66,7 @@ impl ClientBuilder {
     }
 
     /// Registers the `on_close` callback.
+    #[cfg(feature = "async-callbacks")]
     pub fn on_close<T>(mut self, callback: T) -> Self
     where
         T: 'static + Send + Sync + Fn(()) -> BoxFuture<'static, ()>,
@@ -75,6 +76,7 @@ impl ClientBuilder {
     }
 
     /// Registers the `on_data` callback.
+    #[cfg(feature = "async-callbacks")]
     pub fn on_data<T>(mut self, callback: T) -> Self
     where
         T: 'static + Send + Sync + Fn(Bytes) -> BoxFuture<'static, ()>,
@@ -84,6 +86,7 @@ impl ClientBuilder {
     }
 
     /// Registers the `on_error` callback.
+    #[cfg(feature = "async-callbacks")]
     pub fn on_error<T>(mut self, callback: T) -> Self
     where
         T: 'static + Send + Sync + Fn(String) -> BoxFuture<'static, ()>,
@@ -93,6 +96,7 @@ impl ClientBuilder {
     }
 
     /// Registers the `on_open` callback.
+    #[cfg(feature = "async-callbacks")]
     pub fn on_open<T>(mut self, callback: T) -> Self
     where
         T: 'static + Send + Sync + Fn(()) -> BoxFuture<'static, ()>,
@@ -102,6 +106,7 @@ impl ClientBuilder {
     }
 
     /// Registers the `on_packet` callback.
+    #[cfg(feature = "async-callbacks")]
     pub fn on_packet<T>(mut self, callback: T) -> Self
     where
         T: 'static + Send + Sync + Fn(Packet) -> BoxFuture<'static, ()>,

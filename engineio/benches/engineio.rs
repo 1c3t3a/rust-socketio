@@ -44,7 +44,12 @@ pub mod util {
 
 #[cfg(not(feature = "async"))]
 pub mod tests {
-    use super::*;
+    use bytes::Bytes;
+    use reqwest::Url;
+    use rust_engineio::{Client, ClientBuilder, Error, Packet, PacketId};
+
+    use crate::tls_connector;
+
     pub fn engine_io_socket_build(url: Url) -> Result<Client, Error> {
         ClientBuilder::new(url).build()
     }
@@ -80,6 +85,8 @@ pub mod tests {
 
 #[cfg(not(feature = "async"))]
 mod criterion_wrappers {
+    use criterion::{black_box, Criterion};
+
     use super::*;
 
     pub fn criterion_engine_io_socket_build(c: &mut Criterion) {
