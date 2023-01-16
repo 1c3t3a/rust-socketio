@@ -115,6 +115,18 @@ impl ClientBuilder {
         self
     }
 
+    /// If set to `true` automatically set try to reconnect when the server
+    /// disconnects the client.
+    /// Defaults to `false`.
+    ///
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::ClientBuilder;
+    ///
+    /// let socket = ClientBuilder::new("http://localhost:4200/")
+    ///     .reconnect_on_disconnect(true)
+    ///     .connect();
+    /// ```
     pub fn reconnect_on_disconnect(mut self, reconnect_on_disconnect: bool) -> Self {
         self.reconnect_on_disconnect = reconnect_on_disconnect;
         self
