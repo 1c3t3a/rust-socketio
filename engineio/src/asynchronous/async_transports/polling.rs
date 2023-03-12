@@ -1,6 +1,7 @@
 use adler32::adler32;
 use async_stream::try_stream;
 use async_trait::async_trait;
+use base64::{engine::general_purpose, Engine as _};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{Stream, StreamExt};
 use http::HeaderMap;
@@ -106,7 +107,7 @@ impl AsyncTransport for PollingTransport {
             let mut packet_bytes = BytesMut::with_capacity(data.len() + 1);
             packet_bytes.put_u8(b'b');
 
-            let encoded_data = base64::encode(data);
+            let encoded_data = general_purpose::STANDARD.encode(data);
             packet_bytes.put(encoded_data.as_bytes());
 
             packet_bytes.freeze()

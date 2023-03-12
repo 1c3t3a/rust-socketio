@@ -1,5 +1,6 @@
 use crate::error::{Error, Result};
 use crate::transport::Transport;
+use base64::{engine::general_purpose, Engine as _};
 use bytes::{BufMut, Bytes, BytesMut};
 use native_tls::TlsConnector;
 use reqwest::{
@@ -53,7 +54,7 @@ impl Transport for PollingTransport {
             let mut packet_bytes = BytesMut::with_capacity(data.len() + 1);
             packet_bytes.put_u8(b'b');
 
-            let encoded_data = base64::encode(data);
+            let encoded_data = general_purpose::STANDARD.encode(data);
             packet_bytes.put(encoded_data.as_bytes());
 
             packet_bytes.freeze()
