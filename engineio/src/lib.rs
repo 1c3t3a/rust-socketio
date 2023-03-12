@@ -73,10 +73,9 @@
 /// functions.
 macro_rules! spawn_scoped {
     ($e:expr) => {
-        crossbeam_utils::thread::scope(|s| {
-            s.spawn(|_| $e);
-        })
-        .unwrap();
+        std::thread::scope(|s| {
+            s.spawn(|| $e);
+        });
     };
 }
 
