@@ -1,5 +1,5 @@
 extern crate base64;
-use base64::{decode, encode};
+use base64::{engine::general_purpose, Engine as _};
 use bytes::{BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use std::char;
@@ -126,7 +126,7 @@ impl TryFrom<Bytes> for Packet {
         Ok(Packet {
             packet_id,
             data: if is_base64 {
-                Bytes::from(decode(data.as_ref())?)
+                Bytes::from(general_purpose::STANDARD.decode(data.as_ref())?)
             } else {
                 data
             },
@@ -140,7 +140,7 @@ impl From<Packet> for Bytes {
         let mut result = BytesMut::with_capacity(packet.data.len() + 1);
         result.put(String::from(packet.packet_id).as_bytes());
         if packet.packet_id == PacketId::MessageBinary {
-            result.extend(encode(packet.data).into_bytes());
+            result.extend(general_purpose::STANDARD.encode(packet.data).into_bytes());
         } else {
             result.put(packet.data);
         }
