@@ -42,7 +42,6 @@ pub struct ClientBuilder {
     transport_type: TransportType,
     auth: Option<serde_json::Value>,
     pub(crate) reconnect: bool,
-    pub(crate) reconnect_on_disconnect: bool,
     // None reconnect attempts represent infinity.
     pub(crate) max_reconnect_attempts: Option<u8>,
     pub(crate) reconnect_delay_min: u64,
@@ -91,7 +90,6 @@ impl ClientBuilder {
             transport_type: TransportType::Any,
             auth: None,
             reconnect: true,
-            reconnect_on_disconnect: false,
             // None means infinity
             max_reconnect_attempts: None,
             reconnect_delay_min: 1000,
@@ -112,23 +110,6 @@ impl ClientBuilder {
 
     pub fn reconnect(mut self, reconnect: bool) -> Self {
         self.reconnect = reconnect;
-        self
-    }
-
-    /// If set to `true` automatically set try to reconnect when the server
-    /// disconnects the client.
-    /// Defaults to `false`.
-    ///
-    /// # Example
-    /// ```rust
-    /// use rust_socketio::ClientBuilder;
-    ///
-    /// let socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .reconnect_on_disconnect(true)
-    ///     .connect();
-    /// ```
-    pub fn reconnect_on_disconnect(mut self, reconnect_on_disconnect: bool) -> Self {
-        self.reconnect_on_disconnect = reconnect_on_disconnect;
         self
     }
 
@@ -168,7 +149,7 @@ impl ClientBuilder {
     #[allow(unused_mut)]
     pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
-        F: FnMut(Payload, RawClient) + 'static + Send,
+        F: FnMut(Payload, RawClient, Option<i32>) + 'static + Send,
     {
         let callback = Callback::<SocketCallback>::new(callback);
         // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
@@ -196,7 +177,7 @@ impl ClientBuilder {
     #[allow(unused_mut)]
     pub fn on_any<F>(mut self, callback: F) -> Self
     where
-        F: FnMut(Event, Payload, RawClient) + 'static + Send,
+        F: FnMut(Event, Payload, RawClient, Option<i32>) + 'static + Send,
     {
         let callback = Some(Callback::<SocketAnyCallback>::new(callback));
         // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held

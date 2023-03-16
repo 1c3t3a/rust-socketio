@@ -74,85 +74,6 @@
 //! - send JSON data to the server and receive an `ack`.
 //! - send and handle Binary data.
 //!
-//! ## Async version
-//! This library provides an ability for being executed in an asynchronous context using `tokio` as
-//! the execution runtime.
-//! Please note that the current async implementation is in beta, the interface can be object to
-//! drastic changes.
-//! The async `Client` and `ClientBuilder` support a similar interface to the sync version and live
-//! in the [`asynchronous`] module. In order to enable the support, you need to enable the `async`
-//! feature flag:
-//! ```toml
-//! rust_socketio = { version = "0.4.0-alpha.1", features = ["async"] }
-//! ```
-//!
-//! The following code shows the example above in async fashion:
-//!
-//! ``` rust
-//! use futures_util::FutureExt;
-//! use rust_socketio::{
-//!     asynchronous::{Client, ClientBuilder},
-//!     Payload,
-//! };
-//! use serde_json::json;
-//! use std::time::Duration;
-//!
-//! #[tokio::main]
-//! async fn main() {
-//!     // define a callback which is called when a payload is received
-//!     // this callback gets the payload as well as an instance of the
-//!     // socket to communicate with the server
-//!     let callback = |payload: Payload, socket: Client| {
-//!         async move {
-//!             match payload {
-//!                 Payload::String(str) => println!("Received: {}", str),
-//!                 Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
-//!             }
-//!             socket
-//!                 .emit("test", json!({"got ack": true}))
-//!                 .await
-//!                 .expect("Server unreachable");
-//!         }
-//!         .boxed()
-//!     };
-//!
-//!     // get a socket that is connected to the admin namespace
-//!     let socket = ClientBuilder::new("http://localhost:4200/")
-//!         .namespace("/admin")
-//!         .on("test", callback)
-//!         .on("error", |err, _| {
-//!             async move { eprintln!("Error: {:#?}", err) }.boxed()
-//!         })
-//!         .connect()
-//!         .await
-//!         .expect("Connection failed");
-//!
-//!     // emit to the "foo" event
-//!     let json_payload = json!({"token": 123});
-//!     socket
-//!         .emit("foo", json_payload)
-//!         .await
-//!         .expect("Server unreachable");
-//!
-//!     // define a callback, that's executed when the ack got acked
-//!     let ack_callback = |message: Payload, _: Client| {
-//!         async move {
-//!             println!("Yehaa! My ack got acked?");
-//!             println!("Ack data: {:#?}", message);
-//!         }
-//!         .boxed()
-//!     };
-//!
-//!     let json_payload = json!({"myAckData": 123});
-//!     // emit with an ack
-//!     socket
-//!         .emit_with_ack("test", json_payload, Duration::from_secs(2), ack_callback)
-//!         .await
-//!         .expect("Server unreachable");
-//!
-//!     socket.disconnect().await.expect("Disconnect failed");
-//! }
-//! ```
 #![allow(clippy::rc_buffer)]
 #![warn(clippy::complexity)]
 #![warn(clippy::style)]
@@ -175,12 +96,6 @@ pub(self) mod socket;
 /// Contains the error type which will be returned with every result in this
 /// crate.
 pub mod error;
-
-#[cfg(feature = "async")]
-/// Asynchronous version of the socket.io client. This module contains the async
-/// [`crate::asynchronous::Client`] as well as a builder
-/// ([`crate::asynchronous::ClientBuilder`]) that allows for configuring a client.
-pub mod asynchronous;
 
 pub use error::Error;
 

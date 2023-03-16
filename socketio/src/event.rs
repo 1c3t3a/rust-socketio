@@ -5,7 +5,7 @@ pub enum Event {
     Error,
     Custom(String),
     Connect,
-    Close,
+    Close
 }
 
 impl From<String> for Event {

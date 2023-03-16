@@ -4,11 +4,7 @@ use std::{
 };
 
 use super::{ClientBuilder, RawClient};
-use crate::{
-    error::Result,
-    packet::{Packet, PacketId},
-    Error,
-};
+use crate::{error::Result, packet::Packet, Error};
 pub(crate) use crate::{event::Event, payload::Payload};
 use backoff::ExponentialBackoff;
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
@@ -117,7 +113,7 @@ impl Client {
         callback: F,
     ) -> Result<()>
     where
-        F: FnMut(Payload, RawClient) + 'static + Send,
+        F: FnMut(Payload, RawClient, Option<i32>) + 'static + Send,
         E: Into<Event>,
         D: Into<Payload>,
     {
@@ -201,19 +197,9 @@ impl Client {
             // `Result::Ok`, the server receives a close frame so it's safe to
             // terminate
             for packet in self_clone.iter() {
-                let should_reconnect = match packet {
-                    Err(Error::IncompleteResponseFromEngineIo(_)) => {
-                        //TODO: 0.3.X handle errors
-                        //TODO: logging error
-                        true
-                    }
-                    Ok(Packet {
-                        packet_type: PacketId::Disconnect,
-                        ..
-                    }) => self_clone.builder.reconnect_on_disconnect,
-                    _ => false,
-                };
-                if should_reconnect {
+                if let _e @ Err(Error::IncompleteResponseFromEngineIo(_)) = packet {
+                    //TODO: 0.3.X handle errors
+                    //TODO: logging error
                     let _ = self_clone.disconnect();
                     self_clone.reconnect();
                 }
