@@ -37,7 +37,7 @@ pub struct RawClient {
     outstanding_acks: Arc<Mutex<Vec<Ack>>>,
     // namespace, for multiplexing messages
     nsp: String,
-    // Data sent in opening header
+    // Data send in the opening packet (commonly used as for auth)
     auth: Option<serde_json::Value>,
 }
 
