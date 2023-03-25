@@ -28,6 +28,8 @@ pub struct Client {
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
     // namespace, for multiplexing messages
     nsp: String,
+    // Data send in the opening packet (commonly used as for auth)
+    auth: Option<serde_json::Value>,
 }
 
 impl Client {
@@ -39,12 +41,14 @@ impl Client {
         socket: InnerSocket,
         namespace: T,
         on: HashMap<Event, Callback>,
+        auth: Option<serde_json::Value>,
     ) -> Result<Self> {
         Ok(Client {
             socket,
             nsp: namespace.into(),
             on: Arc::new(RwLock::new(on)),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
+            auth,
         })
     }
 
@@ -55,7 +59,8 @@ impl Client {
         self.socket.connect().await?;
 
         // construct the opening packet
-        let open_packet = Packet::new(PacketId::Connect, self.nsp.clone(), None, None, 0, None);
+        let auth = self.auth.as_ref().map(|data| data.to_string());
+        let open_packet = Packet::new(PacketId::Connect, self.nsp.clone(), auth, None, 0, None);
 
         self.socket.send(open_packet).await?;
 
@@ -586,6 +591,36 @@ mod test {
             .is_ok());
 
         test_socketio_socket(socket, "/admin".to_owned()).await
+    }
+
+    #[tokio::test]
+    async fn socket_io_auth_builder_integration() -> Result<()> {
+        let url = crate::test::socket_io_auth_server();
+        let nsp = String::from("/admin");
+        let mut socket = ClientBuilder::new(url)
+            .namespace(nsp.clone())
+            .auth(json!({ "password": "123" }))
+            .connect_manual()
+            .await?;
+
+        // open packet
+        let _ = socket.next().await.unwrap()?;
+
+        println!("Here12");
+        let packet = socket.next().await.unwrap()?;
+        assert_eq!(
+            packet,
+            Packet::new(
+                PacketId::Event,
+                nsp,
+                Some("[\"auth\",\"success\"]".to_owned()),
+                None,
+                0,
+                None
+            )
+        );
+
+        Ok(())
     }
 
     #[tokio::test]
