@@ -9,7 +9,10 @@ use tokio::{
     time::{Duration, Instant},
 };
 
-use super::{ack::Ack, callback::Callback};
+use super::{
+    ack::Ack,
+    callback::{Callback, DynAsyncAnyCallback, DynAsyncCallback},
+};
 use crate::{
     asynchronous::socket::Socket as InnerSocket,
     error::{Error, Result},
@@ -24,7 +27,8 @@ use crate::{
 pub struct Client {
     /// The inner socket client to delegate the methods to.
     socket: InnerSocket,
-    on: Arc<RwLock<HashMap<Event, Callback>>>,
+    on: Arc<RwLock<HashMap<Event, Callback<DynAsyncCallback>>>>,
+    on_any: Arc<RwLock<Option<Callback<DynAsyncAnyCallback>>>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
     // namespace, for multiplexing messages
     nsp: String,
@@ -40,13 +44,15 @@ impl Client {
     pub(crate) fn new<T: Into<String>>(
         socket: InnerSocket,
         namespace: T,
-        on: HashMap<Event, Callback>,
+        on: HashMap<Event, Callback<DynAsyncCallback>>,
+        on_any: Option<Callback<DynAsyncAnyCallback>>,
         auth: Option<serde_json::Value>,
     ) -> Result<Self> {
         Ok(Client {
             socket,
             nsp: namespace.into(),
             on: Arc::new(RwLock::new(on)),
+            on_any: Arc::new(RwLock::new(on_any)),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
             auth,
         })
@@ -221,7 +227,7 @@ impl Client {
             id,
             time_started: Instant::now(),
             timeout,
-            callback: Callback::new(callback),
+            callback: Callback::<DynAsyncCallback>::new(callback),
         };
 
         // add the ack to the tuple of outstanding acks
@@ -232,11 +238,28 @@ impl Client {
 
     async fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {
         let mut on = self.on.write().await;
-        let lock = on.deref_mut();
-        if let Some(callback) = lock.get_mut(event) {
-            callback(payload.into(), self.clone()).await;
+        let mut on_any = self.on_any.write().await;
+
+        let on_lock = on.deref_mut();
+        let on_any_lock = on_any.deref_mut();
+        let payload = payload.into();
+
+        if let Some(callback) = on_lock.get_mut(event) {
+            callback(payload.clone(), self.clone()).await;
         }
+
+        // Call on_any for all common and custom events.
+        match event {
+            Event::Message | Event::Custom(_) => {
+                if let Some(callback) = on_any_lock {
+                    callback(event.clone(), payload, self.clone()).await;
+                }
+            }
+            _ => (),
+        }
+
         drop(on);
+        drop(on_any);
         Ok(())
     }
 
@@ -426,7 +449,7 @@ mod test {
     use futures_util::{FutureExt, StreamExt};
     use native_tls::TlsConnector;
     use serde_json::json;
-    use tokio::time::sleep;
+    use tokio::{sync::mpsc, time::sleep};
 
     use crate::{
         asynchronous::client::{builder::ClientBuilder, client::Client},
@@ -591,6 +614,37 @@ mod test {
             .is_ok());
 
         test_socketio_socket(socket, "/admin".to_owned()).await
+    }
+
+    #[tokio::test]
+    async fn socket_io_on_any_integration() -> Result<()> {
+        let url = crate::test::socket_io_server();
+
+        let (tx, mut rx) = mpsc::channel(2);
+
+        let mut _socket = ClientBuilder::new(url)
+            .namespace("/")
+            .auth(json!({ "password": "123" }))
+            .on_any(move |event, payload, _| {
+                let clone_tx = tx.clone();
+                async move {
+                    if let Payload::String(str) = payload {
+                        println!("{}: {}", String::from(event.clone()), str);
+                    }
+                    clone_tx.send(String::from(event)).await.unwrap();
+                }
+                .boxed()
+            })
+            .connect()
+            .await?;
+
+        let event = rx.recv().await.unwrap();
+        assert_eq!(event, "message");
+
+        let event = rx.recv().await.unwrap();
+        assert_eq!(event, "test");
+
+        Ok(())
     }
 
     #[tokio::test]

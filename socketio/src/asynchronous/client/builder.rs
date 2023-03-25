@@ -11,7 +11,10 @@ use url::Url;
 
 use crate::{error::Result, Error, Event, Payload, TransportType};
 
-use super::{callback::Callback, client::Client};
+use super::{
+    callback::{Callback, DynAsyncAnyCallback, DynAsyncCallback},
+    client::Client,
+};
 use crate::asynchronous::socket::Socket as InnerSocket;
 
 /// A builder class for a `socket.io` socket. This handles setting up the client and
@@ -20,7 +23,8 @@ use crate::asynchronous::socket::Socket as InnerSocket;
 /// acts the `build` method and returns a connected [`Client`].
 pub struct ClientBuilder {
     address: String,
-    on: HashMap<Event, Callback>,
+    on: HashMap<Event, Callback<DynAsyncCallback>>,
+    on_any: Option<Callback<DynAsyncAnyCallback>>,
     namespace: String,
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
@@ -70,6 +74,7 @@ impl ClientBuilder {
         Self {
             address: address.into(),
             on: HashMap::new(),
+            on_any: None,
             namespace: "/".to_owned(),
             tls_config: None,
             opening_headers: None,
@@ -165,7 +170,38 @@ impl ClientBuilder {
             + Send
             + Sync,
     {
-        self.on.insert(event.into(), Callback::new(callback));
+        self.on
+            .insert(event.into(), Callback::<DynAsyncCallback>::new(callback));
+        self
+    }
+
+    /// Registers a Callback for all [`crate::event::Event::Custom`] and [`crate::event::Event::Message`].
+    ///
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{asynchronous::ClientBuilder, Payload};
+    /// use futures_util::future::FutureExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let client = ClientBuilder::new("http://localhost:4200/")
+    ///         .namespace("/admin")
+    ///         .on_any(|event, payload, _client| {
+    ///             async {
+    ///                 if let Payload::String(str) = payload {
+    ///                     println!("{}: {}", String::from(event), str);
+    ///                 }
+    ///             }.boxed()
+    ///         })
+    ///         .connect()
+    ///         .await;
+    /// }
+    /// ```
+    pub fn on_any<F>(mut self, callback: F) -> Self
+    where
+        F: for<'a> FnMut(Event, Payload, Client) -> BoxFuture<'static, ()> + 'static + Send + Sync,
+    {
+        self.on_any = Some(Callback::<DynAsyncAnyCallback>::new(callback));
         self
     }
 
@@ -350,7 +386,13 @@ impl ClientBuilder {
 
         let inner_socket = InnerSocket::new(engine_client)?;
 
-        let socket = Client::new(inner_socket, &self.namespace, self.on, self.auth)?;
+        let socket = Client::new(
+            inner_socket,
+            &self.namespace,
+            self.on,
+            self.on_any,
+            self.auth,
+        )?;
         socket.connect().await?;
 
         Ok(socket)
