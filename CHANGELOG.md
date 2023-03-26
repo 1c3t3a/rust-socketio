@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.4.1-alpha.2`](#041a2) - _2023.03.26_
 * [`0.4.1-alpha.1`](#041a1) - _2023.01.15_
 * [`0.4.0`](#041) - _2023.01.15_
 * [`0.4.0`](#040) - _2022.10.20_
@@ -31,6 +32,17 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## _[Unreleased]_
 
 _nothing new to show for… yet!_
+
+ <a name="041a2">[0.4.0-alpha.2] - _Async socket.io fixes_ </a>
+
+_2023.03.26_
+
+- Add `on_any` method for async `ClientBuilder`. This adds the capability to
+  react to all incoming events (custom and otherwise).
+- Add `auth` option to async `ClientBuilder`. This allows for specifying JSON
+  data that is sent with the first open packet, which is commonly used for
+  authentication.
+- Bump dependencies and remove calls to deprecated library functions.
 
 ## <a name="041a1">[0.4.0-alpha.1] - _Async socket.io version_ </a>
 
