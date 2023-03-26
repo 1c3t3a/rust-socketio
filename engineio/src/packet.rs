@@ -114,7 +114,7 @@ impl TryFrom<Bytes> for Packet {
         let packet_id = if is_base64 {
             PacketId::MessageBinary
         } else {
-            (*bytes.first().ok_or(Error::IncompletePacket())? as u8).try_into()?
+            (*bytes.first().ok_or(Error::IncompletePacket())?).try_into()?
         };
 
         if bytes.len() == 1 && packet_id == PacketId::Message {

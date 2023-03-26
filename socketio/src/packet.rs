@@ -163,7 +163,7 @@ impl TryFrom<&Bytes> for Packet {
         let mut packet: Packet = Default::default();
         let payload_utf8 =
             String::from_utf8(payload.to_vec()).map_err(|e| InvalidUtf8(e.utf8_error()))?;
-        let mut utf8_iter = payload_utf8.chars().into_iter().peekable();
+        let mut utf8_iter = payload_utf8.chars().peekable();
         let mut next_utf8;
         let mut char_buf: Vec<char> = vec![];
 
@@ -233,7 +233,7 @@ impl TryFrom<&Bytes> for Packet {
         }
 
         // data
-        let json_str: String = utf8_iter.into_iter().collect();
+        let json_str: String = utf8_iter.collect();
         let json_data: serde_json::Value = serde_json::from_str(&json_str).map_err(InvalidJson)?;
 
         match packet.packet_type {
