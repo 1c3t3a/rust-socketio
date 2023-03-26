@@ -1521,7 +1521,7 @@ dependencies = [
 
 [[package]]
 name = "rust_socketio"
-version = "0.4.1-alpha.1"
+version = "0.4.1-alpha.2"
 dependencies = [
  "adler32",
  "async-stream",
