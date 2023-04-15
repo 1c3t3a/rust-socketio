@@ -165,7 +165,7 @@ impl ClientBuilder {
     #[cfg(feature = "async-callbacks")]
     pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
-        F: for<'a> std::ops::FnMut(Payload, Client) -> BoxFuture<'static, ()>
+        F: for<'a> std::ops::FnMut(Payload, Client, Option<i32>) -> BoxFuture<'static, ()>
             + 'static
             + Send
             + Sync,
@@ -199,7 +199,7 @@ impl ClientBuilder {
     /// ```
     pub fn on_any<F>(mut self, callback: F) -> Self
     where
-        F: for<'a> FnMut(Event, Payload, Client) -> BoxFuture<'static, ()> + 'static + Send + Sync,
+        F: for<'a> FnMut(Event, Payload, Client, Option<i32>) -> BoxFuture<'static, ()> + 'static + Send + Sync,
     {
         self.on_any = Some(Callback::<DynAsyncAnyCallback>::new(callback));
         self

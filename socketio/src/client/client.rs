@@ -117,7 +117,7 @@ impl Client {
         callback: F,
     ) -> Result<()>
     where
-        F: FnMut(Payload, RawClient) + 'static + Send,
+        F: FnMut(Payload, RawClient, Option<i32>) + 'static + Send,
         E: Into<Event>,
         D: Into<Payload>,
     {
