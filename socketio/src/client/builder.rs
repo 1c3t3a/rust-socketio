@@ -168,7 +168,7 @@ impl ClientBuilder {
     #[allow(unused_mut)]
     pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
-        F: FnMut(Payload, RawClient) + 'static + Send,
+        F: FnMut(Payload, RawClient, Option<i32>) + 'static + Send,
     {
         let callback = Callback::<SocketCallback>::new(callback);
         // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
@@ -196,7 +196,7 @@ impl ClientBuilder {
     #[allow(unused_mut)]
     pub fn on_any<F>(mut self, callback: F) -> Self
     where
-        F: FnMut(Event, Payload, RawClient) + 'static + Send,
+        F: FnMut(Event, Payload, RawClient, Option<i32>) + 'static + Send,
     {
         let callback = Some(Callback::<SocketAnyCallback>::new(callback));
         // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held

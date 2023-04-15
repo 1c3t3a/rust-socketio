@@ -14,6 +14,8 @@ use url::ParseError as UrlParseError;
 pub enum Error {
     // Conform to https://rust-lang.github.io/api-guidelines/naming.html#names-use-a-consistent-word-order-c-word-order
     // Negative verb-object
+    #[error("Missed packet id")]
+    MissedPacketId(),
     #[error("Invalid packet id: {0}")]
     InvalidPacketId(char),
     #[error("Error while parsing an incomplete packet")]

@@ -211,7 +211,7 @@ impl Client {
         callback: F,
     ) -> Result<()>
     where
-        F: for<'a> std::ops::FnMut(Payload, Client) -> BoxFuture<'static, ()>
+        F: for<'a> std::ops::FnMut(Payload, Client, Option<i32>) -> BoxFuture<'static, ()>
             + 'static
             + Send
             + Sync,
@@ -221,7 +221,7 @@ impl Client {
         let id = thread_rng().gen_range(0..999);
         let socket_packet =
             self.socket
-                .build_packet_for_payload(data.into(), event.into(), &self.nsp, Some(id))?;
+                .build_packet_for_payload(data.into(), event.into(), &self.nsp, Some(id), true)?;
 
         let ack = Ack {
             id,
@@ -236,7 +236,57 @@ impl Client {
         self.socket.send(socket_packet).await
     }
 
-    async fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {
+    /// Sends a answer message
+    ///
+    /// # Example
+    /// ```
+    ///
+    /// use futures_util::FutureExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    /// use std::time::Duration;
+    /// use serde_json::json;
+    /// use tokio::time::sleep;
+    /// use rust_socketio::asynchronous::ClientBuilder;
+    /// use rust_socketio::Payload;
+    ///
+    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///         .on("foo", |payload: Payload, _| async move { println!("Received: {:#?}", payload) }.boxed())
+    ///         .connect()
+    ///         .on_any(|event, payload, socket, id| async move {
+    ///             socket.emit_answer(id, json!({"result" : true}));
+    ///         }.boxed())
+    ///         .await
+    ///         .expect("connection failed");
+    ///
+    ///
+    ///     sleep(Duration::from_secs(2));
+    /// }
+    /// ```
+    #[inline]
+    pub async fn emit_answer<D>(
+        &self,
+        id: Option<i32>,
+        data: D,
+    ) -> Result<()>
+    where
+        D: Into<Payload>,
+    {
+        let id = match id {
+            None => {
+                return Err(Error::MissedPacketId());
+            }
+            Some(el) => el
+        };
+        let socket_packet =
+            self.socket
+                .build_packet_for_payload(data.into(), Event::Message, &self.nsp, Some(id), true)?;
+
+        self.socket.send(socket_packet).await
+    }
+
+    async fn callback<P: Into<Payload>>(&self, event: &Event, payload: P, id: Option<i32>) -> Result<()> {
         let mut on = self.on.write().await;
         let mut on_any = self.on_any.write().await;
 
@@ -245,14 +295,14 @@ impl Client {
         let payload = payload.into();
 
         if let Some(callback) = on_lock.get_mut(event) {
-            callback(payload.clone(), self.clone()).await;
+            callback(payload.clone(), self.clone(), id).await;
         }
 
         // Call on_any for all common and custom events.
         match event {
             Event::Message | Event::Custom(_) => {
                 if let Some(callback) = on_any_lock {
-                    callback(event.clone(), payload, self.clone()).await;
+                    callback(event.clone(), payload, self.clone(), id).await;
                 }
             }
             _ => (),
@@ -277,6 +327,7 @@ impl Client {
                             ack.callback.deref_mut()(
                                 Payload::String(payload.to_owned()),
                                 self.clone(),
+                                socket_packet.id,
                             )
                             .await;
                         }
@@ -285,6 +336,7 @@ impl Client {
                                 ack.callback.deref_mut()(
                                     Payload::Binary(payload.to_owned()),
                                     self.clone(),
+                                    socket_packet.id,
                                 )
                                 .await;
                             }
@@ -312,7 +364,7 @@ impl Client {
 
         if let Some(attachments) = &packet.attachments {
             if let Some(binary_payload) = attachments.get(0) {
-                self.callback(&event, Payload::Binary(binary_payload.to_owned()))
+                self.callback(&event, Payload::Binary(binary_payload.to_owned()), packet.id)
                     .await?;
             }
         }
@@ -355,7 +407,7 @@ impl Client {
             };
 
             // call the correct callback
-            self.callback(&event, data.to_string()).await?;
+            self.callback(&event, data.to_string(), packet.id).await?;
         }
 
         Ok(())
@@ -370,20 +422,20 @@ impl Client {
             match packet.packet_type {
                 PacketId::Ack | PacketId::BinaryAck => {
                     if let Err(err) = self.handle_ack(packet).await {
-                        self.callback(&Event::Error, err.to_string()).await?;
+                        self.callback(&Event::Error, err.to_string(), packet.id).await?;
                         return Err(err);
                     }
                 }
                 PacketId::BinaryEvent => {
                     if let Err(err) = self.handle_binary_event(packet).await {
-                        self.callback(&Event::Error, err.to_string()).await?;
+                        self.callback(&Event::Error, err.to_string(), packet.id).await?;
                     }
                 }
                 PacketId::Connect => {
-                    self.callback(&Event::Connect, "").await?;
+                    self.callback(&Event::Connect, "", packet.id).await?;
                 }
                 PacketId::Disconnect => {
-                    self.callback(&Event::Close, "").await?;
+                    self.callback(&Event::Close, "", packet.id).await?;
                 }
                 PacketId::ConnectError => {
                     self.callback(
@@ -393,12 +445,13 @@ impl Client {
                                 .data
                                 .as_ref()
                                 .unwrap_or(&String::from("\"No error message provided\"")),
+                        packet.id
                     )
                     .await?;
                 }
                 PacketId::Event => {
                     if let Err(err) = self.handle_event(packet).await {
-                        self.callback(&Event::Error, err.to_string()).await?;
+                        self.callback(&Event::Error, err.to_string(), packet.id).await?;
                     }
                 }
             }
@@ -425,7 +478,7 @@ impl Stream for Client {
                 }
                 Some(Err(err)) => {
                     // call the error callback
-                    ready!(Box::pin(self.callback(&Event::Error, err.to_string())).poll_unpin(cx))?;
+                    ready!(Box::pin(self.callback(&Event::Error, err.to_string(), None)).poll_unpin(cx))?;
                     return Poll::Ready(Some(Err(err)));
                 }
                 Some(Ok(packet)) => {
