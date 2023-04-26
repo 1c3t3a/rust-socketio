@@ -137,10 +137,14 @@ impl Socket {
                 for await received_data in client.clone() {
                     let packet = received_data?;
 
-                    let packet = Self::handle_engineio_packet(packet, client.clone()).await?;
-                    Self::handle_socketio_packet(&packet, is_connected.clone());
+                    if packet.packet_id == EnginePacketId::Message
+                        || packet.packet_id == EnginePacketId::MessageBinary
+                    {
+                        let packet = Self::handle_engineio_packet(packet, client.clone()).await?;
+                        Self::handle_socketio_packet(&packet, is_connected.clone());
 
-                    yield packet;
+                        yield packet;
+                    }
                 }
         })
     }
