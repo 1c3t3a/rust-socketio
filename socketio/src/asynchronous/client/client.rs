@@ -1,6 +1,6 @@
-use std::{collections::HashMap, ops::DerefMut, pin::Pin, sync::Arc, task::Poll};
+use std::{collections::HashMap, ops::DerefMut, pin::Pin, sync::Arc};
 
-use futures_util::{future::BoxFuture, ready, FutureExt, Stream, StreamExt};
+use futures_util::{future::BoxFuture, stream, Stream, StreamExt};
 use log::trace;
 use rand::{thread_rng, Rng};
 use serde_json::{from_str, Value};
@@ -405,51 +405,47 @@ impl Client {
         }
         Ok(())
     }
-}
 
-impl Stream for Client {
-    type Item = Result<Packet>;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        loop {
-            // poll for the next payload
-            let next = ready!(self.socket.poll_next_unpin(cx));
-
-            match next {
-                None => {
-                    // end the stream if the underlying one is closed
-                    return Poll::Ready(None);
-                }
+    /// Returns the packet stream for the client.
+    pub(crate) fn as_stream<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Stream<Item = Result<Packet>> + Send + 'a>> {
+        stream::unfold(self.socket.clone(), |mut socket| async {
+            // wait for the next payload
+            let packet: Option<std::result::Result<Packet, Error>> = socket.next().await;
+            match packet {
+                // end the stream if the underlying one is closed
+                None => None,
                 Some(Err(err)) => {
                     // call the error callback
-                    ready!(Box::pin(self.callback(&Event::Error, err.to_string())).poll_unpin(cx))?;
-                    return Poll::Ready(Some(Err(err)));
-                }
-                Some(Ok(packet)) => {
-                    // if this packet is not meant for the current namespace, skip it an poll for the next one
-                    if packet.nsp == self.nsp {
-                        ready!(Box::pin(self.handle_socketio_packet(&packet)).poll_unpin(cx))?;
-                        return Poll::Ready(Some(Ok(packet)));
+                    match self.callback(&Event::Error, err.to_string()).await {
+                        Err(callback_err) => Some((Err(callback_err), socket)),
+                        Ok(_) => Some((Err(err), socket)),
                     }
                 }
+                Some(Ok(packet)) => match self.handle_socketio_packet(&packet).await {
+                    Err(callback_err) => Some((Err(callback_err), socket)),
+                    Ok(_) => Some((Ok(packet), socket)),
+                },
             }
-        }
+        })
+        .boxed()
     }
 }
 
 #[cfg(test)]
 mod test {
 
-    use std::time::Duration;
+    use std::{sync::Arc, time::Duration};
 
     use bytes::Bytes;
     use futures_util::{FutureExt, StreamExt};
     use native_tls::TlsConnector;
     use serde_json::json;
-    use tokio::{sync::mpsc, time::sleep};
+    use tokio::{
+        sync::mpsc,
+        time::{sleep, timeout},
+    };
 
     use crate::{
         asynchronous::client::{builder::ClientBuilder, client::Client},
@@ -512,6 +508,43 @@ mod test {
         sleep(Duration::from_secs(2)).await;
 
         assert!(socket.disconnect().await.is_ok());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn socket_io_async_callback() -> Result<()> {
+        // Test whether asynchronous callbacks are fully executed.
+        let url = crate::test::socket_io_server();
+
+        // This synchronization mechanism is used to let the test know that the end of the
+        // async callback was reached.
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let notify_clone = notify.clone();
+
+        let socket = ClientBuilder::new(url)
+            .on("test", move |_, _| {
+                let cl = notify_clone.clone();
+                async move {
+                    sleep(Duration::from_secs(1)).await;
+                    // The async callback should be awaited and not aborted.
+                    // Thus, the notification should be called.
+                    cl.notify_one();
+                }
+                .boxed()
+            })
+            .connect()
+            .await?;
+
+        let payload = json!({"token": 123_i32});
+        let result = socket
+            .emit("test", Payload::String(payload.to_string()))
+            .await;
+
+        assert!(result.is_ok());
+        // If the timeout did not trigger, the async callback was fully executed.
+        let timeout = timeout(Duration::from_secs(5), notify.notified()).await;
+        assert!(timeout.is_ok());
 
         Ok(())
     }
@@ -651,17 +684,18 @@ mod test {
     async fn socket_io_auth_builder_integration() -> Result<()> {
         let url = crate::test::socket_io_auth_server();
         let nsp = String::from("/admin");
-        let mut socket = ClientBuilder::new(url)
+        let socket = ClientBuilder::new(url)
             .namespace(nsp.clone())
             .auth(json!({ "password": "123" }))
             .connect_manual()
             .await?;
 
         // open packet
-        let _ = socket.next().await.unwrap()?;
+        let mut socket_stream = socket.as_stream();
+        let _ = socket_stream.next().await.unwrap()?;
 
         println!("Here12");
-        let packet = socket.next().await.unwrap()?;
+        let packet = socket_stream.next().await.unwrap()?;
         assert_eq!(
             packet,
             Packet::new(
@@ -717,11 +751,12 @@ mod test {
         test_socketio_socket(socket, "/".to_owned()).await
     }
 
-    async fn test_socketio_socket(mut socket: Client, nsp: String) -> Result<()> {
+    async fn test_socketio_socket(socket: Client, nsp: String) -> Result<()> {
         // open packet
-        let _: Option<Packet> = Some(socket.next().await.unwrap()?);
+        let mut socket_stream = socket.as_stream();
+        let _: Option<Packet> = Some(socket_stream.next().await.unwrap()?);
 
-        let packet: Option<Packet> = Some(socket.next().await.unwrap()?);
+        let packet: Option<Packet> = Some(socket_stream.next().await.unwrap()?);
 
         assert!(packet.is_some());
 
@@ -739,7 +774,7 @@ mod test {
             )
         );
 
-        let packet: Option<Packet> = Some(socket.next().await.unwrap()?);
+        let packet: Option<Packet> = Some(socket_stream.next().await.unwrap()?);
 
         assert!(packet.is_some());
 
@@ -756,7 +791,7 @@ mod test {
                 None
             )
         );
-        let packet: Option<Packet> = Some(socket.next().await.unwrap()?);
+        let packet: Option<Packet> = Some(socket_stream.next().await.unwrap()?);
 
         assert!(packet.is_some());
 
@@ -773,7 +808,7 @@ mod test {
             )
         );
 
-        let packet: Option<Packet> = Some(socket.next().await.unwrap()?);
+        let packet: Option<Packet> = Some(socket_stream.next().await.unwrap()?);
 
         assert!(packet.is_some());
 
@@ -811,7 +846,7 @@ mod test {
             .await
             .is_ok());
 
-        let packet: Option<Packet> = Some(socket.next().await.unwrap()?);
+        let packet: Option<Packet> = Some(socket_stream.next().await.unwrap()?);
 
         assert!(packet.is_some());
         let packet = packet.unwrap();
@@ -827,7 +862,7 @@ mod test {
             )
         );
 
-        let packet: Option<Packet> = Some(socket.next().await.unwrap()?);
+        let packet: Option<Packet> = Some(socket_stream.next().await.unwrap()?);
 
         assert!(packet.is_some());
         let packet = packet.unwrap();

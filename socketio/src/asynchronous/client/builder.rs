@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use futures_util::{future::BoxFuture, StreamExt};
 use log::trace;
 use native_tls::TlsConnector;
@@ -7,6 +5,7 @@ use rust_engineio::{
     asynchronous::ClientBuilder as EngineIoClientBuilder,
     header::{HeaderMap, HeaderValue},
 };
+use std::collections::HashMap;
 use url::Url;
 
 use crate::{error::Result, Error, Event, Payload, TransportType};
@@ -339,17 +338,17 @@ impl ClientBuilder {
     /// ```
     pub async fn connect(self) -> Result<Client> {
         let socket = self.connect_manual().await?;
-        let mut socket_clone = socket.clone();
+        let socket_clone = socket.clone();
 
         // Use thread to consume items in iterator in order to call callbacks
         tokio::runtime::Handle::current().spawn(async move {
+            let mut stream = socket_clone.as_stream();
             loop {
                 // tries to restart a poll cycle whenever a 'normal' error occurs,
                 // it just logs on network errors, in case the poll cycle returned
                 // `Result::Ok`, the server receives a close frame so it's safe to
                 // terminate
-                if let Some(e @ Err(Error::IncompleteResponseFromEngineIo(_))) =
-                    socket_clone.next().await
+                if let Some(e @ Err(Error::IncompleteResponseFromEngineIo(_))) = stream.next().await
                 {
                     trace!("Network error occured: {}", e.unwrap_err());
                 }
