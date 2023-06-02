@@ -343,14 +343,10 @@ impl ClientBuilder {
         // Use thread to consume items in iterator in order to call callbacks
         tokio::runtime::Handle::current().spawn(async move {
             let mut stream = socket_clone.as_stream();
-            loop {
-                // tries to restart a poll cycle whenever a 'normal' error occurs,
-                // it just logs on network errors, in case the poll cycle returned
-                // `Result::Ok`, the server receives a close frame so it's safe to
-                // terminate
-                if let Some(e @ Err(Error::IncompleteResponseFromEngineIo(_))) = stream.next().await
-                {
-                    trace!("Network error occured: {}", e.unwrap_err());
+            // Consume the stream until it returns None and the stream is closed.
+            while let Some(item) = stream.next().await {
+                if let e @ Err(Error::IncompleteResponseFromEngineIo(_)) = item {
+                    trace!("Network error occurred: {}", e.unwrap_err());
                 }
             }
         });
