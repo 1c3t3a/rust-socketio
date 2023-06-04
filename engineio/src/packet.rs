@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::char;
 use std::convert::TryFrom;
 use std::convert::TryInto;
+use std::fmt::{Display, Formatter, Result as FmtResult, Write};
 use std::ops::Index;
 
 use crate::error::{Error, Result};
@@ -22,12 +23,19 @@ pub enum PacketId {
     Noop,
 }
 
-impl From<PacketId> for String {
-    fn from(packet: PacketId) -> Self {
-        match packet {
-            PacketId::MessageBinary => "b".to_owned(),
-            _ => (u8::from(packet)).to_string(),
+impl PacketId {
+    /// Returns the byte that represents the [`PacketId`] as a [`char`].
+    fn to_string_byte(self) -> u8 {
+        match self {
+            Self::MessageBinary => b'b',
+            _ => u8::from(self) + b'0',
         }
+    }
+}
+
+impl Display for PacketId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.write_char(self.to_string_byte() as char)
     }
 }
 
@@ -138,7 +146,7 @@ impl From<Packet> for Bytes {
     /// Encodes a `Packet` into an `u8` byte stream.
     fn from(packet: Packet) -> Self {
         let mut result = BytesMut::with_capacity(packet.data.len() + 1);
-        result.put(String::from(packet.packet_id).as_bytes());
+        result.put_u8(packet.packet_id.to_string_byte());
         if packet.packet_id == PacketId::MessageBinary {
             result.extend(general_purpose::STANDARD.encode(packet.data).into_bytes());
         } else {
@@ -303,33 +311,35 @@ mod tests {
         let _sut = sut.unwrap_err();
         assert!(matches!(Error::IncompletePacket, _sut));
 
-        let sut = PacketId::try_from(b'0');
-        assert!(sut.is_ok());
-        assert_eq!(sut.unwrap(), PacketId::Open);
+        assert_eq!(PacketId::MessageBinary.to_string(), "b");
 
-        let sut = PacketId::try_from(b'1');
-        assert!(sut.is_ok());
-        assert_eq!(sut.unwrap(), PacketId::Close);
+        let sut = PacketId::try_from(b'0').unwrap();
+        assert_eq!(sut, PacketId::Open);
+        assert_eq!(sut.to_string(), "0");
 
-        let sut = PacketId::try_from(b'2');
-        assert!(sut.is_ok());
-        assert_eq!(sut.unwrap(), PacketId::Ping);
+        let sut = PacketId::try_from(b'1').unwrap();
+        assert_eq!(sut, PacketId::Close);
+        assert_eq!(sut.to_string(), "1");
 
-        let sut = PacketId::try_from(b'3');
-        assert!(sut.is_ok());
-        assert_eq!(sut.unwrap(), PacketId::Pong);
+        let sut = PacketId::try_from(b'2').unwrap();
+        assert_eq!(sut, PacketId::Ping);
+        assert_eq!(sut.to_string(), "2");
 
-        let sut = PacketId::try_from(b'4');
-        assert!(sut.is_ok());
-        assert_eq!(sut.unwrap(), PacketId::Message);
+        let sut = PacketId::try_from(b'3').unwrap();
+        assert_eq!(sut, PacketId::Pong);
+        assert_eq!(sut.to_string(), "3");
 
-        let sut = PacketId::try_from(b'5');
-        assert!(sut.is_ok());
-        assert_eq!(sut.unwrap(), PacketId::Upgrade);
+        let sut = PacketId::try_from(b'4').unwrap();
+        assert_eq!(sut, PacketId::Message);
+        assert_eq!(sut.to_string(), "4");
 
-        let sut = PacketId::try_from(b'6');
-        assert!(sut.is_ok());
-        assert_eq!(sut.unwrap(), PacketId::Noop);
+        let sut = PacketId::try_from(b'5').unwrap();
+        assert_eq!(sut, PacketId::Upgrade);
+        assert_eq!(sut.to_string(), "5");
+
+        let sut = PacketId::try_from(b'6').unwrap();
+        assert_eq!(sut, PacketId::Noop);
+        assert_eq!(sut.to_string(), "6");
 
         let sut = PacketId::try_from(42);
         assert!(sut.is_err());
