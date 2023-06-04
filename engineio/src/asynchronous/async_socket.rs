@@ -84,7 +84,7 @@ impl Socket {
     }
 
     /// A helper method that distributes
-    pub(super) async fn handle_inconming_packet(&self, packet: Packet) -> Result<()> {
+    pub(super) async fn handle_incoming_packet(&self, packet: Packet) -> Result<()> {
         // check for the appropriate action or callback
         self.handle_packet(packet.clone());
         match packet.packet_id {

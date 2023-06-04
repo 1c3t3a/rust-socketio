@@ -56,7 +56,7 @@ impl Client {
         Box::pin(try_stream! {
             for await item in socket.clone() {
                 let packet = item?;
-                socket.handle_inconming_packet(packet.clone()).await?;
+                socket.handle_incoming_packet(packet.clone()).await?;
                 yield packet;
             }
         })
@@ -204,7 +204,7 @@ mod test {
             socket.next().await.unwrap()?,
             Packet::new(PacketId::Message, "hello client")
         );
-        println!("received msg, abut to send");
+        println!("received msg, about to send");
 
         socket
             .emit(Packet::new(PacketId::Message, "respond"))
