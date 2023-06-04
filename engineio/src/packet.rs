@@ -174,17 +174,10 @@ impl TryFrom<Bytes> for Payload {
     /// Decodes a `payload` which in the `engine.io` context means a chain of normal
     /// packets separated by a certain SEPARATOR, in this case the delimiter `\x30`.
     fn try_from(payload: Bytes) -> Result<Self> {
-        let mut vec = Vec::new();
-        let mut last_index = 0;
-
-        for i in 0..payload.len() {
-            if *payload.get(i).unwrap() as char == Self::SEPARATOR {
-                vec.push(Packet::try_from(payload.slice(last_index..i))?);
-                last_index = i + 1;
-            }
-        }
-        // push the last packet as well
-        vec.push(Packet::try_from(payload.slice(last_index..payload.len()))?);
+        let vec = payload
+            .split(|&c| c as char == Self::SEPARATOR)
+            .map(|slice| Packet::try_from(payload.slice_ref(slice)))
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(Payload(vec))
     }
