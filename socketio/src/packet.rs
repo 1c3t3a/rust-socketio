@@ -1,8 +1,9 @@
 use crate::error::{Error, Result};
 use crate::Error::{InvalidJson, InvalidUtf8};
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use regex::Regex;
 use std::convert::TryFrom;
+use std::fmt::Write;
 
 /// An enumeration of the different `Packet` types in the `socket.io` protocol.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -96,50 +97,47 @@ impl From<&Packet> for Bytes {
     /// stream as it gets handled and send by it's own logic via the socket.
     fn from(packet: &Packet) -> Bytes {
         // first the packet type
-        let mut string = (packet.packet_type as u8).to_string();
+        let mut buffer = String::with_capacity(64);
+        buffer.push((packet.packet_type as u8 + b'0') as char);
 
         // eventually a number of attachments, followed by '-'
         if let PacketId::BinaryAck | PacketId::BinaryEvent = packet.packet_type {
-            string.push_str(&packet.attachment_count.to_string());
-            string.push('-');
+            let _ = write!(buffer, "{}-", packet.attachment_count);
         }
 
         // if the namespace is different from the default one append it as well,
         // followed by ','
         if packet.nsp != "/" {
-            string.push_str(packet.nsp.as_ref());
-            string.push(',');
+            buffer.push_str(&packet.nsp);
+            buffer.push(',');
         }
 
         // if an id is present append it...
-        if let Some(id) = packet.id.as_ref() {
-            string.push_str(&id.to_string());
+        if let Some(id) = packet.id {
+            let _ = write!(buffer, "{id}");
         }
 
-        let mut buffer = BytesMut::new();
-        buffer.put(string.as_ref());
-        if packet.attachments.as_ref().is_some() {
+        if packet.attachments.is_some() {
             // check if an event type is present
-            let placeholder = if let Some(event_type) = packet.data.as_ref() {
-                format!(
+            if let Some(event_type) = packet.data.as_ref() {
+                let _ = write!(
+                    buffer,
                     "[{},{{\"_placeholder\":true,\"num\":{}}}]",
                     event_type,
                     packet.attachment_count - 1,
-                )
+                );
             } else {
-                format!(
+                let _ = write!(
+                    buffer,
                     "[{{\"_placeholder\":true,\"num\":{}}}]",
                     packet.attachment_count - 1,
-                )
-            };
-
-            // build the buffers
-            buffer.put(placeholder.as_ref());
+                );
+            }
         } else if let Some(data) = packet.data.as_ref() {
-            buffer.put(data.as_ref());
+            buffer.push_str(data);
         }
 
-        buffer.freeze()
+        Bytes::from(buffer)
     }
 }
 
