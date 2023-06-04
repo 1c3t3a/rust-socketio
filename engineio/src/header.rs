@@ -6,11 +6,12 @@ use http::{
 };
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::FromStr;
 
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub struct HeaderName {
-    inner: String,
+    inner: Box<str>,
 }
 
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
@@ -27,15 +28,17 @@ pub struct IntoIter {
     inner: std::collections::hash_map::IntoIter<HeaderName, HeaderValue>,
 }
 
-impl ToString for HeaderName {
-    fn to_string(&self) -> std::string::String {
-        self.inner.clone()
+impl Display for HeaderName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.write_str(self.inner.as_ref())
     }
 }
 
 impl From<String> for HeaderName {
     fn from(string: String) -> Self {
-        HeaderName { inner: string }
+        HeaderName {
+            inner: string.into_boxed_str(),
+        }
     }
 }
 
@@ -44,7 +47,7 @@ impl TryFrom<HeaderName> for HttpHeaderName {
     fn try_from(
         header: HeaderName,
     ) -> std::result::Result<Self, <Self as std::convert::TryFrom<HeaderName>>::Error> {
-        Ok(HttpHeaderName::from_str(&header.to_string())?)
+        Ok(HttpHeaderName::from_str(header.inner.as_ref())?)
     }
 }
 
@@ -90,15 +93,15 @@ impl TryFrom<HeaderMap> for HttpHeaderMap {
     fn try_from(
         headers: HeaderMap,
     ) -> std::result::Result<Self, <Self as std::convert::TryFrom<HeaderMap>>::Error> {
-        let mut result = HttpHeaderMap::new();
-        for (key, value) in headers {
-            result.append(
-                HttpHeaderName::try_from(key)?,
-                HttpHeaderValue::try_from(value)?,
-            );
-        }
-
-        Ok(result)
+        headers
+            .into_iter()
+            .map(|(key, value)| {
+                Ok((
+                    HttpHeaderName::try_from(key)?,
+                    HttpHeaderValue::try_from(value)?,
+                ))
+            })
+            .collect()
     }
 }
 
