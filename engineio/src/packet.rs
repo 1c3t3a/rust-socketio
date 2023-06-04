@@ -166,12 +166,11 @@ impl TryFrom<Bytes> for Payload {
     /// Decodes a `payload` which in the `engine.io` context means a chain of normal
     /// packets separated by a certain SEPARATOR, in this case the delimiter `\x30`.
     fn try_from(payload: Bytes) -> Result<Self> {
-        let vec = payload
+        payload
             .split(|&c| c as char == Self::SEPARATOR)
             .map(|slice| Packet::try_from(payload.slice_ref(slice)))
-            .collect::<Result<Vec<_>>>()?;
-
-        Ok(Payload(vec))
+            .collect::<Result<Vec<_>>>()
+            .map(Self)
     }
 }
 
