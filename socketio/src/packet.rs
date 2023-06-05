@@ -160,7 +160,7 @@ impl TryFrom<&Bytes> for Packet {
         // packet_type
         let c = payload.chars().next().ok_or(Error::IncompletePacket())?;
         packet.packet_type = PacketId::try_from(c)?;
-        payload = &payload[1..];
+        payload = &payload[c.len_utf8()..];
 
         // attachment_count
         if let PacketId::BinaryAck | PacketId::BinaryEvent = packet.packet_type {
