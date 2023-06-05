@@ -118,20 +118,16 @@ impl From<&Packet> for Bytes {
         }
 
         if packet.attachments.is_some() {
+            let num = packet.attachment_count - 1;
+
             // check if an event type is present
             if let Some(event_type) = packet.data.as_ref() {
                 let _ = write!(
                     buffer,
-                    "[{},{{\"_placeholder\":true,\"num\":{}}}]",
-                    event_type,
-                    packet.attachment_count - 1,
+                    "[{event_type},{{\"_placeholder\":true,\"num\":{num}}}]",
                 );
             } else {
-                let _ = write!(
-                    buffer,
-                    "[{{\"_placeholder\":true,\"num\":{}}}]",
-                    packet.attachment_count - 1,
-                );
+                let _ = write!(buffer, "[{{\"_placeholder\":true,\"num\":{num}}}]");
             }
         } else if let Some(data) = packet.data.as_ref() {
             buffer.push_str(data);
