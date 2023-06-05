@@ -158,9 +158,9 @@ impl TryFrom<&Bytes> for Packet {
         let mut packet = Packet::default();
 
         // packet_type
-        let c = payload.chars().next().ok_or(Error::IncompletePacket())?;
-        packet.packet_type = PacketId::try_from(c)?;
-        payload = &payload[c.len_utf8()..];
+        let id_char = payload.chars().next().ok_or(Error::IncompletePacket())?;
+        packet.packet_type = PacketId::try_from(id_char)?;
+        payload = &payload[id_char.len_utf8()..];
 
         // attachment_count
         if let PacketId::BinaryAck | PacketId::BinaryEvent = packet.packet_type {
