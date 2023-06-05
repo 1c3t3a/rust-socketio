@@ -3,7 +3,7 @@ use std::{collections::HashMap, ops::DerefMut, pin::Pin, sync::Arc};
 use futures_util::{future::BoxFuture, stream, Stream, StreamExt};
 use log::trace;
 use rand::{thread_rng, Rng};
-use serde_json::{from_str, Value};
+use serde_json::Value;
 use tokio::{
     sync::RwLock,
     time::{Duration, Instant},
@@ -320,37 +320,31 @@ impl Client {
     }
 
     /// A method that parses a packet and eventually calls the corresponding
-    // callback with the supplied data.
+    /// callback with the supplied data.
     async fn handle_event(&self, packet: &Packet) -> Result<()> {
-        if packet.data.is_none() {
+        let Some(ref data) = packet.data else {
             return Ok(());
-        }
-        let data = packet.data.as_ref().unwrap();
+        };
 
         // a socketio message always comes in one of the following two flavors (both JSON):
         // 1: `["event", "msg"]`
         // 2: `["msg"]`
         // in case 2, the message is ment for the default message event, in case 1 the event
         // is specified
-        if let Ok(Value::Array(contents)) = from_str::<Value>(data) {
+        if let Ok(Value::Array(contents)) = serde_json::from_str::<Value>(data) {
             let (event, data) = if contents.len() > 1 {
                 // case 1
-                (
-                    contents
-                        .get(0)
-                        .map(|value| match value {
-                            Value::String(ev) => ev,
-                            _ => "message",
-                        })
-                        .unwrap_or("message")
-                        .into(),
-                    contents.get(1).ok_or(Error::IncompletePacket())?,
-                )
+                let event = match contents.first() {
+                    Some(Value::String(ev)) => Event::from(ev.as_str()),
+                    _ => Event::Message,
+                };
+
+                (event, contents.get(1).ok_or(Error::IncompletePacket())?)
             } else {
                 // case 2
                 (
                     Event::Message,
-                    contents.get(0).ok_or(Error::IncompletePacket())?,
+                    contents.first().ok_or(Error::IncompletePacket())?,
                 )
             };
 
