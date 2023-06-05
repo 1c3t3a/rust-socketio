@@ -305,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn test_packet_id_conversion_and_incompl_packet() {
+    fn test_packet_id_conversion_and_incompl_packet() -> Result<()> {
         let sut = Packet::try_from(Bytes::from_static(b"4"));
         assert!(sut.is_err());
         let _sut = sut.unwrap_err();
@@ -313,37 +313,39 @@ mod tests {
 
         assert_eq!(PacketId::MessageBinary.to_string(), "b");
 
-        let sut = PacketId::try_from(b'0').unwrap();
+        let sut = PacketId::try_from(b'0')?;
         assert_eq!(sut, PacketId::Open);
         assert_eq!(sut.to_string(), "0");
 
-        let sut = PacketId::try_from(b'1').unwrap();
+        let sut = PacketId::try_from(b'1')?;
         assert_eq!(sut, PacketId::Close);
         assert_eq!(sut.to_string(), "1");
 
-        let sut = PacketId::try_from(b'2').unwrap();
+        let sut = PacketId::try_from(b'2')?;
         assert_eq!(sut, PacketId::Ping);
         assert_eq!(sut.to_string(), "2");
 
-        let sut = PacketId::try_from(b'3').unwrap();
+        let sut = PacketId::try_from(b'3')?;
         assert_eq!(sut, PacketId::Pong);
         assert_eq!(sut.to_string(), "3");
 
-        let sut = PacketId::try_from(b'4').unwrap();
+        let sut = PacketId::try_from(b'4')?;
         assert_eq!(sut, PacketId::Message);
         assert_eq!(sut.to_string(), "4");
 
-        let sut = PacketId::try_from(b'5').unwrap();
+        let sut = PacketId::try_from(b'5')?;
         assert_eq!(sut, PacketId::Upgrade);
         assert_eq!(sut.to_string(), "5");
 
-        let sut = PacketId::try_from(b'6').unwrap();
+        let sut = PacketId::try_from(b'6')?;
         assert_eq!(sut, PacketId::Noop);
         assert_eq!(sut.to_string(), "6");
 
         let sut = PacketId::try_from(42);
         assert!(sut.is_err());
         assert!(matches!(sut.unwrap_err(), Error::InvalidPacketId(42)));
+
+        Ok(())
     }
 
     #[test]
