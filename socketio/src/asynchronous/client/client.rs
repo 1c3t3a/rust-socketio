@@ -662,7 +662,7 @@ mod test {
                 let clone_tx = tx.clone();
                 async move {
                     if let Payload::String(str) = payload {
-                        println!("{}: {}", String::from(event.clone()), str);
+                        println!("{event}: {str}");
                     }
                     clone_tx.send(String::from(event)).await.unwrap();
                 }
