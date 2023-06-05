@@ -97,7 +97,7 @@ impl From<&Packet> for Bytes {
     /// stream as it gets handled and send by it's own logic via the socket.
     fn from(packet: &Packet) -> Bytes {
         // first the packet type
-        let mut buffer = String::with_capacity(64);
+        let mut buffer = String::new();
         buffer.push((packet.packet_type as u8 + b'0') as char);
 
         // eventually a number of attachments, followed by '-'
