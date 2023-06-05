@@ -1,7 +1,9 @@
 use super::callback::Callback;
 use crate::packet::{Packet, PacketId};
+use crate::Error;
 pub(crate) use crate::{event::Event, payload::Payload};
 use rand::{thread_rng, Rng};
+use serde_json::Value;
 
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
 use crate::error::Result;
@@ -38,7 +40,7 @@ pub struct RawClient {
     // namespace, for multiplexing messages
     nsp: String,
     // Data send in the opening packet (commonly used as for auth)
-    auth: Option<serde_json::Value>,
+    auth: Option<Value>,
 }
 
 impl RawClient {
@@ -51,7 +53,7 @@ impl RawClient {
         namespace: T,
         on: Arc<Mutex<HashMap<Event, Callback<SocketCallback>>>>,
         on_any: Arc<Mutex<Option<Callback<SocketAnyCallback>>>>,
-        auth: Option<serde_json::Value>,
+        auth: Option<Value>,
     ) -> Result<Self> {
         Ok(RawClient {
             socket,
@@ -316,37 +318,39 @@ impl RawClient {
         Ok(())
     }
 
-    /// A method for handling the Event Client Packets.
-    // this could only be called with an event
+    /// A method that parses a packet and eventually calls the corresponding
+    /// callback with the supplied data.
     fn handle_event(&self, packet: &Packet) -> Result<()> {
-        // unwrap the potential data
-        if let Some(data) = &packet.data {
-            // the string must be a valid json array with the event at index 0 and the
-            // payload at index 1. if no event is specified, the message callback is used
-            if let Ok(serde_json::Value::Array(contents)) =
-                serde_json::from_str::<serde_json::Value>(data)
-            {
-                let event: Event = if contents.len() > 1 {
-                    contents
-                        .get(0)
-                        .map(|value| match value {
-                            serde_json::Value::String(ev) => ev,
-                            _ => "message",
-                        })
-                        .unwrap_or("message")
-                        .into()
-                } else {
-                    Event::Message
+        let Some(ref data) = packet.data else {
+            return Ok(());
+        };
+
+        // a socketio message always comes in one of the following two flavors (both JSON):
+        // 1: `["event", "msg"]`
+        // 2: `["msg"]`
+        // in case 2, the message is ment for the default message event, in case 1 the event
+        // is specified
+        if let Ok(Value::Array(contents)) = serde_json::from_str::<Value>(data) {
+            let (event, data) = if contents.len() > 1 {
+                // case 1
+                let event = match contents.first() {
+                    Some(Value::String(ev)) => Event::from(ev.as_str()),
+                    _ => Event::Message,
                 };
-                self.callback(
-                    &event,
-                    contents
-                        .get(1)
-                        .unwrap_or_else(|| contents.get(0).unwrap())
-                        .to_string(),
-                )?;
-            }
+
+                (event, contents.get(1).ok_or(Error::IncompletePacket())?)
+            } else {
+                // case 2
+                (
+                    Event::Message,
+                    contents.first().ok_or(Error::IncompletePacket())?,
+                )
+            };
+
+            // call the correct callback
+            self.callback(&event, data.to_string())?;
         }
+
         Ok(())
     }
 
