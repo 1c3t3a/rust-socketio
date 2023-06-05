@@ -1,9 +1,9 @@
 use crate::error::{Error, Result};
-use crate::Error::{InvalidJson, InvalidUtf8};
 use bytes::Bytes;
-use regex::Regex;
+
 use std::convert::TryFrom;
 use std::fmt::Write;
+use std::str::from_utf8 as str_from_utf8;
 
 /// An enumeration of the different `Packet` types in the `socket.io` protocol.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -154,102 +154,98 @@ impl TryFrom<&Bytes> for Packet {
     /// this member. This is done because the attachment is usually
     /// send in another packet.
     fn try_from(payload: &Bytes) -> Result<Packet> {
-        let mut packet: Packet = Default::default();
-        let payload_utf8 =
-            String::from_utf8(payload.to_vec()).map_err(|e| InvalidUtf8(e.utf8_error()))?;
-        let mut utf8_iter = payload_utf8.chars().peekable();
-        let mut next_utf8;
-        let mut char_buf: Vec<char> = vec![];
+        let mut packet = Packet::default();
 
         // packet_type
-        packet.packet_type =
-            PacketId::try_from(utf8_iter.next().ok_or(Error::IncompletePacket())?)?;
+        let (prefix, mut rest) = payload.split_first().ok_or(Error::IncompletePacket())?;
+        packet.packet_type = PacketId::try_from(*prefix)?;
 
         // attachment_count
         if let PacketId::BinaryAck | PacketId::BinaryEvent = packet.packet_type {
-            loop {
-                next_utf8 = utf8_iter.peek().ok_or(Error::IncompletePacket())?;
-                if *next_utf8 == '-' {
-                    let _ = utf8_iter.next(); // consume '-' char
-                    break;
-                }
-                char_buf.push(utf8_iter.next().unwrap()); // SAFETY: already peeked
-            }
-        }
-        let count_str: String = char_buf.iter().collect();
-        if let Ok(count) = count_str.parse::<u8>() {
-            packet.attachment_count = count;
+            let dash_idx = rest
+                .iter()
+                .position(|&byte| byte == b'-')
+                .ok_or(Error::IncompletePacket())?;
+
+            let (prefix, [_, rest_ @ ..]) = rest.split_at(dash_idx) else {
+                // SAFETY: slice::split_at will put the element at position `dash_idx`
+                // in the second slice so we know there is at least one element.
+                unreachable!();
+            };
+
+            // awaiting destructuring assignment
+            // https://github.com/rust-lang/rfcs/pull/2909
+            rest = rest_;
+
+            packet.attachment_count = str_from_utf8(prefix)
+                .map_err(Error::InvalidUtf8)?
+                .parse()
+                .map_err(|_| Error::InvalidPacket())?;
         }
 
         // namespace
-        char_buf.clear();
-        next_utf8 = match utf8_iter.peek() {
-            Some(c) => c,
-            None => return Ok(packet),
-        };
+        if let [b'/', rest_ @ ..] = rest {
+            let comma_idx = rest_
+                .iter()
+                .position(|&byte| byte == b',')
+                .ok_or(Error::IncompletePacket())?;
 
-        if *next_utf8 == '/' {
-            char_buf.push(utf8_iter.next().unwrap()); // SAFETY: already peeked
-            loop {
-                next_utf8 = utf8_iter.peek().ok_or(Error::IncompletePacket())?;
-                if *next_utf8 == ',' {
-                    let _ = utf8_iter.next(); // consume ','
-                    break;
-                }
-                char_buf.push(utf8_iter.next().unwrap()); // SAFETY: already peeked
-            }
-        }
-        if !char_buf.is_empty() {
-            packet.nsp = char_buf.iter().collect();
+            let (prefix, [_, rest_ @ ..]) = rest_.split_at(comma_idx) else {
+                // SAFETY: slice::split_at will put the element at position `dash_idx`
+                // in the second slice so we know there is at least one element.
+                unreachable!();
+            };
+
+            rest = rest_;
+
+            // ensuring a proper default namespace
+            debug_assert_eq!(packet.nsp, "/");
+
+            packet
+                .nsp
+                .push_str(str_from_utf8(prefix).map_err(Error::InvalidUtf8)?);
         }
 
         // id
-        char_buf.clear();
-        next_utf8 = match utf8_iter.peek() {
-            None => return Ok(packet),
-            Some(c) => c,
+        let Some(non_digit_idx) = rest.iter().position(|&byte| !byte.is_ascii_digit()) else {
+            return Ok(packet);
         };
 
-        loop {
-            if !next_utf8.is_ascii_digit() {
-                break;
-            }
-            char_buf.push(utf8_iter.next().unwrap()); // SAFETY: already peeked
-            next_utf8 = match utf8_iter.peek() {
-                None => return Ok(packet),
-                Some(c) => c,
-            };
+        if non_digit_idx > 0 {
+            let (prefix, rest_) = rest.split_at(non_digit_idx);
+            rest = rest_;
+
+            packet.id = str_from_utf8(prefix)
+                .map_err(Error::InvalidUtf8)?
+                .parse()
+                .map_err(|_| Error::InvalidPacket())
+                .map(Some)?;
         }
 
-        let count_str: String = char_buf.iter().collect();
-        if let Ok(count) = count_str.parse::<i32>() {
-            packet.id = Some(count);
-        }
-
-        // data
-        let json_str: String = utf8_iter.collect();
-        let json_data: serde_json::Value = serde_json::from_str(&json_str).map_err(InvalidJson)?;
+        // validate json
+        serde_json::from_slice::<serde_json::Value>(rest).map_err(Error::InvalidJson)?;
 
         match packet.packet_type {
             PacketId::BinaryAck | PacketId::BinaryEvent => {
-                let re_close = Regex::new(r",]$|]$").unwrap();
-                let mut str = json_data
-                    .to_string()
-                    .replace("{\"_placeholder\":true,\"num\":0}", "");
-
-                if str.starts_with('[') {
-                    str.remove(0);
-                }
-                str = re_close.replace(&str, "").to_string();
-
-                if str.is_empty() {
-                    packet.data = None
+                let (start, end) = if let [b'[', .., b']'] = rest {
+                    (1, rest.len() - 1)
                 } else {
-                    packet.data = Some(str)
+                    (0, rest.len())
+                };
+
+                let str = str_from_utf8(&rest[start..end]).map_err(Error::InvalidUtf8)?;
+                let mut str = str.replace("{\"_placeholder\":true,\"num\":0}", "");
+
+                if str.ends_with(',') {
+                    str.pop();
+                }
+
+                if !str.is_empty() {
+                    packet.data = Some(str);
                 }
             }
-            _ => packet.data = Some(json_data.to_string()),
-        };
+            _ => packet.data = Some(str_from_utf8(rest).map_err(Error::InvalidUtf8)?.to_string()),
+        }
 
         Ok(packet)
     }
