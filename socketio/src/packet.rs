@@ -154,87 +154,50 @@ impl TryFrom<&Bytes> for Packet {
     /// this member. This is done because the attachment is usually
     /// send in another packet.
     fn try_from(payload: &Bytes) -> Result<Packet> {
+        let mut payload = str_from_utf8(&payload).map_err(Error::InvalidUtf8)?;
         let mut packet = Packet::default();
 
         // packet_type
-        let (prefix, mut rest) = payload.split_first().ok_or(Error::IncompletePacket())?;
-        packet.packet_type = PacketId::try_from(*prefix)?;
+        let c = payload.chars().next().ok_or(Error::IncompletePacket())?;
+        packet.packet_type = PacketId::try_from(c)?;
+        payload = &payload[1..];
 
         // attachment_count
         if let PacketId::BinaryAck | PacketId::BinaryEvent = packet.packet_type {
-            let dash_idx = rest
-                .iter()
-                .position(|&byte| byte == b'-')
-                .ok_or(Error::IncompletePacket())?;
-
-            let (prefix, [_, rest_ @ ..]) = rest.split_at(dash_idx) else {
-                // SAFETY: slice::split_at will put the element at position `dash_idx`
-                // in the second slice so we know there is at least one element.
-                unreachable!();
-            };
-
-            // awaiting destructuring assignment
-            // https://github.com/rust-lang/rfcs/pull/2909
-            rest = rest_;
-
-            packet.attachment_count = str_from_utf8(prefix)
-                .map_err(Error::InvalidUtf8)?
-                .parse()
-                .map_err(|_| Error::InvalidPacket())?;
+            let (prefix, rest) = payload.split_once('-').ok_or(Error::IncompletePacket())?;
+            payload = rest;
+            packet.attachment_count = prefix.parse().map_err(|_| Error::InvalidPacket())?;
         }
 
         // namespace
-        if let [b'/', rest_ @ ..] = rest {
-            let comma_idx = rest_
-                .iter()
-                .position(|&byte| byte == b',')
-                .ok_or(Error::IncompletePacket())?;
-
-            let (prefix, [_, rest_ @ ..]) = rest_.split_at(comma_idx) else {
-                // SAFETY: slice::split_at will put the element at position `dash_idx`
-                // in the second slice so we know there is at least one element.
-                unreachable!();
-            };
-
-            rest = rest_;
-
-            // ensuring a proper default namespace
-            debug_assert_eq!(packet.nsp, "/");
-
-            packet
-                .nsp
-                .push_str(str_from_utf8(prefix).map_err(Error::InvalidUtf8)?);
+        if payload.starts_with('/') {
+            let (prefix, rest) = payload.split_once(',').ok_or(Error::IncompletePacket())?;
+            payload = rest;
+            packet.nsp.clear(); // clearing the default
+            packet.nsp.push_str(prefix);
         }
 
         // id
-        let Some(non_digit_idx) = rest.iter().position(|&byte| !byte.is_ascii_digit()) else {
+        let Some((non_digit_idx, _)) = payload.char_indices().find(|(_, c)| !c.is_ascii_digit()) else {
             return Ok(packet);
         };
 
         if non_digit_idx > 0 {
-            let (prefix, rest_) = rest.split_at(non_digit_idx);
-            rest = rest_;
-
-            packet.id = str_from_utf8(prefix)
-                .map_err(Error::InvalidUtf8)?
-                .parse()
-                .map_err(|_| Error::InvalidPacket())
-                .map(Some)?;
+            let (prefix, rest) = payload.split_at(non_digit_idx);
+            payload = rest;
+            packet.id = Some(prefix.parse().map_err(|_| Error::InvalidPacket())?);
         }
 
         // validate json
-        serde_json::from_slice::<serde_json::Value>(rest).map_err(Error::InvalidJson)?;
+        serde_json::from_str::<serde_json::Value>(payload).map_err(Error::InvalidJson)?;
 
         match packet.packet_type {
             PacketId::BinaryAck | PacketId::BinaryEvent => {
-                let (start, end) = if let [b'[', .., b']'] = rest {
-                    (1, rest.len() - 1)
-                } else {
-                    (0, rest.len())
-                };
+                if let [b'[', .., b']'] = payload.as_bytes() {
+                    payload = &payload[1..payload.len() - 1];
+                }
 
-                let str = str_from_utf8(&rest[start..end]).map_err(Error::InvalidUtf8)?;
-                let mut str = str.replace("{\"_placeholder\":true,\"num\":0}", "");
+                let mut str = payload.replace("{\"_placeholder\":true,\"num\":0}", "");
 
                 if str.ends_with(',') {
                     str.pop();
@@ -244,7 +207,7 @@ impl TryFrom<&Bytes> for Packet {
                     packet.data = Some(str);
                 }
             }
-            _ => packet.data = Some(str_from_utf8(rest).map_err(Error::InvalidUtf8)?.to_string()),
+            _ => packet.data = Some(payload.to_string()),
         }
 
         Ok(packet)
