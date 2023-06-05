@@ -270,36 +270,32 @@ impl RawClient {
     /// Handles the incoming acks and classifies what callbacks to call and how.
     #[inline]
     fn handle_ack(&self, socket_packet: &Packet) -> Result<()> {
-        let mut to_be_removed = Vec::new();
-        if let Some(id) = socket_packet.id {
-            for (index, ack) in self.outstanding_acks.lock()?.iter_mut().enumerate() {
-                if ack.id == id {
-                    to_be_removed.push(index);
+        let Some(id) = socket_packet.id else {
+            return Ok(());
+        };
 
-                    if ack.time_started.elapsed() < ack.timeout {
-                        if let Some(ref payload) = socket_packet.data {
-                            ack.callback.deref_mut()(
-                                Payload::String(payload.to_owned()),
-                                self.clone(),
-                            );
-                        }
-                        if let Some(ref attachments) = socket_packet.attachments {
-                            if let Some(payload) = attachments.get(0) {
-                                ack.callback.deref_mut()(
-                                    Payload::Binary(payload.to_owned()),
-                                    self.clone(),
-                                );
-                            }
-                        }
-                    } else {
-                        // Do something with timed out acks?
+        self.outstanding_acks.lock()?.retain_mut(|ack| {
+            if ack.id != id {
+                return true;
+            }
+
+            if ack.time_started.elapsed() < ack.timeout {
+                if let Some(ref payload) = socket_packet.data {
+                    ack.callback.deref_mut()(Payload::String(payload.to_owned()), self.clone());
+                }
+
+                if let Some(ref attachments) = socket_packet.attachments {
+                    if let Some(payload) = attachments.get(0) {
+                        ack.callback.deref_mut()(Payload::Binary(payload.to_owned()), self.clone());
                     }
                 }
+            } else {
+                // Do something with timed out acks?
             }
-            for index in to_be_removed {
-                self.outstanding_acks.lock()?.remove(index);
-            }
-        }
+
+            false
+        });
+
         Ok(())
     }
 
