@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter, Result as FmtResult};
+
 /// An `Event` in `socket.io` could either (`Message`, `Error`) or custom.
 #[derive(Debug, PartialEq, PartialOrd, Clone, Eq, Hash)]
 pub enum Event {
@@ -6,6 +8,18 @@ pub enum Event {
     Custom(String),
     Connect,
     Close,
+}
+
+impl Event {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Event::Message => "message",
+            Event::Error => "error",
+            Event::Connect => "connect",
+            Event::Close => "close",
+            Event::Custom(string) => string,
+        }
+    }
 }
 
 impl From<String> for Event {
@@ -35,5 +49,11 @@ impl From<Event> for String {
             Event::Error => Self::from("error"),
             Event::Custom(string) => string,
         }
+    }
+}
+
+impl Display for Event {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.write_str(self.as_str())
     }
 }

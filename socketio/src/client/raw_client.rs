@@ -563,7 +563,7 @@ mod test {
             })
             .on_any(move |event, payload, _client| {
                 if let Payload::String(str) = payload {
-                    println!("{} {}", String::from(event.clone()), str);
+                    println!("{event} {str}");
                 }
                 tx.send(String::from(event)).unwrap();
             })

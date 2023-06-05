@@ -117,7 +117,7 @@ impl Socket {
             Payload::String(str_data) => {
                 serde_json::from_str::<IgnoredAny>(&str_data)?;
 
-                let payload = format!("[\"{}\",{}]", String::from(event), str_data);
+                let payload = format!("[\"{event}\",{str_data}]");
 
                 Ok(Packet::new(
                     PacketId::Event,

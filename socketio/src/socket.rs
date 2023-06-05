@@ -105,9 +105,9 @@ impl Socket {
             )),
             Payload::String(str_data) => {
                 let payload = if serde_json::from_str::<IgnoredAny>(&str_data).is_ok() {
-                    format!("[\"{}\",{}]", String::from(event), str_data)
+                    format!("[\"{event}\",{str_data}]")
                 } else {
-                    format!("[\"{}\",\"{}\"]", String::from(event), str_data)
+                    format!("[\"{event}\",\"{str_data}\"]")
                 };
 
                 Ok(Packet::new(
