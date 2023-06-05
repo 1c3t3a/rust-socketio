@@ -193,7 +193,7 @@ impl TryFrom<&Bytes> for Packet {
 
         match packet.packet_type {
             PacketId::BinaryAck | PacketId::BinaryEvent => {
-                if let [b'[', .., b']'] = payload.as_bytes() {
+                if payload.starts_with('[') && payload.ends_with(']') {
                     payload = &payload[1..payload.len() - 1];
                 }
 
