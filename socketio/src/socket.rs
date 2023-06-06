@@ -2,6 +2,8 @@ use crate::error::{Error, Result};
 use crate::packet::{Packet, PacketId};
 use bytes::Bytes;
 use rust_engineio::{Client as EngineClient, Packet as EnginePacket, PacketId as EnginePacketId};
+use serde::de::IgnoredAny;
+use serde_json::Value;
 use std::convert::TryFrom;
 use std::sync::{atomic::AtomicBool, Arc};
 use std::{fmt::Debug, sync::atomic::Ordering};
@@ -96,13 +98,13 @@ impl Socket {
                     PacketId::BinaryEvent
                 },
                 nsp.to_owned(),
-                Some(serde_json::Value::String(event.into()).to_string()),
+                Some(Value::String(event.into()).to_string()),
                 id,
                 1,
                 Some(vec![bin_data]),
             )),
             Payload::String(str_data) => {
-                let payload = if serde_json::from_str::<serde_json::Value>(&str_data).is_ok() {
+                let payload = if serde_json::from_str::<IgnoredAny>(&str_data).is_ok() {
                     format!("[\"{}\",{}]", String::from(event), str_data)
                 } else {
                     format!("[\"{}\",\"{}\"]", String::from(event), str_data)

@@ -10,6 +10,8 @@ use futures_util::{Stream, StreamExt};
 use rust_engineio::{
     asynchronous::Client as EngineClient, Packet as EnginePacket, PacketId as EnginePacketId,
 };
+use serde::de::IgnoredAny;
+use serde_json::Value;
 use std::{
     fmt::Debug,
     pin::Pin,
@@ -107,13 +109,13 @@ impl Socket {
                     PacketId::BinaryEvent
                 },
                 nsp.to_owned(),
-                Some(serde_json::Value::String(event.into()).to_string()),
+                Some(Value::String(event.into()).to_string()),
                 id,
                 1,
                 Some(vec![bin_data]),
             )),
             Payload::String(str_data) => {
-                serde_json::from_str::<serde_json::Value>(&str_data)?;
+                serde_json::from_str::<IgnoredAny>(&str_data)?;
 
                 let payload = format!("[\"{}\",{}]", String::from(event), str_data);
 
