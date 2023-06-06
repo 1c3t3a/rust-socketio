@@ -1536,6 +1536,7 @@ dependencies = [
  "native-tls",
  "rand",
  "rust_engineio",
+ "serde",
  "serde_json",
  "thiserror",
  "tokio",

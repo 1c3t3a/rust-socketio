@@ -1,5 +1,6 @@
 use crate::error::{Error, Result};
 use bytes::Bytes;
+use serde::de::IgnoredAny;
 
 use std::convert::TryFrom;
 use std::fmt::Write;
@@ -189,7 +190,7 @@ impl TryFrom<&Bytes> for Packet {
         }
 
         // validate json
-        serde_json::from_str::<serde_json::Value>(payload).map_err(Error::InvalidJson)?;
+        serde_json::from_str::<IgnoredAny>(payload).map_err(Error::InvalidJson)?;
 
         match packet.packet_type {
             PacketId::BinaryAck | PacketId::BinaryEvent => {
