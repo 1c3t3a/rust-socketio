@@ -39,6 +39,8 @@ impl Client {
         Ok(s)
     }
 
+    /// Updates the URL the client will connect to when reconnecting.
+    /// This is especially useful for updating query parameters.
     pub fn set_reconnect_url<T: Into<String>>(&self, address: T) {
         self.builder.lock().unwrap().address = address.into();
     }
@@ -220,7 +222,7 @@ impl Client {
                     Ok(Packet {
                         packet_type: PacketId::Disconnect,
                         ..
-                    }) => self_clone.builder.reconnect_on_disconnect,
+                    }) => self_clone.builder.lock().unwrap().reconnect_on_disconnect,
                     _ => false,
                 };
                 if should_reconnect {
@@ -362,18 +364,18 @@ mod test {
             .reconnect_delay(100, 100)
             .on(Event::Connect, move |_, socket| {
                 connect_num_clone.fetch_add(1, Ordering::SeqCst);
-                let r = socket.emit_with_ack(
+                let result = socket.emit_with_ack(
                     "message",
                     json!(""),
                     Duration::from_millis(100),
                     |_, _| {},
                 );
-                assert!(r.is_ok(), "should emit message success");
+                assert!(result.is_ok(), "should emit message success");
             })
             .on(Event::Close, move |_, _| {
                 close_num_clone.fetch_add(1, Ordering::SeqCst);
             })
-            .on("message", move |_, _socket| {
+            .on("message", move |_, _| {
                 // test the iterator implementation and make sure there is a constant
                 // stream of packets, even when reconnecting
                 message_num_clone.fetch_add(1, Ordering::SeqCst);
@@ -395,8 +397,8 @@ mod test {
 
         socket.set_reconnect_url(get_url());
 
-        let r = socket.emit("restart_server", json!(""));
-        assert!(r.is_ok(), "should emit restart success");
+        let result = socket.emit("restart_server", json!(""));
+        assert!(result.is_ok(), "should emit restart success");
 
         // waiting for server to restart
         for _ in 0..10 {

@@ -1,25 +1,25 @@
-const { Socket } = require("socket.io");
-
 let createServer = require("http").createServer;
 let server = createServer();
 const io = require("socket.io")(server);
 const port = 4206;
 const timeout = 200;
 
-function isTimestampValid(timestampStr) {
+const TIMESTAMP_SLACK_ALLOWED = 1000;
+
+function isValidTimestamp(timestampStr) {
   if (timestampStr === undefined) return false;
   const timestamp = parseInt(timestampStr);
   if (isNaN(timestamp)) return false;
 
   const diff = Date.now() - timestamp;
-  return Math.abs(diff) <= 1000;
+  return Math.abs(diff) <= TIMESTAMP_SLACK_ALLOWED;
 }
 
 console.log("Started");
 var callback = (client) => {
   const timestamp = client.request._query.timestamp;
   console.log("Connected, timestamp:", timestamp);
-  if (!isTimestampValid(timestamp)) {
+  if (!isValidTimestamp(timestamp)) {
     console.log("Invalid timestamp!");
     client.disconnect();
     return;
