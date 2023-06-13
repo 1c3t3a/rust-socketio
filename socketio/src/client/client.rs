@@ -401,7 +401,7 @@ mod test {
         // waiting for timestamp in url to expire
         std::thread::sleep(std::time::Duration::from_secs(1));
 
-        socket.set_reconnect_url(get_url());
+        socket.set_reconnect_url(get_url())?;
 
         let result = socket.emit("restart_server", json!(""));
         assert!(result.is_ok(), "should emit restart success");
@@ -457,7 +457,7 @@ mod test {
         drop(lock);
 
         let _ = socket.disconnect();
-        socket.reconnect();
+        socket.reconnect()?;
 
         // waiting for client to emit messages
         std::thread::sleep(Duration::from_millis(100));
