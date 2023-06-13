@@ -41,8 +41,9 @@ impl Client {
 
     /// Updates the URL the client will connect to when reconnecting.
     /// This is especially useful for updating query parameters.
-    pub fn set_reconnect_url<T: Into<String>>(&self, address: T) {
-        self.builder.lock().unwrap().address = address.into();
+    pub fn set_reconnect_url<T: Into<String>>(&self, address: T) -> Result<()> {
+        self.builder.lock()?.address = address.into();
+        Ok(())
     }
 
     /// Sends a message to the server using the underlying `engine.io` protocol.
@@ -162,10 +163,10 @@ impl Client {
         client.disconnect()
     }
 
-    fn reconnect(&mut self) {
+    fn reconnect(&mut self) -> Result<()> {
         let mut reconnect_attempts = 0;
         let (reconnect, max_reconnect_attempts) = {
-            let builder = self.builder.lock().unwrap();
+            let builder = self.builder.lock()?;
             (builder.reconnect, builder.max_reconnect_attempts)
         };
 
@@ -187,10 +188,12 @@ impl Client {
                 }
             }
         }
+
+        Ok(())
     }
 
     fn do_reconnect(&self) -> Result<()> {
-        let builder = self.builder.lock().unwrap();
+        let builder = self.builder.lock()?;
         let new_client = builder.clone().connect_raw()?;
         let mut client = self.client.write()?;
         *client = new_client;
@@ -227,7 +230,7 @@ impl Client {
                 };
                 if should_reconnect {
                     let _ = self_clone.disconnect();
-                    self_clone.reconnect();
+                    let _ = self_clone.reconnect();
                 }
             }
         });
