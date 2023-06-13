@@ -225,7 +225,10 @@ impl Client {
                     Ok(Packet {
                         packet_type: PacketId::Disconnect,
                         ..
-                    }) => self_clone.builder.lock().unwrap().reconnect_on_disconnect,
+                    }) => match self_clone.builder.lock() {
+                        Ok(builder) => builder.reconnect_on_disconnect,
+                        Err(_) => false,
+                    },
                     _ => false,
                 };
                 if should_reconnect {
