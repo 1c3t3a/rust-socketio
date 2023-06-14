@@ -281,22 +281,18 @@ mod test {
 
     #[test]
     fn socket_io_reconnect_integration() -> Result<()> {
+        static CONNECT_NUM: AtomicUsize = AtomicUsize::new(0);
+        static CLOSE_NUM: AtomicUsize = AtomicUsize::new(0);
+        static MESSAGE_NUM: AtomicUsize = AtomicUsize::new(0);
+
         let url = crate::test::socket_io_restart_server();
-
-        let connect_num = Arc::new(AtomicUsize::new(0));
-        let close_num = Arc::new(AtomicUsize::new(0));
-        let message_num = Arc::new(AtomicUsize::new(0));
-
-        let connect_num_clone = Arc::clone(&connect_num);
-        let close_num_clone = Arc::clone(&close_num);
-        let message_num_clone = Arc::clone(&message_num);
 
         let socket = ClientBuilder::new(url)
             .reconnect(true)
             .max_reconnect_attempts(100)
             .reconnect_delay(100, 100)
             .on(Event::Connect, move |_, socket| {
-                connect_num_clone.fetch_add(1, Ordering::SeqCst);
+                CONNECT_NUM.fetch_add(1, Ordering::SeqCst);
                 let r = socket.emit_with_ack(
                     "message",
                     json!(""),
@@ -306,12 +302,12 @@ mod test {
                 assert!(r.is_ok(), "should emit message success");
             })
             .on(Event::Close, move |_, _| {
-                close_num_clone.fetch_add(1, Ordering::SeqCst);
+                CLOSE_NUM.fetch_add(1, Ordering::SeqCst);
             })
             .on("message", move |_, _socket| {
                 // test the iterator implementation and make sure there is a constant
                 // stream of packets, even when reconnecting
-                message_num_clone.fetch_add(1, Ordering::SeqCst);
+                MESSAGE_NUM.fetch_add(1, Ordering::SeqCst);
             })
             .connect();
 
@@ -321,9 +317,9 @@ mod test {
         // waiting for server to emit message
         std::thread::sleep(std::time::Duration::from_millis(500));
 
-        assert_eq!(load(&connect_num), 1, "should connect once");
-        assert_eq!(load(&message_num), 1, "should receive one");
-        assert_eq!(load(&close_num), 0, "should not close");
+        assert_eq!(load(&CONNECT_NUM), 1, "should connect once");
+        assert_eq!(load(&MESSAGE_NUM), 1, "should receive one");
+        assert_eq!(load(&CLOSE_NUM), 0, "should not close");
 
         let r = socket.emit("restart_server", json!(""));
         assert!(r.is_ok(), "should emit restart success");
@@ -331,14 +327,14 @@ mod test {
         // waiting for server to restart
         for _ in 0..10 {
             std::thread::sleep(std::time::Duration::from_millis(400));
-            if load(&connect_num) == 2 && load(&message_num) == 2 {
+            if load(&CONNECT_NUM) == 2 && load(&MESSAGE_NUM) == 2 {
                 break;
             }
         }
 
-        assert_eq!(load(&connect_num), 2, "should connect twice");
-        assert_eq!(load(&message_num), 2, "should receive two messages");
-        assert_eq!(load(&close_num), 1, "should close once");
+        assert_eq!(load(&CONNECT_NUM), 2, "should connect twice");
+        assert_eq!(load(&MESSAGE_NUM), 2, "should receive two messages");
+        assert_eq!(load(&CLOSE_NUM), 1, "should close once");
 
         socket.disconnect()?;
         Ok(())
@@ -346,6 +342,10 @@ mod test {
 
     #[test]
     fn socket_io_reconnect_url_auth_integration() -> Result<()> {
+        static CONNECT_NUM: AtomicUsize = AtomicUsize::new(0);
+        static CLOSE_NUM: AtomicUsize = AtomicUsize::new(0);
+        static MESSAGE_NUM: AtomicUsize = AtomicUsize::new(0);
+
         fn get_url() -> Url {
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -356,20 +356,12 @@ mod test {
             url
         }
 
-        let connect_num = Arc::new(AtomicUsize::new(0));
-        let close_num = Arc::new(AtomicUsize::new(0));
-        let message_num = Arc::new(AtomicUsize::new(0));
-
-        let connect_num_clone = Arc::clone(&connect_num);
-        let close_num_clone = Arc::clone(&close_num);
-        let message_num_clone = Arc::clone(&message_num);
-
         let socket = ClientBuilder::new(get_url())
             .reconnect(true)
             .max_reconnect_attempts(100)
             .reconnect_delay(100, 100)
             .on(Event::Connect, move |_, socket| {
-                connect_num_clone.fetch_add(1, Ordering::SeqCst);
+                CONNECT_NUM.fetch_add(1, Ordering::SeqCst);
                 let result = socket.emit_with_ack(
                     "message",
                     json!(""),
@@ -379,12 +371,12 @@ mod test {
                 assert!(result.is_ok(), "should emit message success");
             })
             .on(Event::Close, move |_, _| {
-                close_num_clone.fetch_add(1, Ordering::SeqCst);
+                CLOSE_NUM.fetch_add(1, Ordering::SeqCst);
             })
             .on("message", move |_, _| {
                 // test the iterator implementation and make sure there is a constant
                 // stream of packets, even when reconnecting
-                message_num_clone.fetch_add(1, Ordering::SeqCst);
+                MESSAGE_NUM.fetch_add(1, Ordering::SeqCst);
             })
             .connect();
 
@@ -394,9 +386,9 @@ mod test {
         // waiting for server to emit message
         std::thread::sleep(std::time::Duration::from_millis(500));
 
-        assert_eq!(load(&connect_num), 1, "should connect once");
-        assert_eq!(load(&message_num), 1, "should receive one");
-        assert_eq!(load(&close_num), 0, "should not close");
+        assert_eq!(load(&CONNECT_NUM), 1, "should connect once");
+        assert_eq!(load(&MESSAGE_NUM), 1, "should receive one");
+        assert_eq!(load(&CLOSE_NUM), 0, "should not close");
 
         // waiting for timestamp in url to expire
         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -409,14 +401,14 @@ mod test {
         // waiting for server to restart
         for _ in 0..10 {
             std::thread::sleep(std::time::Duration::from_millis(400));
-            if load(&connect_num) == 2 && load(&message_num) == 2 {
+            if load(&CONNECT_NUM) == 2 && load(&MESSAGE_NUM) == 2 {
                 break;
             }
         }
 
-        assert_eq!(load(&connect_num), 2, "should connect twice");
-        assert_eq!(load(&message_num), 2, "should receive two messages");
-        assert_eq!(load(&close_num), 1, "should close once");
+        assert_eq!(load(&CONNECT_NUM), 2, "should connect twice");
+        assert_eq!(load(&MESSAGE_NUM), 2, "should receive two messages");
+        assert_eq!(load(&CLOSE_NUM), 1, "should close once");
 
         socket.disconnect()?;
         Ok(())
@@ -476,7 +468,7 @@ mod test {
         Ok(())
     }
 
-    fn load(num: &Arc<AtomicUsize>) -> usize {
+    fn load(num: &AtomicUsize) -> usize {
         num.load(Ordering::SeqCst)
     }
 }
