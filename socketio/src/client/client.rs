@@ -292,7 +292,7 @@ mod test {
             .max_reconnect_attempts(100)
             .reconnect_delay(100, 100)
             .on(Event::Connect, move |_, socket| {
-                CONNECT_NUM.fetch_add(1, Ordering::SeqCst);
+                CONNECT_NUM.fetch_add(1, Ordering::Release);
                 let r = socket.emit_with_ack(
                     "message",
                     json!(""),
@@ -302,12 +302,12 @@ mod test {
                 assert!(r.is_ok(), "should emit message success");
             })
             .on(Event::Close, move |_, _| {
-                CLOSE_NUM.fetch_add(1, Ordering::SeqCst);
+                CLOSE_NUM.fetch_add(1, Ordering::Release);
             })
             .on("message", move |_, _socket| {
                 // test the iterator implementation and make sure there is a constant
                 // stream of packets, even when reconnecting
-                MESSAGE_NUM.fetch_add(1, Ordering::SeqCst);
+                MESSAGE_NUM.fetch_add(1, Ordering::Release);
             })
             .connect();
 
@@ -361,7 +361,7 @@ mod test {
             .max_reconnect_attempts(100)
             .reconnect_delay(100, 100)
             .on(Event::Connect, move |_, socket| {
-                CONNECT_NUM.fetch_add(1, Ordering::SeqCst);
+                CONNECT_NUM.fetch_add(1, Ordering::Release);
                 let result = socket.emit_with_ack(
                     "message",
                     json!(""),
@@ -371,12 +371,12 @@ mod test {
                 assert!(result.is_ok(), "should emit message success");
             })
             .on(Event::Close, move |_, _| {
-                CLOSE_NUM.fetch_add(1, Ordering::SeqCst);
+                CLOSE_NUM.fetch_add(1, Ordering::Release);
             })
             .on("message", move |_, _| {
                 // test the iterator implementation and make sure there is a constant
                 // stream of packets, even when reconnecting
-                MESSAGE_NUM.fetch_add(1, Ordering::SeqCst);
+                MESSAGE_NUM.fetch_add(1, Ordering::Release);
             })
             .connect();
 
@@ -469,6 +469,6 @@ mod test {
     }
 
     fn load(num: &AtomicUsize) -> usize {
-        num.load(Ordering::SeqCst)
+        num.load(Ordering::Acquire)
     }
 }
