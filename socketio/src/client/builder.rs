@@ -33,7 +33,7 @@ pub enum TransportType {
 /// acts the `build` method and returns a connected [`Client`].
 #[derive(Clone)]
 pub struct ClientBuilder {
-    address: String,
+    pub(crate) address: String,
     on: Arc<Mutex<HashMap<Event, Callback<SocketCallback>>>>,
     on_any: Arc<Mutex<Option<Callback<SocketAnyCallback>>>>,
     namespace: String,
