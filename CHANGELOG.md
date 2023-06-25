@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.4.2`](#042) - _2023.06.25_
 * [`0.4.1-alpha.2`](#041a2) - _2023.03.26_
 * [`0.4.1-alpha.1`](#041a1) - _2023.01.15_
 * [`0.4.0`](#041) - _2023.01.15_
@@ -33,7 +34,18 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 _nothing new to show for… yet!_
 
- <a name="041a2">[0.4.0-alpha.2] - _Async socket.io fixes_ </a>
+## <a name="042">[0.4.2] - _Stabilizing the async interface!_ </a>
+
+_2023.06.25_
+
+- Fix "Error while parsing an incomplete packet socketio" on first heartbeat killing the connection async client
+([#311](https://github.com/1c3t3a/rust-socketio/issues/311)). Credits to [@sirkrypt0](https://github.com/sirkrypt0)
+- Fix allow awaiting async callbacks ([#313](https://github.com/1c3t3a/rust-socketio/issues/313)). Credits to [@felix-gohla](https://github.com/felix-gohla)
+- Various performance improvements especially in packet parsing. Credits to [@MaxOhn](https://github.com/MaxOhn)
+- API for setting the reconnect URL on a connected client ([#251](https://github.com/1c3t3a/rust-socketio/issues/251)).
+Credits to [@tyilo](https://github.com/tyilo)
+
+## <a name="041a2">[0.4.0-alpha.2] - _Async socket.io fixes_ </a>
 
 _2023.03.26_
 
