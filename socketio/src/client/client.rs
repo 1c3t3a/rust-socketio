@@ -173,11 +173,11 @@ impl Client {
         if reconnect {
             loop {
                 if let Some(max_reconnect_attempts) = max_reconnect_attempts {
+                    reconnect_attempts += 1;
                     if reconnect_attempts > max_reconnect_attempts {
                         break;
                     }
                 }
-                reconnect_attempts += 1;
 
                 if let Some(backoff) = self.backoff.next_backoff() {
                     std::thread::sleep(backoff);
