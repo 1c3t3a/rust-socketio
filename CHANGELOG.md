@@ -34,6 +34,13 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 _nothing new to show for… yet!_
 
+## <a name="043">[0.4.3] - _Bugfix!_ </a>
+
+_2023.07.08_
+
+- Fix of [#323](https://github.com/1c3t3a/rust-socketio/issues/323)
+- Marking the async feature optional
+
 ## <a name="042">[0.4.2] - _Stabilizing the async interface!_ </a>
 
 _2023.06.25_
