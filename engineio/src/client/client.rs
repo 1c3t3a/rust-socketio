@@ -1,5 +1,6 @@
 use super::super::socket::Socket as InnerSocket;
 use crate::callback::OptionalCallback;
+use crate::socket::DEFAULT_MAX_POLL_TIMEOUT;
 use crate::transport::Transport;
 
 use crate::error::{Error, Result};
@@ -128,7 +129,8 @@ impl ClientBuilder {
 
         let mut url = self.url.clone();
 
-        let handshake: HandshakePacket = Packet::try_from(transport.poll()?)?.try_into()?;
+        let handshake: HandshakePacket =
+            Packet::try_from(transport.poll(DEFAULT_MAX_POLL_TIMEOUT)?)?.try_into()?;
 
         // update the base_url with the new sid
         url.query_pairs_mut().append_pair("sid", &handshake.sid[..]);

@@ -52,6 +52,8 @@ pub enum Error {
     InvalidHeaderNameFromReqwest(#[from] reqwest::header::InvalidHeaderName),
     #[error("Invalid header value")]
     InvalidHeaderValueFromReqwest(#[from] reqwest::header::InvalidHeaderValue),
+    #[error("The server did not send a PING packet in time")]
+    PingTimeout(),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
