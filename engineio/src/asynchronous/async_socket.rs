@@ -9,7 +9,7 @@ use std::{
 
 use async_stream::try_stream;
 use bytes::Bytes;
-use futures_util::{Stream, StreamExt};
+use futures_util::{stream, Stream, StreamExt};
 use tokio::{runtime::Handle, sync::Mutex, time::Instant};
 
 use crate::{
@@ -19,12 +19,11 @@ use crate::{
     Error, Packet, PacketId,
 };
 
-use super::generator::StreamGenerator;
-
 #[derive(Clone)]
 pub struct Socket {
     handle: Handle,
     transport: Arc<Mutex<AsyncTransportType>>,
+    transport_raw: AsyncTransportType,
     on_close: OptionalCallback<()>,
     on_data: OptionalCallback<Bytes>,
     on_error: OptionalCallback<String>,
@@ -34,7 +33,7 @@ pub struct Socket {
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     connection_data: Arc<HandshakePacket>,
-    generator: StreamGenerator<Packet>,
+    max_ping_timeout: u64,
 }
 
 impl Socket {
@@ -47,6 +46,8 @@ impl Socket {
         on_open: OptionalCallback<()>,
         on_packet: OptionalCallback<Packet>,
     ) -> Self {
+        let max_ping_timeout = handshake.ping_interval + handshake.ping_timeout;
+
         Socket {
             handle: Handle::current(),
             on_close,
@@ -55,11 +56,12 @@ impl Socket {
             on_open,
             on_packet,
             transport: Arc::new(Mutex::new(transport.clone())),
+            transport_raw: transport,
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
             connection_data: Arc::new(handshake),
-            generator: StreamGenerator::new(Self::stream(transport)),
+            max_ping_timeout,
         }
     }
 
@@ -202,6 +204,23 @@ impl Socket {
         *self.last_ping.lock().await = Instant::now();
     }
 
+    /// Returns the time in milliseconds that is left until a new ping must be received.
+    /// This is used to detect whether we have been disconnected from the server.
+    /// See https://socket.io/docs/v4/how-it-works/#disconnection-detection
+    async fn time_to_next_ping(&self) -> u64 {
+        match Instant::now().checked_duration_since(*self.last_ping.lock().await) {
+            Some(since_last_ping) => {
+                let since_last_ping = since_last_ping.as_millis() as u64;
+                if since_last_ping > self.max_ping_timeout {
+                    0
+                } else {
+                    self.max_ping_timeout - since_last_ping
+                }
+            }
+            None => 0,
+        }
+    }
+
     pub(crate) fn handle_packet(&self, packet: Packet) {
         if let Some(on_packet) = self.on_packet.as_ref() {
             let on_packet = on_packet.clone();
@@ -224,16 +243,35 @@ impl Socket {
 
         self.connected.store(false, Ordering::Release);
     }
-}
 
-impl Stream for Socket {
-    type Item = Result<Packet>;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        self.generator.poll_next_unpin(cx)
+    /// Returns the packet stream for the client.
+    pub(crate) fn as_stream<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Stream<Item = Result<Packet>> + Send + 'a>> {
+        stream::unfold(
+            Self::stream(self.transport_raw.clone()),
+            |mut stream| async {
+                // Wait for the next payload or until we should have received the next ping.
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(self.time_to_next_ping().await),
+                    stream.next(),
+                )
+                .await
+                {
+                    Ok(result) => result.map(|result| (result, stream)),
+                    // We didn't receive a ping in time and now consider the connection as closed.
+                    Err(_) => {
+                        // Be nice and disconnect properly.
+                        if let Err(e) = self.disconnect().await {
+                            Some((Err(e), stream))
+                        } else {
+                            Some((Err(Error::PingTimeout()), stream))
+                        }
+                    }
+                }
+            },
+        )
+        .boxed()
     }
 }
 

@@ -6,11 +6,17 @@ use crate::packet::{HandshakePacket, Packet, PacketId, Payload};
 use bytes::Bytes;
 use std::convert::TryFrom;
 use std::sync::RwLock;
+use std::time::Duration;
 use std::{fmt::Debug, sync::atomic::Ordering};
 use std::{
     sync::{atomic::AtomicBool, Arc, Mutex},
     time::Instant,
 };
+
+/// The default maximum ping timeout as calculated from the pingInterval and pingTimeout.
+/// See https://socket.io/docs/v4/server-options/#pinginterval and
+/// https://socket.io/docs/v4/server-options/#pingtimeout
+pub const DEFAULT_MAX_POLL_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// An `engine.io` socket which manages a connection with the server and allows
 /// it to register common callbacks.
@@ -28,6 +34,7 @@ pub struct Socket {
     connection_data: Arc<HandshakePacket>,
     /// Since we get packets in payloads it's possible to have a state where only some of the packets have been consumed.
     remaining_packets: Arc<RwLock<Option<crate::packet::IntoIter>>>,
+    max_ping_timeout: u64,
 }
 
 impl Socket {
@@ -40,6 +47,8 @@ impl Socket {
         on_open: OptionalCallback<()>,
         on_packet: OptionalCallback<Packet>,
     ) -> Self {
+        let max_ping_timeout = handshake.ping_interval + handshake.ping_timeout;
+
         Socket {
             on_close,
             on_data,
@@ -52,6 +61,7 @@ impl Socket {
             last_pong: Arc::new(Mutex::new(Instant::now())),
             connection_data: Arc::new(handshake),
             remaining_packets: Arc::new(RwLock::new(None)),
+            max_ping_timeout,
         }
     }
 
@@ -126,9 +136,13 @@ impl Socket {
                     }
                 }
 
-                // Iterator has run out of packets, get a new payload
-                // TODO: 0.3.X timeout?
-                let data = self.transport.as_transport().poll()?;
+                // Iterator has run out of packets, get a new payload.
+                // Make sure that payload is received within time_to_next_ping, as otherwise the heart
+                // stopped beating and we disconnect.
+                let data = self
+                    .transport
+                    .as_transport()
+                    .poll(Duration::from_millis(self.time_to_next_ping()?))?;
 
                 if data.is_empty() {
                     continue;
@@ -163,6 +177,23 @@ impl Socket {
     pub(crate) fn pinged(&self) -> Result<()> {
         *self.last_ping.lock()? = Instant::now();
         Ok(())
+    }
+
+    /// Returns the time in milliseconds that is left until a new ping must be received.
+    /// This is used to detect whether we have been disconnected from the server.
+    /// See https://socket.io/docs/v4/how-it-works/#disconnection-detection
+    fn time_to_next_ping(&self) -> Result<u64> {
+        match Instant::now().checked_duration_since(*self.last_ping.lock()?) {
+            Some(since_last_ping) => {
+                let since_last_ping = since_last_ping.as_millis() as u64;
+                if since_last_ping > self.max_ping_timeout {
+                    Ok(0)
+                } else {
+                    Ok(self.max_ping_timeout - since_last_ping)
+                }
+            }
+            None => Ok(0),
+        }
     }
 
     pub(crate) fn handle_packet(&self, packet: Packet) {

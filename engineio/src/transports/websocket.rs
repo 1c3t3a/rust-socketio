@@ -8,7 +8,7 @@ use crate::{
 };
 use bytes::Bytes;
 use http::HeaderMap;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio::runtime::Runtime;
 use url::Url;
 
@@ -46,9 +46,12 @@ impl Transport for WebsocketTransport {
             .block_on(async { self.inner.emit(data, is_binary_att).await })
     }
 
-    fn poll(&self) -> Result<Bytes> {
+    fn poll(&self, timeout: Duration) -> Result<Bytes> {
         self.runtime.block_on(async {
-            let r = self.inner.poll_next().await;
+            let r = match tokio::time::timeout(timeout, self.inner.poll_next()).await {
+                Ok(r) => r,
+                Err(_) => return Err(Error::PingTimeout()),
+            };
             match r {
                 Ok(b) => b.ok_or(Error::IncompletePacket()),
                 Err(_) => Err(Error::IncompletePacket()),
@@ -80,6 +83,8 @@ mod test {
     use super::*;
     use crate::ENGINE_IO_VERSION;
     use std::str::FromStr;
+
+    const TIMEOUT_DURATION: Duration = Duration::from_secs(45);
 
     fn new() -> Result<WebsocketTransport> {
         let url = crate::test::engine_io_server()?.to_string()
@@ -123,8 +128,8 @@ mod test {
             format!("{:?}", transport),
             format!("WebsocketTransport(base_url: {:?})", transport.base_url())
         );
-        println!("{:?}", transport.poll().unwrap());
-        println!("{:?}", transport.poll().unwrap());
+        println!("{:?}", transport.poll(TIMEOUT_DURATION).unwrap());
+        println!("{:?}", transport.poll(TIMEOUT_DURATION).unwrap());
         Ok(())
     }
 }
