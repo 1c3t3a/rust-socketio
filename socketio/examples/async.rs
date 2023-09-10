@@ -1,6 +1,6 @@
 use futures_util::FutureExt;
 use rust_socketio::{
-    asynchronous::{Client, ClientBuilder},
+    asynchronous::{Client, ClientBuilder, RawClient},
     Payload,
 };
 use serde_json::json;
@@ -11,7 +11,7 @@ async fn main() {
     // define a callback which is called when a payload is received
     // this callback gets the payload as well as an instance of the
     // socket to communicate with the server
-    let callback = |payload: Payload, socket: Client| {
+    let callback = |payload: Payload, socket: RawClient| {
         async move {
             match payload {
                 Payload::String(str) => println!("Received: {}", str),
@@ -44,7 +44,7 @@ async fn main() {
         .expect("Server unreachable");
 
     // define a callback, that's executed when the ack got acked
-    let ack_callback = |message: Payload, _: Client| {
+    let ack_callback = |message: Payload, _: RawClient| {
         async move {
             println!("Yehaa! My ack got acked?");
             println!("Ack data: {:#?}", message);

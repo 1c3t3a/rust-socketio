@@ -131,7 +131,7 @@ impl Socket {
         }
     }
 
-    fn stream(
+    pub(crate) fn stream(
         client: EngineClient,
         is_connected: Arc<AtomicBool>,
     ) -> Pin<Box<impl Stream<Item = Result<Packet>> + Send>> {

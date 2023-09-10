@@ -1,4 +1,5 @@
-use futures_util::{future::BoxFuture, StreamExt};
+use crate::{error::Result, Event, Payload, TransportType};
+use futures_util::future::BoxFuture;
 use log::trace;
 use native_tls::TlsConnector;
 use rust_engineio::{
@@ -6,13 +7,15 @@ use rust_engineio::{
     header::{HeaderMap, HeaderValue},
 };
 use std::collections::HashMap;
-use url::Url;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-use crate::{error::Result, Error, Event, Payload, TransportType};
+use url::Url;
 
 use super::{
     callback::{Callback, DynAsyncAnyCallback, DynAsyncCallback},
     client::Client,
+    raw_client::RawClient,
 };
 use crate::asynchronous::socket::Socket as InnerSocket;
 
@@ -20,15 +23,22 @@ use crate::asynchronous::socket::Socket as InnerSocket;
 /// configuring the callback, the namespace and metadata of the socket. If no
 /// namespace is specified, the default namespace `/` is taken. The `connect` method
 /// acts the `build` method and returns a connected [`Client`].
+#[derive(Clone)]
 pub struct ClientBuilder {
-    address: String,
-    on: HashMap<Event, Callback<DynAsyncCallback>>,
-    on_any: Option<Callback<DynAsyncAnyCallback>>,
+    pub(crate) address: String,
+    on: Arc<RwLock<HashMap<Event, Callback<DynAsyncCallback>>>>,
+    on_any: Arc<RwLock<Option<Callback<DynAsyncAnyCallback>>>>,
     namespace: String,
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
     auth: Option<serde_json::Value>,
+    pub(crate) reconnect: bool,
+    pub(crate) reconnect_on_disconnect: bool,
+    // None reconnect attempts represent infinity.
+    pub(crate) max_reconnect_attempts: Option<u8>,
+    pub(crate) reconnect_delay_min: u64,
+    pub(crate) reconnect_delay_max: u64,
 }
 
 impl ClientBuilder {
@@ -72,13 +82,19 @@ impl ClientBuilder {
     pub fn new<T: Into<String>>(address: T) -> Self {
         Self {
             address: address.into(),
-            on: HashMap::new(),
-            on_any: None,
+            on: Arc::new(RwLock::new(HashMap::new())),
+            on_any: Arc::new(RwLock::new(None)),
             namespace: "/".to_owned(),
             tls_config: None,
             opening_headers: None,
             transport_type: TransportType::Any,
             auth: None,
+            reconnect: true,
+            reconnect_on_disconnect: false,
+            // None means infinity
+            max_reconnect_attempts: None,
+            reconnect_delay_min: 1000,
+            reconnect_delay_max: 5000,
         }
     }
 
@@ -93,6 +109,41 @@ impl ClientBuilder {
             trace!("Added `/` to the given namespace: {}", nsp);
         }
         self.namespace = nsp;
+        self
+    }
+
+    pub fn reconnect(mut self, reconnect: bool) -> Self {
+        self.reconnect = reconnect;
+        self
+    }
+
+    /// If set to `true` automatically set try to reconnect when the server
+    /// disconnects the client.
+    /// Defaults to `false`.
+    ///
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::ClientBuilder;
+    ///
+    /// let socket = ClientBuilder::new("http://localhost:4200/")
+    ///     .reconnect_on_disconnect(true)
+    ///     .connect();
+    /// ```
+    pub fn reconnect_on_disconnect(mut self, reconnect_on_disconnect: bool) -> Self {
+        self.reconnect_on_disconnect = reconnect_on_disconnect;
+        self
+    }
+
+    /// The delay between each reconnect attempt in milliseconds (applied via exponential backoff).
+    pub fn reconnect_delay(mut self, min: u64, max: u64) -> Self {
+        self.reconnect_delay_min = min;
+        self.reconnect_delay_max = max;
+
+        self
+    }
+
+    pub fn max_reconnect_attempts(mut self, reconnect_attempts: u8) -> Self {
+        self.max_reconnect_attempts = Some(reconnect_attempts);
         self
     }
 
@@ -162,15 +213,25 @@ impl ClientBuilder {
     /// ```
     ///
     #[cfg(feature = "async-callbacks")]
-    pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
+    pub fn on<T: Into<Event> + Send + 'static, F>(self, event: T, callback: F) -> Self
     where
-        F: for<'a> std::ops::FnMut(Payload, Client) -> BoxFuture<'static, ()>
+        F: for<'a> std::ops::FnMut(Payload, RawClient) -> BoxFuture<'static, ()>
             + 'static
             + Send
             + Sync,
     {
-        self.on
-            .insert(event.into(), Callback::<DynAsyncCallback>::new(callback));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let on_clone = self.on.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().expect("Unable to create a new runtime");
+            rt.block_on(async {
+                let callback = Callback::<DynAsyncCallback>::new(callback);
+                on_clone.write().await.insert(event.into(), callback);
+                tx.send(()).expect("Unable to send completion signal");
+            });
+        });
+
+        rx.recv().expect("Unable to receive completion signal");
         self
     }
 
@@ -196,11 +257,28 @@ impl ClientBuilder {
     ///         .await;
     /// }
     /// ```
-    pub fn on_any<F>(mut self, callback: F) -> Self
+    pub fn on_any<F>(self, callback: F) -> Self
     where
-        F: for<'a> FnMut(Event, Payload, Client) -> BoxFuture<'static, ()> + 'static + Send + Sync,
+        F: for<'a> FnMut(Event, Payload, RawClient) -> BoxFuture<'static, ()>
+            + 'static
+            + Send
+            + Sync,
     {
-        self.on_any = Some(Callback::<DynAsyncAnyCallback>::new(callback));
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        // Clone the parts of self that you'll need in the thread.
+        let on_any_clone = self.on_any.clone();
+
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().expect("Unable to create a new runtime");
+            rt.block_on(async {
+                let callback = Some(Callback::<DynAsyncAnyCallback>::new(callback));
+                *on_any_clone.write().await = callback; // Use the clone here
+                tx.send(()).expect("Unable to send completion signal");
+            });
+        });
+
+        rx.recv().expect("Unable to receive completion signal");
         self
     }
 
@@ -337,25 +415,11 @@ impl ClientBuilder {
     /// }
     /// ```
     pub async fn connect(self) -> Result<Client> {
-        let socket = self.connect_manual().await?;
-        let socket_clone = socket.clone();
-
-        // Use thread to consume items in iterator in order to call callbacks
-        tokio::runtime::Handle::current().spawn(async move {
-            let mut stream = socket_clone.as_stream();
-            // Consume the stream until it returns None and the stream is closed.
-            while let Some(item) = stream.next().await {
-                if let e @ Err(Error::IncompleteResponseFromEngineIo(_)) = item {
-                    trace!("Network error occurred: {}", e.unwrap_err());
-                }
-            }
-        });
-
-        Ok(socket)
+        Client::new(self).await
     }
 
     //TODO: 0.3.X stabilize
-    pub(crate) async fn connect_manual(self) -> Result<Client> {
+    pub(crate) async fn connect_raw(self) -> Result<RawClient> {
         // Parse url here rather than in new to keep new returning Self.
         let mut url = Url::parse(&self.address)?;
 
@@ -381,13 +445,14 @@ impl ClientBuilder {
 
         let inner_socket = InnerSocket::new(engine_client)?;
 
-        let socket = Client::new(
+        let socket = RawClient::new(
             inner_socket,
             &self.namespace,
             self.on,
             self.on_any,
             self.auth,
         )?;
+
         socket.connect().await?;
 
         Ok(socket)

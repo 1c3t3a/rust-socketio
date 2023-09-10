@@ -132,6 +132,7 @@ impl ClientBuilder {
         self
     }
 
+     /// The delay between each reconnect attempt in milliseconds (applied via exponential backoff).
     pub fn reconnect_delay(mut self, min: u64, max: u64) -> Self {
         self.reconnect_delay_min = min;
         self.reconnect_delay_max = max;
