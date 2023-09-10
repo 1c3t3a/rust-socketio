@@ -169,7 +169,7 @@ pub(crate) mod packet;
 /// Defines the types of payload (binary or string), that
 /// could be sent or received.
 pub mod payload;
-pub(self) mod socket;
+mod socket;
 
 /// Deprecated import since 0.3.0-alpha-2, use Error in the crate root instead.
 /// Contains the error type which will be returned with every result in this
