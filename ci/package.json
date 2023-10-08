@@ -5,7 +5,7 @@
   "author": "Bastian Kersting",
   "license": "MIT",
   "dependencies": {
-    "engine.io": "5.2.1",
+    "engine.io": "6.4.2",
     "socket.io": "4.0.0"
   }
 }
