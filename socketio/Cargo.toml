@@ -25,7 +25,7 @@ tokio = { version = "1.16.1", optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["sink"], optional = true }
 async-stream = { version = "0.3.5", optional = true }
 log = "0.4.17"
-serde = "1.0.164"
+serde = "1.0.168"
 
 [dev-dependencies]
 cargo-tarpaulin = "0.18.5"
