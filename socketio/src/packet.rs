@@ -179,7 +179,8 @@ impl TryFrom<&Bytes> for Packet {
         }
 
         // id
-        let Some((non_digit_idx, _)) = payload.char_indices().find(|(_, c)| !c.is_ascii_digit()) else {
+        let Some((non_digit_idx, _)) = payload.char_indices().find(|(_, c)| !c.is_ascii_digit())
+        else {
             return Ok(packet);
         };
 
