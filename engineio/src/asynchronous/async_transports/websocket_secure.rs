@@ -45,8 +45,15 @@ impl WebsocketSecureTransport {
             req.headers_mut().extend(map);
         }
 
+        // `disable_nagle` Sets the value of the TCP_NODELAY option on this socket.
+        //
+        // If set to `true`, this option disables the Nagle algorithm.
+        // This means that segments are always sent as soon as possible, even if there is only a small amount of data.
+        // When `false`, data is buffered until there is a sufficient amount to send out, thereby avoiding the frequent sending of small packets.
+        //
+        // See the docs: https://docs.rs/tokio/latest/tokio/net/struct.TcpStream.html#method.set_nodelay
         let (ws_stream, _) =
-            connect_async_tls_with_config(req, None, false, tls_config.map(Connector::NativeTls)).await?;
+            connect_async_tls_with_config(req, None, /*disable_nagle=*/false, tls_config.map(Connector::NativeTls)).await?;
 
         let (sen, rec) = ws_stream.split();
         let inner = AsyncWebsocketGeneralTransport::new(sen, rec).await;
