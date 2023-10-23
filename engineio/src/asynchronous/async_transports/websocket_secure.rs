@@ -46,7 +46,7 @@ impl WebsocketSecureTransport {
         }
 
         let (ws_stream, _) =
-            connect_async_tls_with_config(req, None, tls_config.map(Connector::NativeTls)).await?;
+            connect_async_tls_with_config(req, None, false, tls_config.map(Connector::NativeTls)).await?;
 
         let (sen, rec) = ws_stream.split();
         let inner = AsyncWebsocketGeneralTransport::new(sen, rec).await;
