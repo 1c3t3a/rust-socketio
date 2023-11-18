@@ -1560,7 +1560,7 @@ dependencies = [
 
 [[package]]
 name = "rust_engineio"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "adler32",
  "async-stream",
@@ -1584,7 +1584,7 @@ dependencies = [
 
 [[package]]
 name = "rust_socketio"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "adler32",
  "async-stream",

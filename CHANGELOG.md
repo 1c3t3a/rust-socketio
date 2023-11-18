@@ -34,6 +34,14 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 _nothing new to show for… yet!_
 
+## <a name="044">[0.4.4] - _Bump dependencies_ </a>
+
+_2023.11.05_
+
+- Bump tungstenite version to v0.20.1 (avoiding security vulnerability) [#368](https://github.com/1c3t3a/rust-socketio/pull/368)
+- Updating other dependencies
+
+
 ## <a name="043">[0.4.3] - _Bugfix!_ </a>
 
 _2023.07.08_
