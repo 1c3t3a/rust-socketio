@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.4.4`](#044) - _2023.11.18_
+* [`0.4.3`](#043) - _2023.07.08_
 * [`0.4.2`](#042) - _2023.06.25_
 * [`0.4.1-alpha.2`](#041a2) - _2023.03.26_
 * [`0.4.1-alpha.1`](#041a1) - _2023.01.15_
@@ -36,7 +38,7 @@ _nothing new to show for… yet!_
 
 ## <a name="044">[0.4.4] - _Bump dependencies_ </a>
 
-_2023.11.05_
+_2023.11.18_
 
 - Bump tungstenite version to v0.20.1 (avoiding security vulnerability) [#368](https://github.com/1c3t3a/rust-socketio/pull/368)
 - Updating other dependencies
