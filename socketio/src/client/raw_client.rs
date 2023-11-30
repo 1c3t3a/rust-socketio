@@ -434,6 +434,7 @@ mod test {
             .on("test", |msg, _| match msg {
                 Payload::String(str) => println!("Received string: {}", str),
                 Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
+                Payload::StringArray(arr) => println!("Received string array: {:#?}", arr),
             })
             .connect()?;
 

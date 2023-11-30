@@ -119,6 +119,29 @@ impl Socket {
                     None,
                 ))
             }
+            Payload::StringArray(array) => {
+                let stringified_array = array
+                    .iter()
+                    .map(|string| {
+                        if serde_json::from_str::<IgnoredAny>(&string).is_ok() {
+                            string.to_owned()
+                        } else {
+                            format!("\"{string}\"")
+                        }
+                    })
+                    .fold(String::new(), |acc, current| format!("{acc}, {current}"));
+
+                let payload = format!("[\"{event}\"{stringified_array}]");
+
+                Ok(Packet::new(
+                    PacketId::Event,
+                    nsp.to_owned(),
+                    Some(payload),
+                    id,
+                    0,
+                    None,
+                ))
+            }
         }
     }
 

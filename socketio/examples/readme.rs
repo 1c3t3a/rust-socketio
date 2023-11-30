@@ -10,6 +10,7 @@ fn main() {
         match payload {
             Payload::String(str) => println!("Received: {}", str),
             Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+            Payload::StringArray(arr) => println!("Received string array: {:#?}", arr),
         }
         socket
             .emit("test", json!({"got ack": true}))

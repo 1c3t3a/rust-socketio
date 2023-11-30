@@ -115,9 +115,33 @@ impl Socket {
                 Some(vec![bin_data]),
             )),
             Payload::String(str_data) => {
+                // is there any reason this is different than the blocking client ?
                 serde_json::from_str::<IgnoredAny>(&str_data)?;
 
                 let payload = format!("[\"{event}\",{str_data}]");
+
+                Ok(Packet::new(
+                    PacketId::Event,
+                    nsp.to_owned(),
+                    Some(payload),
+                    id,
+                    0,
+                    None,
+                ))
+            }
+            Payload::StringArray(array) => {
+                let stringified_array = array
+                    .iter()
+                    .map(|string| {
+                        if serde_json::from_str::<IgnoredAny>(&string).is_ok() {
+                            string.to_owned()
+                        } else {
+                            format!("\"{string}\"")
+                        }
+                    })
+                    .fold(String::new(), |acc, current| format!("{acc}, {current}"));
+
+                let payload = format!("[\"{event}\"{stringified_array}]");
 
                 Ok(Packet::new(
                     PacketId::Event,
