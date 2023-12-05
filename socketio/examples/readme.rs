@@ -8,7 +8,9 @@ fn main() {
     // socket to communicate with the server
     let callback = |payload: Payload, socket: RawClient| {
         match payload {
+            #[allow(deprecated)]
             Payload::String(str) => println!("Received: {}", str),
+            Payload::Text(text) => println!("Received json: {:?}", text),
             Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
         }
         socket

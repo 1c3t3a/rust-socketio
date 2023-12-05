@@ -189,8 +189,10 @@ impl Client {
     ///     let ack_callback = |message: Payload, socket: Client| {
     ///         async move {
     ///             match message {
-    ///                 Payload::String(str) => println!("{}", str),
+    ///                 Payload::Text(values) => println!("{:?}", values),
     ///                 Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
+    ///                 // This is deprecated use Payload::Text instead
+    ///                 Payload::String(str) => println!("{}", str),
     ///             }
     ///         }.boxed()
     ///     };    
@@ -220,8 +222,7 @@ impl Client {
     {
         let id = thread_rng().gen_range(0..999);
         let socket_packet =
-            self.socket
-                .build_packet_for_payload(data.into(), event.into(), &self.nsp, Some(id))?;
+            Packet::new_from_payload(data.into(), event.into(), &self.nsp, Some(id))?;
 
         let ack = Ack {
             id,
@@ -275,7 +276,7 @@ impl Client {
                     if ack.time_started.elapsed() < ack.timeout {
                         if let Some(ref payload) = socket_packet.data {
                             ack.callback.deref_mut()(
-                                Payload::String(payload.to_owned()),
+                                Payload::from(payload.to_owned()),
                                 self.clone(),
                             )
                             .await;
@@ -456,6 +457,8 @@ mod test {
             .on("test", |msg, _| {
                 async {
                     match msg {
+                        Payload::Text(values) => println!("Received json: {:?}", values),
+                        #[allow(deprecated)]
                         Payload::String(str) => println!("Received string: {}", str),
                         Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
                     }
@@ -466,31 +469,26 @@ mod test {
             .await?;
 
         let payload = json!({"token": 123_i32});
-        let result = socket
-            .emit("test", Payload::String(payload.to_string()))
-            .await;
+        let result = socket.emit("test", Payload::from(payload.clone())).await;
 
         assert!(result.is_ok());
 
         let ack = socket
             .emit_with_ack(
                 "test",
-                Payload::String(payload.to_string()),
+                Payload::from(payload),
                 Duration::from_secs(1),
                 |message: Payload, socket: Client| {
                     async move {
                         let result = socket
-                            .emit(
-                                "test",
-                                Payload::String(json!({"got ack": true}).to_string()),
-                            )
+                            .emit("test", Payload::from(json!({"got ack": true})))
                             .await;
                         assert!(result.is_ok());
 
                         println!("Yehaa! My ack got acked?");
-                        if let Payload::String(str) = message {
-                            println!("Received string Ack");
-                            println!("Ack data: {}", str);
+                        if let Payload::Text(json) = message {
+                            println!("Received json Ack");
+                            println!("Ack data: {:?}", json);
                         }
                     }
                     .boxed()
@@ -531,9 +529,7 @@ mod test {
             .await?;
 
         let payload = json!({"token": 123_i32});
-        let result = socket
-            .emit("test", Payload::String(payload.to_string()))
-            .await;
+        let result = socket.emit("test", Payload::from(payload)).await;
 
         assert!(result.is_ok());
         // If the timeout did not trigger, the async callback was fully executed.
@@ -655,8 +651,8 @@ mod test {
             .on_any(move |event, payload, _| {
                 let clone_tx = tx.clone();
                 async move {
-                    if let Payload::String(str) = payload {
-                        println!("{event}: {str}");
+                    if let Payload::Text(values) = payload {
+                        println!("{event}: {values:?}");
                     }
                     clone_tx.send(String::from(event)).await.unwrap();
                 }
@@ -819,12 +815,36 @@ mod test {
             )
         );
 
+        let packet: Option<Packet> = Some(socket_stream.next().await.unwrap()?);
+
+        assert!(packet.is_some());
+
+        let packet = packet.unwrap();
+        assert_eq!(
+            packet,
+            Packet::new(
+                PacketId::Event,
+                nsp.clone(),
+                Some(
+                    serde_json::Value::Array(vec![
+                        serde_json::Value::from("This is the first argument"),
+                        serde_json::Value::from("This is the second argument"),
+                        serde_json::json!({"argCount":3})
+                    ])
+                    .to_string()
+                ),
+                None,
+                0,
+                None,
+            )
+        );
+
         let cb = |message: Payload, _| {
             async {
                 println!("Yehaa! My ack got acked?");
-                if let Payload::String(str) = message {
-                    println!("Received string ack");
-                    println!("Ack data: {}", str);
+                if let Payload::Text(values) = message {
+                    println!("Received json ack");
+                    println!("Ack data: {:?}", values);
                 }
             }
             .boxed()
@@ -833,7 +853,7 @@ mod test {
         assert!(socket
             .emit_with_ack(
                 "test",
-                Payload::String("123".to_owned()),
+                Payload::from("123".to_owned()),
                 Duration::from_secs(10),
                 cb
             )

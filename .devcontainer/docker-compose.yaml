@@ -67,7 +67,7 @@ services:
             - "..:/workspace/rust-socketio"
         environment:
             - "SOCKET_IO_SERVER=http://node-socket-io:4200"
-            - "SOCKET_IO_AUTH_SERVER=http://node-socket-io:4204"
+            - "SOCKET_IO_AUTH_SERVER=http://node-socket-io-auth:4204"
             - "ENGINE_IO_SERVER=http://node-engine-io:4201"
             - "ENGINE_IO_SECURE_SERVER=https://node-engine-io-secure:4202"
             - "ENGINE_IO_SECURE_HOST=node-engine-io-secure"

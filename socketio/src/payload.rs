@@ -8,24 +8,49 @@ use bytes::Bytes;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Payload {
     Binary(Bytes),
+    Text(Vec<serde_json::Value>),
+    #[deprecated = "Use `Payload::Text` instead. Continue existing behavior with: Payload::from(String)"]
+    /// String that is sent as JSON if this is a JSON string, or as a raw string if it isn't
     String(String),
+}
+
+impl Payload {
+    pub(crate) fn string_to_value(string: String) -> serde_json::Value {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&string) {
+            value
+        } else {
+            serde_json::Value::String(string)
+        }
+    }
 }
 
 impl From<&str> for Payload {
     fn from(string: &str) -> Self {
-        Self::String(string.to_owned())
+        Payload::from(string.to_owned())
     }
 }
 
 impl From<String> for Payload {
-    fn from(str: String) -> Self {
-        Self::String(str)
+    fn from(string: String) -> Self {
+        Self::Text(vec![Payload::string_to_value(string)])
+    }
+}
+
+impl From<Vec<String>> for Payload {
+    fn from(arr: Vec<String>) -> Self {
+        Self::Text(arr.into_iter().map(Payload::string_to_value).collect())
+    }
+}
+
+impl From<Vec<serde_json::Value>> for Payload {
+    fn from(values: Vec<serde_json::Value>) -> Self {
+        Self::Text(values)
     }
 }
 
 impl From<serde_json::Value> for Payload {
     fn from(value: serde_json::Value) -> Self {
-        Self::String(value.to_string())
+        Self::Text(vec![value])
     }
 }
 
@@ -47,15 +72,6 @@ impl From<Bytes> for Payload {
     }
 }
 
-impl AsRef<[u8]> for Payload {
-    fn as_ref(&self) -> &[u8] {
-        match self {
-            Payload::Binary(b) => b.as_ref(),
-            Payload::String(s) => s.as_ref(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -63,17 +79,69 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_from() {
+    fn test_from_string() {
         let sut = Payload::from("foo ™");
 
-        assert_eq!(Payload::String(String::from("foo ™")), sut);
+        assert_eq!(
+            Payload::Text(vec![serde_json::Value::String(String::from("foo ™"))]),
+            sut
+        );
 
         let sut = Payload::from(String::from("foo ™"));
-        assert_eq!(Payload::String(String::from("foo ™")), sut);
+        assert_eq!(
+            Payload::Text(vec![serde_json::Value::String(String::from("foo ™"))]),
+            sut
+        );
 
         let sut = Payload::from(json!("foo ™"));
-        assert_eq!(Payload::String(String::from("\"foo ™\"")), sut);
+        assert_eq!(
+            Payload::Text(vec![serde_json::Value::String(String::from("foo ™"))]),
+            sut
+        );
+    }
 
+    #[test]
+    fn test_from_multiple_strings() {
+        let input = vec![
+            "one".to_owned(),
+            "two".to_owned(),
+            json!(["foo", "bar"]).to_string(),
+        ];
+
+        assert_eq!(
+            Payload::Text(vec![
+                serde_json::Value::String(String::from("one")),
+                serde_json::Value::String(String::from("two")),
+                json!(["foo", "bar"])
+            ]),
+            Payload::from(input)
+        );
+    }
+
+    #[test]
+    fn test_from_multiple_json() {
+        let input = vec![json!({"foo": "bar"}), json!("foo"), json!(["foo", "bar"])];
+
+        assert_eq!(Payload::Text(input.clone()), Payload::from(input.clone()));
+    }
+
+    #[test]
+    fn test_from_json() {
+        let json = json!({
+            "foo": "bar"
+        });
+        let sut = Payload::from(json.clone());
+
+        assert_eq!(Payload::Text(vec![json.clone()]), sut);
+
+        // From JSON encoded string
+        let sut = Payload::from(json.to_string());
+
+        assert_eq!(Payload::Text(vec![json]), sut);
+    }
+
+    #[test]
+    fn test_from_binary() {
         let sut = Payload::from(vec![1, 2, 3]);
         assert_eq!(Payload::Binary(Bytes::from_static(&[1, 2, 3])), sut);
 

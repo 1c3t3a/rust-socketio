@@ -40,6 +40,9 @@ var callback = client => {
     client.emit('test', 'Hello from the test event!');
     client.emit(Buffer.from([4, 5, 6]));
     client.emit('test', Buffer.from([1, 2, 3]));
+    client.emit('This is the first argument', 'This is the second argument', {
+        argCount: 3
+    });
 };
 io.on('connection', callback);
 io.of('/admin').on('connection', callback);
