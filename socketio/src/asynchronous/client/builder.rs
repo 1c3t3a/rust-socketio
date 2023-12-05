@@ -48,8 +48,10 @@ impl ClientBuilder {
     ///     let callback = |payload: Payload, socket: Client| {
     ///         async move {
     ///             match payload {
-    ///                 Payload::String(str) => println!("Received: {}", str),
+    ///                 Payload::Text(values) => println!("Received: {:?}", values),
     ///                 Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///                 // This is deprecated, use Payload::Text instead
+    ///                 Payload::String(str) => println!("Received: {}", str),
     ///             }
     ///         }.boxed()
     ///     };
@@ -112,8 +114,10 @@ impl ClientBuilder {
     ///         .on("test", |payload: Payload, _| {
     ///             async move {
     ///                 match payload {
-    ///                        Payload::String(str) => println!("Received: {}", str),
-    ///                       Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///                     Payload::Text(values) => println!("Received: {:?}", values),
+    ///                     Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///                     // This is deprecated, use Payload::Text instead
+    ///                     Payload::String(str) => println!("Received: {}", str),
     ///                 }
     ///             }
     ///             .boxed()
@@ -146,8 +150,10 @@ impl ClientBuilder {
     ///     let callback = |payload: Payload, _| {
     ///             async move {
     ///                 match payload {
-    ///                        Payload::String(str) => println!("Received: {}", str),
-    ///                       Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///                     Payload::Text(values) => println!("Received: {:?}", values),
+    ///                     Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///                     // This is deprecated use Payload::Text instead
+    ///                     Payload::String(str) => println!("Received: {}", str),
     ///                 }
     ///             }
     ///             .boxed() // <-- this makes sure we end up with a `BoxFuture<_>`

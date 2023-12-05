@@ -8,34 +8,45 @@
     "service": "rust-client",
     "workspaceFolder": "/workspace/rust-socketio",
     "shutdownAction": "stopCompose",
-    // Set *default* container specific settings.json values on container create.
-    "settings": {
-        "lldb.executable": "/usr/bin/lldb",
-        // VS Code don't watch files under ./target
-        "files.watcherExclude": {
-            "**/target/**": true
-        } /*,
-        // If you prefer rust-analzyer to be less noisy consider these settings to your settings.json
-        "editor.semanticTokenColorCustomizations": {
-            "rules": {
-                "*.mutable": {
-                    "underline": false
-                }
-            }
-        },
-        "rust-analyzer.inlayHints.parameterHints": false
-        */
+    "customizations": {
+        "vscode": {
+            // Set *default* container specific settings.json values on container create.
+            "settings": {
+                "lldb.executable": "/usr/bin/lldb",
+                // VS Code don't watch files under ./target
+                "files.watcherExclude": {
+                    "**/target/**": true
+                },
+                "rust-analyzer.cargo.features": [
+                    "async"
+                ]
+                /*,
+                // If you prefer rust-analzyer to be less noisy consider these settings to your settings.json
+                "editor.semanticTokenColorCustomizations": {
+                    "rules": {
+                        "*.mutable": {
+                            "underline": false
+                        }
+                    }
+                },
+                "rust-analyzer.inlayHints.parameterHints": false
+                */
+            },
+            // Add the IDs of extensions you want installed when the container is created.
+            "extensions": [
+                "rust-lang.rust-analyzer",
+                "bungcip.better-toml",
+                "vadimcn.vscode-lldb",
+                "eamodio.gitlens",
+                "streetsidesoftware.code-spell-checker"
+            ]
+        }
     },
-    // Add the IDs of extensions you want installed when the container is created.
-    "extensions": [
-        "rust-lang.rust-analyzer",
-        "bungcip.better-toml",
-        "vadimcn.vscode-lldb",
-        "eamodio.gitlens",
-        "streetsidesoftware.code-spell-checker"
-    ],
-    // Use 'forwardPorts' to make a list of ports inside the container available locally.
-    // "forwardPorts": [],
-    // Comment out connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
-    "remoteUser": "vscode"
+    "remoteUser": "vscode",
+    // Start a TCP proxy from to the testing node-socket-io server so doc tests can pass.
+    "postAttachCommand": {
+        "SocketIOProxy": "socat TCP-LISTEN:4200,fork,reuseaddr TCP:node-socket-io:4200",
+        "EngineIOProxy": "socat TCP-LISTEN:4201,fork,reuseaddr TCP:node-engine-io:4201",
+        "SocketIOAuthProxy": "socat TCP-LISTEN:4204,fork,reuseaddr TCP:node-socket-io-auth:4204"
+    }
 }

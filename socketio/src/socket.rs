@@ -2,8 +2,6 @@ use crate::error::{Error, Result};
 use crate::packet::{Packet, PacketId};
 use bytes::Bytes;
 use rust_engineio::{Client as EngineClient, Packet as EnginePacket, PacketId as EnginePacketId};
-use serde::de::IgnoredAny;
-use serde_json::Value;
 use std::convert::TryFrom;
 use std::sync::{atomic::AtomicBool, Arc};
 use std::{fmt::Debug, sync::atomic::Ordering};
@@ -75,51 +73,9 @@ impl Socket {
     /// Emits to certain event with given data. The data needs to be JSON,
     /// otherwise this returns an `InvalidJson` error.
     pub fn emit(&self, nsp: &str, event: Event, data: Payload) -> Result<()> {
-        let socket_packet = self.build_packet_for_payload(data, event, nsp, None)?;
+        let socket_packet = Packet::new_from_payload(data, event, nsp, None)?;
 
         self.send(socket_packet)
-    }
-
-    /// Returns a packet for a payload, could be used for both binary and non binary
-    /// events and acks. Convenience method.
-    #[inline]
-    pub(crate) fn build_packet_for_payload<'a>(
-        &'a self,
-        payload: Payload,
-        event: Event,
-        nsp: &'a str,
-        id: Option<i32>,
-    ) -> Result<Packet> {
-        match payload {
-            Payload::Binary(bin_data) => Ok(Packet::new(
-                if id.is_some() {
-                    PacketId::BinaryAck
-                } else {
-                    PacketId::BinaryEvent
-                },
-                nsp.to_owned(),
-                Some(Value::String(event.into()).to_string()),
-                id,
-                1,
-                Some(vec![bin_data]),
-            )),
-            Payload::String(str_data) => {
-                let payload = if serde_json::from_str::<IgnoredAny>(&str_data).is_ok() {
-                    format!("[\"{event}\",{str_data}]")
-                } else {
-                    format!("[\"{event}\",\"{str_data}\"]")
-                };
-
-                Ok(Packet::new(
-                    PacketId::Event,
-                    nsp.to_owned(),
-                    Some(payload),
-                    id,
-                    0,
-                    None,
-                ))
-            }
-        }
     }
 
     pub(crate) fn poll(&self) -> Result<Option<Packet>> {

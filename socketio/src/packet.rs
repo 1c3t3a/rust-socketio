@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use crate::{Event, Payload};
 use bytes::Bytes;
 use serde::de::IgnoredAny;
 
@@ -27,6 +28,66 @@ pub struct Packet {
     pub id: Option<i32>,
     pub attachment_count: u8,
     pub attachments: Option<Vec<Bytes>>,
+}
+
+impl Packet {
+    /// Returns a packet for a payload, could be used for both binary and non binary
+    /// events and acks. Convenience method.
+    #[inline]
+    pub(crate) fn new_from_payload<'a>(
+        payload: Payload,
+        event: Event,
+        nsp: &'a str,
+        id: Option<i32>,
+    ) -> Result<Packet> {
+        match payload {
+            Payload::Binary(bin_data) => Ok(Packet::new(
+                if id.is_some() {
+                    PacketId::BinaryAck
+                } else {
+                    PacketId::BinaryEvent
+                },
+                nsp.to_owned(),
+                Some(serde_json::Value::String(event.into()).to_string()),
+                id,
+                1,
+                Some(vec![bin_data]),
+            )),
+            #[allow(deprecated)]
+            Payload::String(str_data) => {
+                let payload = if serde_json::from_str::<IgnoredAny>(&str_data).is_ok() {
+                    format!("[\"{event}\",{str_data}]")
+                } else {
+                    format!("[\"{event}\",\"{str_data}\"]")
+                };
+
+                Ok(Packet::new(
+                    PacketId::Event,
+                    nsp.to_owned(),
+                    Some(payload),
+                    id,
+                    0,
+                    None,
+                ))
+            }
+            Payload::Text(mut data) => {
+                let mut payload_args = vec![serde_json::Value::String(event.to_string())];
+                payload_args.append(&mut data);
+                drop(data);
+
+                let payload = serde_json::Value::Array(payload_args).to_string();
+
+                Ok(Packet::new(
+                    PacketId::Event,
+                    nsp.to_owned(),
+                    Some(payload),
+                    id,
+                    0,
+                    None,
+                ))
+            }
+        }
+    }
 }
 
 impl Default for Packet {
@@ -545,5 +606,69 @@ mod test {
     fn test_illegal_packet_id() {
         let _sut = PacketId::try_from(42).expect_err("error!");
         assert!(matches!(Error::InvalidPacketId(42 as char), _sut))
+    }
+
+    #[test]
+    fn new_from_payload_binary() {
+        let payload = Payload::Binary(Bytes::from_static(&[0, 4, 9]));
+        let result =
+            Packet::new_from_payload(payload.clone(), "test_event".into(), "namespace", None)
+                .unwrap();
+        assert_eq!(
+            result,
+            Packet {
+                packet_type: PacketId::BinaryEvent,
+                nsp: "namespace".to_owned(),
+                data: Some("\"test_event\"".to_owned()),
+                id: None,
+                attachment_count: 1,
+                attachments: Some(vec![Bytes::from_static(&[0, 4, 9])])
+            }
+        )
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn new_from_payload_string() {
+        let payload = Payload::String("test".to_owned());
+        let result = Packet::new_from_payload(
+            payload.clone(),
+            "other_event".into(),
+            "other_namespace",
+            Some(10),
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            Packet {
+                packet_type: PacketId::Event,
+                nsp: "other_namespace".to_owned(),
+                data: Some("[\"other_event\",\"test\"]".to_owned()),
+                id: Some(10),
+                attachment_count: 0,
+                attachments: None
+            }
+        )
+    }
+
+    #[test]
+    fn new_from_payload_json() {
+        let payload = Payload::Text(vec![
+            serde_json::json!("String test"),
+            serde_json::json!({"type":"object"}),
+        ]);
+        let result =
+            Packet::new_from_payload(payload.clone(), "third_event".into(), "/", Some(10)).unwrap();
+        assert_eq!(
+            result,
+            Packet {
+                packet_type: PacketId::Event,
+                nsp: "/".to_owned(),
+                data: Some("[\"third_event\",\"String test\",{\"type\":\"object\"}]".to_owned()),
+                id: Some(10),
+                attachment_count: 0,
+                attachments: None
+            }
+        )
     }
 }

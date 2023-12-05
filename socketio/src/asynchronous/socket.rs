@@ -10,8 +10,6 @@ use futures_util::{Stream, StreamExt};
 use rust_engineio::{
     asynchronous::Client as EngineClient, Packet as EnginePacket, PacketId as EnginePacketId,
 };
-use serde::de::IgnoredAny;
-use serde_json::Value;
 use std::{
     fmt::Debug,
     pin::Pin,
@@ -86,49 +84,9 @@ impl Socket {
     /// Emits to certain event with given data. The data needs to be JSON,
     /// otherwise this returns an `InvalidJson` error.
     pub async fn emit(&self, nsp: &str, event: Event, data: Payload) -> Result<()> {
-        let socket_packet = self.build_packet_for_payload(data, event, nsp, None)?;
+        let socket_packet = Packet::new_from_payload(data, event, nsp, None)?;
 
         self.send(socket_packet).await
-    }
-
-    /// Returns a packet for a payload, could be used for bot binary and non binary
-    /// events and acks. Convenance method.
-    #[inline]
-    pub(crate) fn build_packet_for_payload<'a>(
-        &'a self,
-        payload: Payload,
-        event: Event,
-        nsp: &'a str,
-        id: Option<i32>,
-    ) -> Result<Packet> {
-        match payload {
-            Payload::Binary(bin_data) => Ok(Packet::new(
-                if id.is_some() {
-                    PacketId::BinaryAck
-                } else {
-                    PacketId::BinaryEvent
-                },
-                nsp.to_owned(),
-                Some(Value::String(event.into()).to_string()),
-                id,
-                1,
-                Some(vec![bin_data]),
-            )),
-            Payload::String(str_data) => {
-                serde_json::from_str::<IgnoredAny>(&str_data)?;
-
-                let payload = format!("[\"{event}\",{str_data}]");
-
-                Ok(Packet::new(
-                    PacketId::Event,
-                    nsp.to_owned(),
-                    Some(payload),
-                    id,
-                    0,
-                    None,
-                ))
-            }
-        }
     }
 
     fn stream(

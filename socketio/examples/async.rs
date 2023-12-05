@@ -14,8 +14,11 @@ async fn main() {
     let callback = |payload: Payload, socket: Client| {
         async move {
             match payload {
-                Payload::String(str) => println!("Received: {}", str),
+                Payload::Text(values) => println!("Received: {:?}", values),
                 Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+                // Use Payload::Text instead
+                #[allow(deprecated)]
+                Payload::String(str) => println!("Received: {}", str),
             }
             socket
                 .emit("test", json!({"got ack": true}))
