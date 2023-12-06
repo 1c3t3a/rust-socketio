@@ -178,7 +178,7 @@ impl RawClient {
     ///
     /// let ack_callback = |message: Payload, socket: RawClient| {
     ///     match message {
-    ///         Payload::Text(values) => println!("{:?}", values),
+    ///         Payload::Text(values) => println!("{:#?}", values),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
     ///         // This is deprecated, use Payload::Text instead
     ///         Payload::String(str) => println!("{}", str),
@@ -435,7 +435,7 @@ mod test {
             .on("test", |msg, _| match msg {
                 #[allow(deprecated)]
                 Payload::String(str) => println!("Received string: {}", str),
-                Payload::Text(text) => println!("Received json: {:?}", text),
+                Payload::Text(text) => println!("Received json: {:#?}", text),
                 Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
             })
             .connect()?;
@@ -453,7 +453,7 @@ mod test {
             println!("Yehaa! My ack got acked?");
             if let Payload::Text(values) = message {
                 println!("Received json Ack");
-                println!("Ack data: {:?}", values);
+                println!("Ack data: {:#?}", values);
             }
         };
 
@@ -563,12 +563,12 @@ mod test {
             .auth(json!({ "password": "123" }))
             .on("auth", |payload, _client| {
                 if let Payload::Text(payload) = payload {
-                    println!("{:?}", payload);
+                    println!("{:#?}", payload);
                 }
             })
             .on_any(move |event, payload, _client| {
                 if let Payload::Text(payload) = payload {
-                    println!("{event} {payload:?}");
+                    println!("{event} {payload:#?}");
                 }
                 tx.send(String::from(event)).unwrap();
             })
@@ -760,7 +760,7 @@ mod test {
                     println!("Yehaa! My ack got acked?");
                     if let Payload::Text(values) = message {
                         println!("Received ack");
-                        println!("Ack data: {values:?}");
+                        println!("Ack data: {values:#?}");
                     }
                 }
             )

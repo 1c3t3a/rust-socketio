@@ -48,7 +48,7 @@ impl ClientBuilder {
     ///     let callback = |payload: Payload, socket: Client| {
     ///         async move {
     ///             match payload {
-    ///                 Payload::Text(values) => println!("Received: {:?}", values),
+    ///                 Payload::Text(values) => println!("Received: {:#?}", values),
     ///                 Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
     ///                 // This is deprecated, use Payload::Text instead
     ///                 Payload::String(str) => println!("Received: {}", str),
@@ -114,7 +114,7 @@ impl ClientBuilder {
     ///         .on("test", |payload: Payload, _| {
     ///             async move {
     ///                 match payload {
-    ///                     Payload::Text(values) => println!("Received: {:?}", values),
+    ///                     Payload::Text(values) => println!("Received: {:#?}", values),
     ///                     Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
     ///                     // This is deprecated, use Payload::Text instead
     ///                     Payload::String(str) => println!("Received: {}", str),
@@ -150,7 +150,7 @@ impl ClientBuilder {
     ///     let callback = |payload: Payload, _| {
     ///             async move {
     ///                 match payload {
-    ///                     Payload::Text(values) => println!("Received: {:?}", values),
+    ///                     Payload::Text(values) => println!("Received: {:#?}", values),
     ///                     Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
     ///                     // This is deprecated use Payload::Text instead
     ///                     Payload::String(str) => println!("Received: {}", str),

@@ -62,7 +62,7 @@ impl ClientBuilder {
     ///
     /// let callback = |payload: Payload, socket: RawClient| {
     ///            match payload {
-    ///                Payload::Text(values) => println!("Received: {:?}", values),
+    ///                Payload::Text(values) => println!("Received: {:#?}", values),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
     ///                // This payload type is deprecated, use Payload::Text instead
     ///                Payload::String(str) => println!("Received: {}", str),
@@ -158,7 +158,7 @@ impl ClientBuilder {
     ///     .namespace("/admin")
     ///     .on("test", |payload: Payload, _| {
     ///            match payload {
-    ///                Payload::Text(values) => println!("Received: {:?}", values),
+    ///                Payload::Text(values) => println!("Received: {:#?}", values),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
     ///                // This payload type is deprecated, use Payload::Text instead
     ///                Payload::String(str) => println!("Received: {}", str),
