@@ -189,7 +189,7 @@ impl Client {
     ///     let ack_callback = |message: Payload, socket: Client| {
     ///         async move {
     ///             match message {
-    ///                 Payload::Text(values) => println!("{:?}", values),
+    ///                 Payload::Text(values) => println!("{:#?}", values),
     ///                 Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
     ///                 // This is deprecated use Payload::Text instead
     ///                 Payload::String(str) => println!("{}", str),
@@ -457,7 +457,7 @@ mod test {
             .on("test", |msg, _| {
                 async {
                     match msg {
-                        Payload::Text(values) => println!("Received json: {:?}", values),
+                        Payload::Text(values) => println!("Received json: {:#?}", values),
                         #[allow(deprecated)]
                         Payload::String(str) => println!("Received string: {}", str),
                         Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
@@ -488,7 +488,7 @@ mod test {
                         println!("Yehaa! My ack got acked?");
                         if let Payload::Text(json) = message {
                             println!("Received json Ack");
-                            println!("Ack data: {:?}", json);
+                            println!("Ack data: {:#?}", json);
                         }
                     }
                     .boxed()
@@ -652,7 +652,7 @@ mod test {
                 let clone_tx = tx.clone();
                 async move {
                     if let Payload::Text(values) = payload {
-                        println!("{event}: {values:?}");
+                        println!("{event}: {values:#?}");
                     }
                     clone_tx.send(String::from(event)).await.unwrap();
                 }
@@ -844,7 +844,7 @@ mod test {
                 println!("Yehaa! My ack got acked?");
                 if let Payload::Text(values) = message {
                     println!("Received json ack");
-                    println!("Ack data: {:?}", values);
+                    println!("Ack data: {:#?}", values);
                 }
             }
             .boxed()

@@ -11,7 +11,7 @@
 //! // socket to communicate with the server
 //! let callback = |payload: Payload, socket: RawClient| {
 //!        match payload {
-//!            Payload::Text(values) => println!("Received: {:?}", values),
+//!            Payload::Text(values) => println!("Received: {:#?}", values),
 //!            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
 //!            // This variant is deprecated, use Payload::Text instead
 //!            Payload::String(str) => println!("Received: {}", str),
@@ -109,7 +109,7 @@ async fn main() {
     let callback = |payload: Payload, socket: Client| {
         async move {
             match payload {
-                Payload::Text(values) => println!("Received: {:?}", values),
+                Payload::Text(values) => println!("Received: {:#?}", values),
                 Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
                 // This is deprecated use Payload::Text instead
                 Payload::String(str) => println!("Received: {}", str),

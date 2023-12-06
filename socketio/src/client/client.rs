@@ -106,7 +106,7 @@ impl Client {
     ///
     /// let ack_callback = |message: Payload, socket: RawClient| {
     ///     match message {
-    ///         Payload::Text(values) => println!("{:?}", values),
+    ///         Payload::Text(values) => println!("{:#?}", values),
     ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
     ///         // This is deprecated, use Payload::Text instead.
     ///         Payload::String(str) => println!("{}", str),

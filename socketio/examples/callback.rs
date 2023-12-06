@@ -11,7 +11,7 @@ fn main() {
     // socket to communicate with the server
     let handle_test = |payload: Payload, socket: RawClient| {
         match payload {
-            Payload::Text(text) => println!("Received json: {:?}", text),
+            Payload::Text(text) => println!("Received json: {:#?}", text),
             Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
             #[allow(deprecated)]
             // Use Payload::Text instead
