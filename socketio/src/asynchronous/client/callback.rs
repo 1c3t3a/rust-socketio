@@ -9,11 +9,18 @@ use crate::{Event, Payload};
 use super::client::Client;
 
 /// Internal type, provides a way to store futures and return them in a boxed manner.
-pub(crate) type DynAsyncCallback =
-    Box<dyn for<'a> FnMut(Payload, Client, Option<i32>) -> BoxFuture<'static, ()> + 'static + Send + Sync>;
+pub(crate) type DynAsyncCallback = Box<
+    dyn for<'a> FnMut(Payload, Client, Option<i32>) -> BoxFuture<'static, ()>
+        + 'static
+        + Send
+        + Sync,
+>;
 
 pub(crate) type DynAsyncAnyCallback = Box<
-    dyn for<'a> FnMut(Event, Payload, Client, Option<i32>) -> BoxFuture<'static, ()> + 'static + Send + Sync,
+    dyn for<'a> FnMut(Event, Payload, Client, Option<i32>) -> BoxFuture<'static, ()>
+        + 'static
+        + Send
+        + Sync,
 >;
 
 pub(crate) struct Callback<T> {
@@ -27,8 +34,10 @@ impl<T> Debug for Callback<T> {
 }
 
 impl Deref for Callback<DynAsyncCallback> {
-    type Target =
-        dyn for<'a> FnMut(Payload, Client, Option<i32>) -> BoxFuture<'static, ()> + 'static + Sync + Send;
+    type Target = dyn for<'a> FnMut(Payload, Client, Option<i32>) -> BoxFuture<'static, ()>
+        + 'static
+        + Sync
+        + Send;
 
     fn deref(&self) -> &Self::Target {
         self.inner.as_ref()
@@ -44,7 +53,10 @@ impl DerefMut for Callback<DynAsyncCallback> {
 impl Callback<DynAsyncCallback> {
     pub(crate) fn new<T>(callback: T) -> Self
     where
-        T: for<'a> FnMut(Payload, Client, Option<i32>) -> BoxFuture<'static, ()> + 'static + Sync + Send,
+        T: for<'a> FnMut(Payload, Client, Option<i32>) -> BoxFuture<'static, ()>
+            + 'static
+            + Sync
+            + Send,
     {
         Callback {
             inner: Box::new(callback),
@@ -53,8 +65,10 @@ impl Callback<DynAsyncCallback> {
 }
 
 impl Deref for Callback<DynAsyncAnyCallback> {
-    type Target =
-        dyn for<'a> FnMut(Event, Payload, Client, Option<i32>) -> BoxFuture<'static, ()> + 'static + Sync + Send;
+    type Target = dyn for<'a> FnMut(Event, Payload, Client, Option<i32>) -> BoxFuture<'static, ()>
+        + 'static
+        + Sync
+        + Send;
 
     fn deref(&self) -> &Self::Target {
         self.inner.as_ref()
@@ -70,7 +84,10 @@ impl DerefMut for Callback<DynAsyncAnyCallback> {
 impl Callback<DynAsyncAnyCallback> {
     pub(crate) fn new<T>(callback: T) -> Self
     where
-        T: for<'a> FnMut(Event, Payload, Client, Option<i32>) -> BoxFuture<'static, ()> + 'static + Sync + Send,
+        T: for<'a> FnMut(Event, Payload, Client, Option<i32>) -> BoxFuture<'static, ()>
+            + 'static
+            + Sync
+            + Send,
     {
         Callback {
             inner: Box::new(callback),

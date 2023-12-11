@@ -1,7 +1,7 @@
 use super::generator::StreamGenerator;
 use crate::{
     error::Result,
-    packet::{Packet, PacketId},
+    packet::{self, Packet, PacketId},
     Error, Event, Payload,
 };
 use async_stream::try_stream;
@@ -134,8 +134,23 @@ impl Socket {
                     0,
                     None,
                 ))
-            },
-            Payload::Text(data) => todo!("not implemented yet"),
+            }
+            Payload::Text(data) => {
+                let packet_type = if is_answer {
+                    PacketId::Ack
+                } else {
+                    PacketId::Event
+                };
+
+                Ok(Packet::new(
+                    packet_type,
+                    nsp.to_owned(),
+                    Some(data),
+                    id,
+                    0,
+                    None,
+                ))
+            }
         }
     }
 

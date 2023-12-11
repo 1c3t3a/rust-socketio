@@ -102,6 +102,7 @@ impl Socket {
                 1,
                 Some(vec![bin_data]),
             )),
+            #[allow(deprecated)]
             Payload::String(str_data) => {
                 let package_type;
                 let payload;
@@ -130,8 +131,27 @@ impl Socket {
                     0,
                     None,
                 ))
-            },
-            Payload::Text(data) => todo!("Text: {:?}", data),
+            }
+            Payload::Text(json_data) => {
+                let packge_type;
+                let data;
+                if is_answer {
+                    data = serde_json::to_string(&json_data)?;
+                    packge_type = PacketId::Ack;
+                } else {
+                    data = serde_json::to_string(&json_data)?;
+                    packge_type = PacketId::Event;
+                }
+
+                Ok(Packet::new(
+                    packge_type,
+                    nsp.to_owned(),
+                    Some(data),
+                    id,
+                    0,
+                    None,
+                ))
+            }
         }
     }
 

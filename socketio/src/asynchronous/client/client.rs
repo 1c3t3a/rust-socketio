@@ -221,9 +221,13 @@ impl Client {
         D: Into<Payload>,
     {
         let id = thread_rng().gen_range(0..999);
-        let socket_packet =
-            self.socket
-                .build_packet_for_payload(data.into(), event.into(), &self.nsp, Some(id), true)?;
+        let socket_packet = self.socket.build_packet_for_payload(
+            data.into(),
+            event.into(),
+            &self.nsp,
+            Some(id),
+            true,
+        )?;
 
         let ack = Ack {
             id,
@@ -267,11 +271,7 @@ impl Client {
     /// }
     /// ```
     #[inline]
-    pub async fn emit_answer<D>(
-        &self,
-        id: Option<i32>,
-        data: D,
-    ) -> Result<()>
+    pub async fn emit_answer<D>(&self, id: Option<i32>, data: D) -> Result<()>
     where
         D: Into<Payload>,
     {
@@ -279,16 +279,25 @@ impl Client {
             None => {
                 return Err(Error::MissedPacketId());
             }
-            Some(el) => el
+            Some(el) => el,
         };
-        let socket_packet =
-            self.socket
-                .build_packet_for_payload(data.into(), Event::Message, &self.nsp, Some(id), true)?;
+        let socket_packet = self.socket.build_packet_for_payload(
+            data.into(),
+            Event::Message,
+            &self.nsp,
+            Some(id),
+            true,
+        )?;
 
         self.socket.send(socket_packet).await
     }
 
-    async fn callback<P: Into<Payload>>(&self, event: &Event, payload: P, id: Option<i32>) -> Result<()> {
+    async fn callback<P: Into<Payload>>(
+        &self,
+        event: &Event,
+        payload: P,
+        id: Option<i32>,
+    ) -> Result<()> {
         let mut on = self.on.write().await;
         let mut on_any = self.on_any.write().await;
 
@@ -366,8 +375,12 @@ impl Client {
 
         if let Some(attachments) = &packet.attachments {
             if let Some(binary_payload) = attachments.get(0) {
-                self.callback(&event, Payload::Binary(binary_payload.to_owned()), packet.id)
-                    .await?;
+                self.callback(
+                    &event,
+                    Payload::Binary(binary_payload.to_owned()),
+                    packet.id,
+                )
+                .await?;
             }
         }
         Ok(())
@@ -418,13 +431,15 @@ impl Client {
             match packet.packet_type {
                 PacketId::Ack | PacketId::BinaryAck => {
                     if let Err(err) = self.handle_ack(packet).await {
-                        self.callback(&Event::Error, err.to_string(), packet.id).await?;
+                        self.callback(&Event::Error, err.to_string(), packet.id)
+                            .await?;
                         return Err(err);
                     }
                 }
                 PacketId::BinaryEvent => {
                     if let Err(err) = self.handle_binary_event(packet).await {
-                        self.callback(&Event::Error, err.to_string(), packet.id).await?;
+                        self.callback(&Event::Error, err.to_string(), packet.id)
+                            .await?;
                     }
                 }
                 PacketId::Connect => {
@@ -441,13 +456,14 @@ impl Client {
                                 .data
                                 .as_ref()
                                 .unwrap_or(&String::from("\"No error message provided\"")),
-                        packet.id
+                        packet.id,
                     )
                     .await?;
                 }
                 PacketId::Event => {
                     if let Err(err) = self.handle_event(packet).await {
-                        self.callback(&Event::Error, err.to_string(), packet.id).await?;
+                        self.callback(&Event::Error, err.to_string(), packet.id)
+                            .await?;
                     }
                 }
             }
@@ -471,7 +487,7 @@ impl Client {
                         Err(callback_err) => Some((Err(callback_err), socket)),
                         Ok(_) => Some((Err(err), socket)),
                     }
-                },
+                }
                 // Some(Ok(packet)) => {
                 //     // if this packet is not meant for the current namespace, skip it an poll for the next one
                 //     if packet.nsp == self.nsp {

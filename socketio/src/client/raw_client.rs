@@ -204,9 +204,13 @@ impl RawClient {
         D: Into<Payload>,
     {
         let id = thread_rng().gen_range(0..999);
-        let socket_packet =
-            self.socket
-                .build_packet_for_payload(data.into(), event.into(), &self.nsp, Some(id), false)?;
+        let socket_packet = self.socket.build_packet_for_payload(
+            data.into(),
+            event.into(),
+            &self.nsp,
+            Some(id),
+            false,
+        )?;
 
         let ack = Ack {
             id,
@@ -222,11 +226,7 @@ impl RawClient {
         Ok(())
     }
 
-    pub fn emit_answer<D>(
-        &self,
-        id: Option<i32>,
-        data: D,
-    ) -> Result<()>
+    pub fn emit_answer<D>(&self, id: Option<i32>, data: D) -> Result<()>
     where
         D: Into<Payload>,
     {
@@ -234,11 +234,15 @@ impl RawClient {
             None => {
                 return Err(Error::MissedPacketId());
             }
-            Some(el) => el
+            Some(el) => el,
         };
-        let socket_packet =
-            self.socket
-                .build_packet_for_payload(data.into(), Event::Message, &self.nsp, Some(id), true)?;
+        let socket_packet = self.socket.build_packet_for_payload(
+            data.into(),
+            Event::Message,
+            &self.nsp,
+            Some(id),
+            true,
+        )?;
 
         self.socket.send(socket_packet)?;
         Ok(())
@@ -307,19 +311,27 @@ impl RawClient {
 
             if ack.time_started.elapsed() < ack.timeout {
                 if let Some(ref payload) = socket_packet.data {
-                    ack.callback.deref_mut()(Payload::from(payload.to_owned()), self.clone(), socket_packet.id);
+                    ack.callback.deref_mut()(
+                        Payload::from(payload.to_owned()),
+                        self.clone(),
+                        socket_packet.id,
+                    );
                 }
 
                 if let Some(ref attachments) = socket_packet.attachments {
                     if let Some(payload) = attachments.get(0) {
-                        ack.callback.deref_mut()(Payload::Binary(payload.to_owned()), self.clone(), socket_packet.id);
+                        ack.callback.deref_mut()(
+                            Payload::Binary(payload.to_owned()),
+                            self.clone(),
+                            socket_packet.id,
+                        );
                     }
                     if ack.time_started.elapsed() < ack.timeout {
                         if let Some(ref payload) = socket_packet.data {
                             ack.callback.deref_mut()(
-                                Payload::String(payload.to_owned()),
+                                Payload::from(payload.to_owned()),
                                 self.clone(),
-                                None
+                                None,
                             );
                         }
                         if let Some(ref attachments) = socket_packet.attachments {
@@ -327,14 +339,14 @@ impl RawClient {
                                 ack.callback.deref_mut()(
                                     Payload::Binary(payload.to_owned()),
                                     self.clone(),
-                                    None
+                                    None,
                                 );
                             }
                         }
                     } else {
                         // Do something with timed out acks?
                     }
-                    }
+                }
             } else {
                 // Do something with timed out acks?
             }
@@ -356,7 +368,11 @@ impl RawClient {
 
         if let Some(attachments) = &packet.attachments {
             if let Some(binary_payload) = attachments.get(0) {
-                self.callback(&event, Payload::Binary(binary_payload.to_owned()), packet.id)?;
+                self.callback(
+                    &event,
+                    Payload::Binary(binary_payload.to_owned()),
+                    packet.id,
+                )?;
             }
         }
         Ok(())
@@ -375,7 +391,7 @@ impl RawClient {
         // in case 2, the message is ment for the default message event, in case 1 the event
         // is specified
         if let Ok(Value::Array(contents)) = serde_json::from_str::<Value>(data) {
-            let (event, data) = if contents.len() > 1 {
+            let (event, _data) = if contents.len() > 1 {
                 // case 1
                 let event = match contents.first() {
                     Some(Value::String(ev)) => Event::from(ev.as_str()),
@@ -391,14 +407,14 @@ impl RawClient {
             };
 
             // call the correct callback
-                self.callback(
-                    &event,
-                    contents
-                        .get(1)
-                        .unwrap_or_else(|| contents.get(0).unwrap())
-                        .to_string(),
-                    packet.id
-                )?;
+            self.callback(
+                &event,
+                contents
+                    .get(1)
+                    .unwrap_or_else(|| contents.get(0).unwrap())
+                    .to_string(),
+                packet.id,
+            )?;
         }
 
         Ok(())
@@ -436,7 +452,7 @@ impl RawClient {
                                 .clone()
                                 .data
                                 .unwrap_or_else(|| String::from("\"No error message provided\"")),
-                        packet.id
+                        packet.id,
                     )?;
                 }
                 PacketId::Event => {

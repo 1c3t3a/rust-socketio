@@ -204,7 +204,10 @@ impl ClientBuilder {
     /// ```
     pub fn on_any<F>(mut self, callback: F) -> Self
     where
-        F: for<'a> FnMut(Event, Payload, Client, Option<i32>) -> BoxFuture<'static, ()> + 'static + Send + Sync,
+        F: for<'a> FnMut(Event, Payload, Client, Option<i32>) -> BoxFuture<'static, ()>
+            + 'static
+            + Send
+            + Sync,
     {
         self.on_any = Some(Callback::<DynAsyncAnyCallback>::new(callback));
         self

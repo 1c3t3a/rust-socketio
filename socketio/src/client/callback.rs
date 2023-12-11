@@ -7,7 +7,8 @@ use super::RawClient;
 use crate::{Event, Payload};
 
 pub(crate) type SocketCallback = Box<dyn FnMut(Payload, RawClient, Option<i32>) + 'static + Send>;
-pub(crate) type SocketAnyCallback = Box<dyn FnMut(Event, Payload, RawClient, Option<i32>) + 'static + Send>;
+pub(crate) type SocketAnyCallback =
+    Box<dyn FnMut(Event, Payload, RawClient, Option<i32>) + 'static + Send>;
 
 pub(crate) struct Callback<T> {
     inner: T,
