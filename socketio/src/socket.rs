@@ -73,86 +73,9 @@ impl Socket {
     /// Emits to certain event with given data. The data needs to be JSON,
     /// otherwise this returns an `InvalidJson` error.
     pub fn emit(&self, nsp: &str, event: Event, data: Payload) -> Result<()> {
-        let socket_packet = self.build_packet_for_payload(data, event, nsp, None, false)?;
+        let socket_packet = Packet::new_from_payload(data, event, nsp, None)?;
 
         self.send(socket_packet)
-    }
-
-    /// Returns a packet for a payload, could be used for both binary and non binary
-    /// events and acks. Convenance method.
-    #[inline]
-    pub(crate) fn build_packet_for_payload<'a>(
-        &'a self,
-        payload: Payload,
-        event: Event,
-        nsp: &'a str,
-        id: Option<i32>,
-        is_answer: bool,
-    ) -> Result<Packet> {
-        match payload {
-            Payload::Binary(bin_data) => Ok(Packet::new(
-                if id.is_some() {
-                    PacketId::BinaryAck
-                } else {
-                    PacketId::BinaryEvent
-                },
-                nsp.to_owned(),
-                Some(serde_json::Value::String(event.into()).to_string()),
-                id,
-                1,
-                Some(vec![bin_data]),
-            )),
-            #[allow(deprecated)]
-            Payload::String(str_data) => {
-                let package_type;
-                let payload;
-
-                if is_answer {
-                    payload = if serde_json::from_str::<serde_json::Value>(&str_data).is_ok() {
-                        format!("[{}]", str_data)
-                    } else {
-                        format!("[\"{}\"]", str_data)
-                    };
-                    package_type = PacketId::Ack;
-                } else {
-                    payload = if serde_json::from_str::<serde_json::Value>(&str_data).is_ok() {
-                        format!("[\"{}\",{}]", String::from(event), str_data)
-                    } else {
-                        format!("[\"{}\",\"{}\"]", String::from(event), str_data)
-                    };
-                    package_type = PacketId::Event;
-                }
-
-                Ok(Packet::new(
-                    package_type,
-                    nsp.to_owned(),
-                    Some(payload),
-                    id,
-                    0,
-                    None,
-                ))
-            }
-            Payload::Text(json_data) => {
-                let packge_type;
-                let data;
-                if is_answer {
-                    data = serde_json::to_string(&json_data)?;
-                    packge_type = PacketId::Ack;
-                } else {
-                    data = serde_json::to_string(&json_data)?;
-                    packge_type = PacketId::Event;
-                }
-
-                Ok(Packet::new(
-                    packge_type,
-                    nsp.to_owned(),
-                    Some(data),
-                    id,
-                    0,
-                    None,
-                ))
-            }
-        }
     }
 
     pub(crate) fn poll(&self) -> Result<Option<Packet>> {

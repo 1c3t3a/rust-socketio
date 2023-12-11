@@ -43,6 +43,7 @@ var callback = client => {
     client.emit('This is the first argument', 'This is the second argument', {
         argCount: 3
     });
+    client.emit('some_auth', 'some number', {'a': 'a-key', 'b': 'b-key'})
 };
 io.on('connection', callback);
 io.of('/admin').on('connection', callback);

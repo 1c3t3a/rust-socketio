@@ -1,6 +1,6 @@
 use super::callback::Callback;
 use crate::packet::{Packet, PacketId};
-use crate::Error;
+use crate::{event, Error};
 pub(crate) use crate::{event::Event, payload::Payload};
 use rand::{thread_rng, Rng};
 use serde_json::Value;
@@ -204,13 +204,8 @@ impl RawClient {
         D: Into<Payload>,
     {
         let id = thread_rng().gen_range(0..999);
-        let socket_packet = self.socket.build_packet_for_payload(
-            data.into(),
-            event.into(),
-            &self.nsp,
-            Some(id),
-            false,
-        )?;
+        let socket_packet =
+            Packet::new_from_payload(data.into(), event.into(), &self.nsp, Some(id))?;
 
         let ack = Ack {
             id,
@@ -236,13 +231,8 @@ impl RawClient {
             }
             Some(el) => el,
         };
-        let socket_packet = self.socket.build_packet_for_payload(
-            data.into(),
-            Event::Message,
-            &self.nsp,
-            Some(id),
-            true,
-        )?;
+        let socket_packet =
+            Packet::new_from_payload(data.into(), Event::Message, &self.nsp, Some(id))?;
 
         self.socket.send(socket_packet)?;
         Ok(())
@@ -391,30 +381,24 @@ impl RawClient {
         // in case 2, the message is ment for the default message event, in case 1 the event
         // is specified
         if let Ok(Value::Array(contents)) = serde_json::from_str::<Value>(data) {
-            let (event, _data) = if contents.len() > 1 {
-                // case 1
-                let event = match contents.first() {
-                    Some(Value::String(ev)) => Event::from(ev.as_str()),
-                    _ => Event::Message,
-                };
-                (event, contents.get(1).ok_or(Error::IncompletePacket())?)
-            } else {
-                // case 2
-                (
-                    Event::Message,
-                    contents.first().ok_or(Error::IncompletePacket())?,
-                )
+            let (event, payloads) = match contents.len() {
+                0 => return Err(Error::IncompletePacket()),
+                1 => {
+                    (
+                        Event::Message,
+                        contents.as_slice(), // safe to unwrap, checked above
+                    )
+                }
+                _ => match contents.first() {
+                    // get rest of data if first is a event
+                    Some(Value::String(ev)) => (Event::from(ev.as_str()), &contents[1..]),
+                    _ => (Event::Message, contents.as_slice()),
+                },
             };
 
             // call the correct callback
-            self.callback(
-                &event,
-                contents
-                    .get(1)
-                    .unwrap_or_else(|| contents.get(0).unwrap())
-                    .to_string(),
-                packet.id,
-            )?;
+            // println!("event: {:?}| data: {:?}| id: {:?}", event, _data, packet.id);
+            self.callback(&event, payloads.to_vec(), packet.id)?;
         }
 
         Ok(())
@@ -814,6 +798,29 @@ mod test {
                 None,
                 0,
                 None,
+            )
+        );
+
+        let packet: Option<Packet> = iter.next();
+        assert!(packet.is_some());
+
+        let packet = packet.unwrap();
+        assert_eq!(
+            packet,
+            Packet::new(
+                PacketId::Event,
+                nsp.clone(),
+                Some(
+                    serde_json::Value::Array(vec![
+                        serde_json::Value::from("some_auth"),
+                        serde_json::Value::from("some number"),
+                        serde_json::json!({"a": "a-key", "b": "b-key"})
+                    ])
+                    .to_string()
+                ),
+                None,
+                0,
+                None
             )
         );
 

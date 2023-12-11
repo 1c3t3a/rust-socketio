@@ -221,12 +221,11 @@ impl Client {
         D: Into<Payload>,
     {
         let id = thread_rng().gen_range(0..999);
-        let socket_packet = self.socket.build_packet_for_payload(
+        let socket_packet = Packet::new_from_payload(
             data.into(),
             event.into(),
             &self.nsp,
             Some(id),
-            true,
         )?;
 
         let ack = Ack {
@@ -281,7 +280,7 @@ impl Client {
             }
             Some(el) => el,
         };
-        let socket_packet = self.socket.build_packet_for_payload(
+        let socket_packet = Packet::new_from_payload(
             data.into(),
             Event::Message,
             &self.nsp,
