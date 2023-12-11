@@ -58,7 +58,7 @@ impl Client {
     /// use serde_json::json;
     ///
     /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, socket: RawClient| {
+    ///     .on("test", |payload: Payload, socket: RawClient, _id: Option<i32>| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     ///      })
@@ -100,7 +100,7 @@ impl Client {
     /// use std::thread::sleep;
     ///
     /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
+    ///     .on("foo", |payload: Payload, _, _| println!("Received: {:#?}", payload))
     ///     .connect()
     ///     .expect("connection failed");
     ///
@@ -126,7 +126,7 @@ impl Client {
         callback: F,
     ) -> Result<()>
     where
-        F: FnMut(Payload, RawClient) + 'static + Send,
+        F: FnMut(Payload, RawClient, Option<i32>) + 'static + Send,
         E: Into<Event>,
         D: Into<Payload>,
     {
@@ -142,7 +142,7 @@ impl Client {
     /// use rust_socketio::{ClientBuilder, Payload, RawClient};
     /// use serde_json::json;
     ///
-    /// fn handle_test(payload: Payload, socket: RawClient) {
+    /// fn handle_test(payload: Payload, socket: RawClient, _id: Option<i32>) {
     ///     println!("Received: {:#?}", payload);
     ///     socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     /// }
@@ -293,20 +293,20 @@ mod test {
             .reconnect(true)
             .max_reconnect_attempts(100)
             .reconnect_delay(100, 100)
-            .on(Event::Connect, move |_, socket| {
+            .on(Event::Connect, move |_, socket, _| {
                 CONNECT_NUM.fetch_add(1, Ordering::Release);
                 let r = socket.emit_with_ack(
                     "message",
                     json!(""),
                     Duration::from_millis(100),
-                    |_, _| {},
+                    |_, _, _| {},
                 );
                 assert!(r.is_ok(), "should emit message success");
             })
-            .on(Event::Close, move |_, _| {
+            .on(Event::Close, move |_, _, _| {
                 CLOSE_NUM.fetch_add(1, Ordering::Release);
             })
-            .on("message", move |_, _socket| {
+            .on("message", move |_, _socket, _| {
                 // test the iterator implementation and make sure there is a constant
                 // stream of packets, even when reconnecting
                 MESSAGE_NUM.fetch_add(1, Ordering::Release);
@@ -362,20 +362,20 @@ mod test {
             .reconnect(true)
             .max_reconnect_attempts(100)
             .reconnect_delay(100, 100)
-            .on(Event::Connect, move |_, socket| {
+            .on(Event::Connect, move |_, socket, _| {
                 CONNECT_NUM.fetch_add(1, Ordering::Release);
                 let result = socket.emit_with_ack(
                     "message",
                     json!(""),
                     Duration::from_millis(100),
-                    |_, _| {},
+                    |_, _, _| {},
                 );
                 assert!(result.is_ok(), "should emit message success");
             })
-            .on(Event::Close, move |_, _| {
+            .on(Event::Close, move |_, _, _| {
                 CLOSE_NUM.fetch_add(1, Ordering::Release);
             })
-            .on("message", move |_, _| {
+            .on("message", move |_, _, _| {
                 // test the iterator implementation and make sure there is a constant
                 // stream of packets, even when reconnecting
                 MESSAGE_NUM.fetch_add(1, Ordering::Release);

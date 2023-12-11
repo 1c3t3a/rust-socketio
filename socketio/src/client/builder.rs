@@ -60,7 +60,7 @@ impl ClientBuilder {
     /// use serde_json::json;
     ///
     ///
-    /// let callback = |payload: Payload, socket: RawClient| {
+    /// let callback = |payload: Payload, socket: RawClient, _id: Option<i32>| {
     ///            match payload {
     ///                Payload::Text(values) => println!("Received: {:#?}", values),
     ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -164,7 +164,7 @@ impl ClientBuilder {
     ///                Payload::String(str) => println!("Received: {}", str),
     ///            }
     ///     })
-    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    ///     .on("error", |err, _, _| eprintln!("Error: {:#?}", err))
     ///     .connect();
     ///
     /// ```
@@ -172,7 +172,7 @@ impl ClientBuilder {
     #[allow(unused_mut)]
     pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
-        F: FnMut(Payload, RawClient) + 'static + Send,
+        F: FnMut(Payload, RawClient, Option<i32>) + 'static + Send,
     {
         let callback = Callback::<SocketCallback>::new(callback);
         // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
@@ -200,7 +200,7 @@ impl ClientBuilder {
     #[allow(unused_mut)]
     pub fn on_any<F>(mut self, callback: F) -> Self
     where
-        F: FnMut(Event, Payload, RawClient) + 'static + Send,
+        F: FnMut(Event, Payload, RawClient, Option<i32>) + 'static + Send,
     {
         let callback = Some(Callback::<SocketAnyCallback>::new(callback));
         // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
@@ -222,7 +222,7 @@ impl ClientBuilder {
     ///
     /// let socket = ClientBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    ///     .on("error", |err, _, _| eprintln!("Error: {:#?}", err))
     ///     .tls_config(tls_connector)
     ///     .connect();
     ///
@@ -242,7 +242,7 @@ impl ClientBuilder {
     ///
     /// let socket = ClientBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    ///     .on("error", |err, _, _| eprintln!("Error: {:#?}", err))
     ///     .opening_header("accept-encoding", "application/json")
     ///     .connect();
     ///
@@ -270,7 +270,7 @@ impl ClientBuilder {
     /// let socket = ClientBuilder::new("http://localhost:4204/")
     ///     .namespace("/admin")
     ///     .auth(json!({ "password": "1337" }))
-    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    ///     .on("error", |err, _, _| eprintln!("Error: {:#?}", err))
     ///     .connect()
     ///     .expect("Connection error");
     ///
@@ -318,7 +318,7 @@ impl ClientBuilder {
     ///
     /// let mut socket = ClientBuilder::new("http://localhost:4200/")
     ///     .namespace("/admin")
-    ///     .on("error", |err, _| eprintln!("Client error!: {:#?}", err))
+    ///     .on("error", |err, _, _| eprintln!("Client error!: {:#?}", err))
     ///     .connect()
     ///     .expect("connection failed");
     ///

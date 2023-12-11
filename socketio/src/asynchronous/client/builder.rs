@@ -45,7 +45,7 @@ impl ClientBuilder {
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let callback = |payload: Payload, socket: Client| {
+    ///     let callback = |payload: Payload, socket: Client, _id: Option<i32>| {
     ///         async move {
     ///             match payload {
     ///                 Payload::Text(values) => println!("Received: {:#?}", values),
@@ -111,7 +111,7 @@ impl ClientBuilder {
     /// async fn main() {
     ///     let socket = ClientBuilder::new("http://localhost:4200/")
     ///         .namespace("/admin")
-    ///         .on("test", |payload: Payload, _| {
+    ///         .on("test", |payload: Payload, _, _| {
     ///             async move {
     ///                 match payload {
     ///                     Payload::Text(values) => println!("Received: {:#?}", values),
@@ -122,7 +122,7 @@ impl ClientBuilder {
     ///             }
     ///             .boxed()
     ///         })
-    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .on("error", |err, _, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
     ///         .connect()
     ///         .await;
     /// }
@@ -147,7 +147,7 @@ impl ClientBuilder {
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let callback = |payload: Payload, _| {
+    ///     let callback = |payload: Payload, _, _| {
     ///             async move {
     ///                 match payload {
     ///                     Payload::Text(values) => println!("Received: {:#?}", values),
@@ -170,7 +170,7 @@ impl ClientBuilder {
     #[cfg(feature = "async-callbacks")]
     pub fn on<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
     where
-        F: for<'a> std::ops::FnMut(Payload, Client) -> BoxFuture<'static, ()>
+        F: for<'a> std::ops::FnMut(Payload, Client, Option<i32>) -> BoxFuture<'static, ()>
             + 'static
             + Send
             + Sync,
@@ -204,7 +204,7 @@ impl ClientBuilder {
     /// ```
     pub fn on_any<F>(mut self, callback: F) -> Self
     where
-        F: for<'a> FnMut(Event, Payload, Client) -> BoxFuture<'static, ()> + 'static + Send + Sync,
+        F: for<'a> FnMut(Event, Payload, Client, Option<i32>) -> BoxFuture<'static, ()> + 'static + Send + Sync,
     {
         self.on_any = Some(Callback::<DynAsyncAnyCallback>::new(callback));
         self
@@ -227,7 +227,7 @@ impl ClientBuilder {
     ///
     ///     let socket = ClientBuilder::new("http://localhost:4200/")
     ///         .namespace("/admin")
-    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .on("error", |err, _, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
     ///         .tls_config(tls_connector)
     ///         .connect()
     ///         .await;
@@ -250,7 +250,7 @@ impl ClientBuilder {
     /// async fn main() {
     ///     let socket = ClientBuilder::new("http://localhost:4200/")
     ///         .namespace("/admin")
-    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .on("error", |err, _, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
     ///         .opening_header("accept-encoding", "application/json")
     ///         .connect()
     ///         .await;
@@ -282,7 +282,7 @@ impl ClientBuilder {
     ///     let socket = ClientBuilder::new("http://localhost:4204/")
     ///         .namespace("/admin")
     ///         .auth(json!({ "password": "1337" }))
-    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .on("error", |err, _, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
     ///         .connect()
     ///         .await;
     /// }
@@ -329,7 +329,7 @@ impl ClientBuilder {
     /// async fn main() {
     ///     let mut socket = ClientBuilder::new("http://localhost:4200/")
     ///         .namespace("/admin")
-    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .on("error", |err, _, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
     ///         .connect()
     ///         .await
     ///         .expect("connection failed");

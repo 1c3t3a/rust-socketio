@@ -94,7 +94,7 @@ impl RawClient {
     /// use serde_json::json;
     ///
     /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .on("test", |payload: Payload, socket: RawClient| {
+    ///     .on("test", |payload: Payload, socket: RawClient, _id: Option<i32>| {
     ///         println!("Received: {:#?}", payload);
     ///         socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     ///      })
@@ -123,7 +123,7 @@ impl RawClient {
     /// use rust_socketio::{ClientBuilder, Payload, RawClient};
     /// use serde_json::json;
     ///
-    /// fn handle_test(payload: Payload, socket: RawClient) {
+    /// fn handle_test(payload: Payload, socket: RawClient, _id: Option<i32>) {
     ///     println!("Received: {:#?}", payload);
     ///     socket.emit("test", json!({"hello": true})).expect("Server unreachable");
     /// }
@@ -149,7 +149,7 @@ impl RawClient {
         let _ = self.socket.send(disconnect_packet);
         self.socket.disconnect()?;
 
-        let _ = self.callback(&Event::Close, ""); // trigger on_close
+        let _ = self.callback(&Event::Close, "", None); // trigger on_close
         Ok(())
     }
 
@@ -172,7 +172,7 @@ impl RawClient {
     /// use std::thread::sleep;
     ///
     /// let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .on("foo", |payload: Payload, _| println!("Received: {:#?}", payload))
+    ///     .on("foo", |payload: Payload, _, _| println!("Received: {:#?}", payload))
     ///     .connect()
     ///     .expect("connection failed");
     ///
@@ -199,13 +199,14 @@ impl RawClient {
         callback: F,
     ) -> Result<()>
     where
-        F: FnMut(Payload, RawClient) + 'static + Send,
+        F: FnMut(Payload, RawClient, Option<i32>) + 'static + Send,
         E: Into<Event>,
         D: Into<Payload>,
     {
         let id = thread_rng().gen_range(0..999);
         let socket_packet =
-            Packet::new_from_payload(data.into(), event.into(), &self.nsp, Some(id))?;
+            self.socket
+                .build_packet_for_payload(data.into(), event.into(), &self.nsp, Some(id), false)?;
 
         let ack = Ack {
             id,
@@ -221,11 +222,33 @@ impl RawClient {
         Ok(())
     }
 
+    pub fn emit_answer<D>(
+        &self,
+        id: Option<i32>,
+        data: D,
+    ) -> Result<()>
+    where
+        D: Into<Payload>,
+    {
+        let id = match id {
+            None => {
+                return Err(Error::MissedPacketId());
+            }
+            Some(el) => el
+        };
+        let socket_packet =
+            self.socket
+                .build_packet_for_payload(data.into(), Event::Message, &self.nsp, Some(id), true)?;
+
+        self.socket.send(socket_packet)?;
+        Ok(())
+    }
+
     pub(crate) fn poll(&self) -> Result<Option<Packet>> {
         loop {
             match self.socket.poll() {
                 Err(err) => {
-                    self.callback(&Event::Error, err.to_string())?;
+                    self.callback(&Event::Error, err.to_string(), None)?;
                     return Err(err);
                 }
                 Ok(Some(packet)) => {
@@ -246,7 +269,7 @@ impl RawClient {
         Iter { socket: self }
     }
 
-    fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {
+    fn callback<P: Into<Payload>>(&self, event: &Event, payload: P, id: Option<i32>) -> Result<()> {
         let mut on = self.on.lock()?;
         let mut on_any = self.on_any.lock()?;
         let lock = on.deref_mut();
@@ -255,12 +278,12 @@ impl RawClient {
         let payload = payload.into();
 
         if let Some(callback) = lock.get_mut(event) {
-            callback(payload.clone(), self.clone());
+            callback(payload.clone(), self.clone(), id);
         }
         match event {
             Event::Message | Event::Custom(_) => {
                 if let Some(callback) = on_any_lock {
-                    callback(event.clone(), payload, self.clone())
+                    callback(event.clone(), payload, self.clone(), id)
                 }
             }
             _ => {}
@@ -284,14 +307,34 @@ impl RawClient {
 
             if ack.time_started.elapsed() < ack.timeout {
                 if let Some(ref payload) = socket_packet.data {
-                    ack.callback.deref_mut()(Payload::from(payload.to_owned()), self.clone());
+                    ack.callback.deref_mut()(Payload::from(payload.to_owned()), self.clone(), socket_packet.id);
                 }
 
                 if let Some(ref attachments) = socket_packet.attachments {
                     if let Some(payload) = attachments.get(0) {
-                        ack.callback.deref_mut()(Payload::Binary(payload.to_owned()), self.clone());
+                        ack.callback.deref_mut()(Payload::Binary(payload.to_owned()), self.clone(), socket_packet.id);
                     }
-                }
+                    if ack.time_started.elapsed() < ack.timeout {
+                        if let Some(ref payload) = socket_packet.data {
+                            ack.callback.deref_mut()(
+                                Payload::String(payload.to_owned()),
+                                self.clone(),
+                                None
+                            );
+                        }
+                        if let Some(ref attachments) = socket_packet.attachments {
+                            if let Some(payload) = attachments.get(0) {
+                                ack.callback.deref_mut()(
+                                    Payload::Binary(payload.to_owned()),
+                                    self.clone(),
+                                    None
+                                );
+                            }
+                        }
+                    } else {
+                        // Do something with timed out acks?
+                    }
+                    }
             } else {
                 // Do something with timed out acks?
             }
@@ -313,7 +356,7 @@ impl RawClient {
 
         if let Some(attachments) = &packet.attachments {
             if let Some(binary_payload) = attachments.get(0) {
-                self.callback(&event, Payload::Binary(binary_payload.to_owned()))?;
+                self.callback(&event, Payload::Binary(binary_payload.to_owned()), packet.id)?;
             }
         }
         Ok(())
@@ -338,7 +381,6 @@ impl RawClient {
                     Some(Value::String(ev)) => Event::from(ev.as_str()),
                     _ => Event::Message,
                 };
-
                 (event, contents.get(1).ok_or(Error::IncompletePacket())?)
             } else {
                 // case 2
@@ -349,7 +391,14 @@ impl RawClient {
             };
 
             // call the correct callback
-            self.callback(&event, data.to_string())?;
+                self.callback(
+                    &event,
+                    contents
+                        .get(1)
+                        .unwrap_or_else(|| contents.get(0).unwrap())
+                        .to_string(),
+                    packet.id
+                )?;
         }
 
         Ok(())
@@ -364,20 +413,20 @@ impl RawClient {
             match packet.packet_type {
                 PacketId::Ack | PacketId::BinaryAck => {
                     if let Err(err) = self.handle_ack(packet) {
-                        self.callback(&Event::Error, err.to_string())?;
+                        self.callback(&Event::Error, err.to_string(), packet.id)?;
                         return Err(err);
                     }
                 }
                 PacketId::BinaryEvent => {
                     if let Err(err) = self.handle_binary_event(packet) {
-                        self.callback(&Event::Error, err.to_string())?;
+                        self.callback(&Event::Error, err.to_string(), packet.id)?;
                     }
                 }
                 PacketId::Connect => {
-                    self.callback(&Event::Connect, "")?;
+                    self.callback(&Event::Connect, "", packet.id)?;
                 }
                 PacketId::Disconnect => {
-                    self.callback(&Event::Close, "")?;
+                    self.callback(&Event::Close, "", packet.id)?;
                 }
                 PacketId::ConnectError => {
                     self.callback(
@@ -387,11 +436,12 @@ impl RawClient {
                                 .clone()
                                 .data
                                 .unwrap_or_else(|| String::from("\"No error message provided\"")),
+                        packet.id
                     )?;
                 }
                 PacketId::Event => {
                     if let Err(err) = self.handle_event(packet) {
-                        self.callback(&Event::Error, err.to_string())?;
+                        self.callback(&Event::Error, err.to_string(), packet.id)?;
                     }
                 }
             }
@@ -432,7 +482,7 @@ mod test {
         let url = crate::test::socket_io_server();
 
         let socket = ClientBuilder::new(url)
-            .on("test", |msg, _| match msg {
+            .on("test", |msg, _, _| match msg {
                 #[allow(deprecated)]
                 Payload::String(str) => println!("Received string: {}", str),
                 Payload::Text(text) => println!("Received json: {:#?}", text),
@@ -446,7 +496,7 @@ mod test {
 
         assert!(result.is_ok());
 
-        let ack_callback = move |message: Payload, socket: RawClient| {
+        let ack_callback = move |message: Payload, socket: RawClient, _: Option<i32>| {
             let result = socket.emit("test", Payload::Text(vec![json!({"got ack": true})]));
             assert!(result.is_ok());
 
@@ -488,8 +538,8 @@ mod test {
             .namespace("/admin")
             .tls_config(tls_connector)
             .opening_header("accept-encoding", "application/json")
-            .on("test", |str, _| println!("Received: {:#?}", str))
-            .on("message", |payload, _| println!("{:#?}", payload))
+            .on("test", |str, _, _| println!("Received: {:#?}", str))
+            .on("message", |payload, _, _| println!("{:#?}", payload))
             .connect()?;
 
         assert!(socket.emit("message", json!("Hello World")).is_ok());
@@ -501,7 +551,7 @@ mod test {
                 "binary",
                 json!("pls ack"),
                 Duration::from_secs(1),
-                |payload, _| {
+                |payload, _, _| {
                     println!("Yehaa the ack got acked");
                     println!("With data: {:#?}", payload);
                 }
@@ -529,8 +579,8 @@ mod test {
             .namespace("/admin")
             .tls_config(tls_connector)
             .opening_header("accept-encoding", "application/json")
-            .on("test", |str, _| println!("Received: {:#?}", str))
-            .on("message", |payload, _| println!("{:#?}", payload))
+            .on("test", |str, _, _| println!("Received: {:#?}", str))
+            .on("message", |payload, _, _| println!("{:#?}", payload))
             .connect_raw()?;
 
         assert!(socket.emit("message", json!("Hello World")).is_ok());
@@ -542,7 +592,7 @@ mod test {
                 "binary",
                 json!("pls ack"),
                 Duration::from_secs(1),
-                |payload, _| {
+                |payload, _, _| {
                     println!("Yehaa the ack got acked");
                     println!("With data: {:#?}", payload);
                 }
@@ -561,12 +611,12 @@ mod test {
         let _socket = ClientBuilder::new(url)
             .namespace("/")
             .auth(json!({ "password": "123" }))
-            .on("auth", |payload, _client| {
+            .on("auth", |payload, _client, _| {
                 if let Payload::Text(payload) = payload {
                     println!("{:#?}", payload);
                 }
             })
-            .on_any(move |event, payload, _client| {
+            .on_any(move |event, payload, _client, _| {
                 if let Payload::Text(payload) = payload {
                     println!("{event} {payload:#?}");
                 }
@@ -756,7 +806,7 @@ mod test {
                 "test",
                 Payload::from("123"),
                 Duration::from_secs(10),
-                |message: Payload, _| {
+                |message: Payload, _, _| {
                     println!("Yehaa! My ack got acked?");
                     if let Payload::Text(values) = message {
                         println!("Received ack");

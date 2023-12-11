@@ -88,7 +88,7 @@ impl Client {
     /// #[tokio::main]
     /// async fn main() {
     ///     let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///         .on("test", |payload: Payload, socket: Client| {
+    ///         .on("test", |payload: Payload, socket: Client, _id: Option<i32>| {
     ///             async move {
     ///                 println!("Received: {:#?}", payload);
     ///                 socket.emit("test", json!({"hello": true})).await.expect("Server unreachable");
@@ -126,7 +126,7 @@ impl Client {
     /// async fn main() {
     ///     // apparently the syntax for functions is a bit verbose as rust currently doesn't
     ///     // support an `AsyncFnMut` type that conform with async functions
-    ///     fn handle_test(payload: Payload, socket: Client) -> BoxFuture<'static, ()> {
+    ///     fn handle_test(payload: Payload, socket: Client, _id: Option<i32>) -> BoxFuture<'static, ()> {
     ///         async move {
     ///             println!("Received: {:#?}", payload);
     ///             socket.emit("test", json!({"hello": true})).await.expect("Server unreachable");
@@ -181,7 +181,7 @@ impl Client {
     /// #[tokio::main]
     /// async fn main() {
     ///     let mut socket = ClientBuilder::new("http://localhost:4200/")
-    ///         .on("foo", |payload: Payload, _| async move { println!("Received: {:#?}", payload) }.boxed())
+    ///         .on("foo", |payload: Payload, _, _| async move { println!("Received: {:#?}", payload) }.boxed())
     ///         .connect()
     ///         .await
     ///         .expect("connection failed");
@@ -213,7 +213,7 @@ impl Client {
         callback: F,
     ) -> Result<()>
     where
-        F: for<'a> std::ops::FnMut(Payload, Client) -> BoxFuture<'static, ()>
+        F: for<'a> std::ops::FnMut(Payload, Client, Option<i32>) -> BoxFuture<'static, ()>
             + 'static
             + Send
             + Sync,
@@ -222,7 +222,8 @@ impl Client {
     {
         let id = thread_rng().gen_range(0..999);
         let socket_packet =
-            Packet::new_from_payload(data.into(), event.into(), &self.nsp, Some(id))?;
+            self.socket
+                .build_packet_for_payload(data.into(), event.into(), &self.nsp, Some(id), true)?;
 
         let ack = Ack {
             id,
@@ -237,7 +238,57 @@ impl Client {
         self.socket.send(socket_packet).await
     }
 
-    async fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {
+    /// Sends a answer message
+    ///
+    /// # Example
+    /// ```
+    ///
+    /// use futures_util::FutureExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    /// use std::time::Duration;
+    /// use serde_json::json;
+    /// use tokio::time::sleep;
+    /// use rust_socketio::asynchronous::ClientBuilder;
+    /// use rust_socketio::Payload;
+    ///
+    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///         .on("foo", |payload: Payload, _, _| async move { println!("Received: {:#?}", payload) }.boxed())
+    ///         .connect()
+    ///         .on_any(|event, payload, socket, id| async move {
+    ///             socket.emit_answer(id, json!({"result" : true}));
+    ///         }.boxed())
+    ///         .await
+    ///         .expect("connection failed");
+    ///
+    ///
+    ///     sleep(Duration::from_secs(2));
+    /// }
+    /// ```
+    #[inline]
+    pub async fn emit_answer<D>(
+        &self,
+        id: Option<i32>,
+        data: D,
+    ) -> Result<()>
+    where
+        D: Into<Payload>,
+    {
+        let id = match id {
+            None => {
+                return Err(Error::MissedPacketId());
+            }
+            Some(el) => el
+        };
+        let socket_packet =
+            self.socket
+                .build_packet_for_payload(data.into(), Event::Message, &self.nsp, Some(id), true)?;
+
+        self.socket.send(socket_packet).await
+    }
+
+    async fn callback<P: Into<Payload>>(&self, event: &Event, payload: P, id: Option<i32>) -> Result<()> {
         let mut on = self.on.write().await;
         let mut on_any = self.on_any.write().await;
 
@@ -246,14 +297,14 @@ impl Client {
         let payload = payload.into();
 
         if let Some(callback) = on_lock.get_mut(event) {
-            callback(payload.clone(), self.clone()).await;
+            callback(payload.clone(), self.clone(), id).await;
         }
 
         // Call on_any for all common and custom events.
         match event {
             Event::Message | Event::Custom(_) => {
                 if let Some(callback) = on_any_lock {
-                    callback(event.clone(), payload, self.clone()).await;
+                    callback(event.clone(), payload, self.clone(), id).await;
                 }
             }
             _ => (),
@@ -278,6 +329,7 @@ impl Client {
                             ack.callback.deref_mut()(
                                 Payload::from(payload.to_owned()),
                                 self.clone(),
+                                socket_packet.id,
                             )
                             .await;
                         }
@@ -286,6 +338,7 @@ impl Client {
                                 ack.callback.deref_mut()(
                                     Payload::Binary(payload.to_owned()),
                                     self.clone(),
+                                    socket_packet.id,
                                 )
                                 .await;
                             }
@@ -313,7 +366,7 @@ impl Client {
 
         if let Some(attachments) = &packet.attachments {
             if let Some(binary_payload) = attachments.get(0) {
-                self.callback(&event, Payload::Binary(binary_payload.to_owned()))
+                self.callback(&event, Payload::Binary(binary_payload.to_owned()), packet.id)
                     .await?;
             }
         }
@@ -350,7 +403,7 @@ impl Client {
             };
 
             // call the correct callback
-            self.callback(&event, data.to_string()).await?;
+            self.callback(&event, data.to_string(), packet.id).await?;
         }
 
         Ok(())
@@ -365,20 +418,20 @@ impl Client {
             match packet.packet_type {
                 PacketId::Ack | PacketId::BinaryAck => {
                     if let Err(err) = self.handle_ack(packet).await {
-                        self.callback(&Event::Error, err.to_string()).await?;
+                        self.callback(&Event::Error, err.to_string(), packet.id).await?;
                         return Err(err);
                     }
                 }
                 PacketId::BinaryEvent => {
                     if let Err(err) = self.handle_binary_event(packet).await {
-                        self.callback(&Event::Error, err.to_string()).await?;
+                        self.callback(&Event::Error, err.to_string(), packet.id).await?;
                     }
                 }
                 PacketId::Connect => {
-                    self.callback(&Event::Connect, "").await?;
+                    self.callback(&Event::Connect, "", packet.id).await?;
                 }
                 PacketId::Disconnect => {
-                    self.callback(&Event::Close, "").await?;
+                    self.callback(&Event::Close, "", packet.id).await?;
                 }
                 PacketId::ConnectError => {
                     self.callback(
@@ -388,12 +441,13 @@ impl Client {
                                 .data
                                 .as_ref()
                                 .unwrap_or(&String::from("\"No error message provided\"")),
+                        packet.id
                     )
                     .await?;
                 }
                 PacketId::Event => {
                     if let Err(err) = self.handle_event(packet).await {
-                        self.callback(&Event::Error, err.to_string()).await?;
+                        self.callback(&Event::Error, err.to_string(), packet.id).await?;
                     }
                 }
             }
@@ -413,11 +467,18 @@ impl Client {
                 None => None,
                 Some(Err(err)) => {
                     // call the error callback
-                    match self.callback(&Event::Error, err.to_string()).await {
+                    match self.callback(&Event::Error, err.to_string(), None).await {
                         Err(callback_err) => Some((Err(callback_err), socket)),
                         Ok(_) => Some((Err(err), socket)),
                     }
-                }
+                },
+                // Some(Ok(packet)) => {
+                //     // if this packet is not meant for the current namespace, skip it an poll for the next one
+                //     if packet.nsp == self.nsp {
+                //         ready!(Box::pin(self.handle_socketio_packet(&packet)).poll_unpin(cx))?;
+                //         return Poll::Ready(Some(Ok(packet)));
+                //     }
+                // }
                 Some(Ok(packet)) => match self.handle_socketio_packet(&packet).await {
                     Err(callback_err) => Some((Err(callback_err), socket)),
                     Ok(_) => Some((Ok(packet), socket)),
@@ -454,7 +515,7 @@ mod test {
         let url = crate::test::socket_io_server();
 
         let socket = ClientBuilder::new(url)
-            .on("test", |msg, _| {
+            .on("test", |msg, _, _| {
                 async {
                     match msg {
                         Payload::Text(values) => println!("Received json: {:#?}", values),
@@ -515,7 +576,7 @@ mod test {
         let notify_clone = notify.clone();
 
         let socket = ClientBuilder::new(url)
-            .on("test", move |_, _| {
+            .on("test", move |_, _, _| {
                 let cl = notify_clone.clone();
                 async move {
                     sleep(Duration::from_secs(1)).await;
@@ -555,10 +616,10 @@ mod test {
             .namespace("/admin")
             .tls_config(tls_connector)
             .opening_header("accept-encoding", "application/json")
-            .on("test", |str, _| {
+            .on("test", |str, _, _| {
                 async move { println!("Received: {:#?}", str) }.boxed()
             })
-            .on("message", |payload, _| {
+            .on("message", |payload, _, _| {
                 async move { println!("{:#?}", payload) }.boxed()
             })
             .connect()
@@ -606,10 +667,10 @@ mod test {
             .namespace("/admin")
             .tls_config(tls_connector)
             .opening_header("accept-encoding", "application/json")
-            .on("test", |str, _| {
+            .on("test", |str, _, _| {
                 async move { println!("Received: {:#?}", str) }.boxed()
             })
-            .on("message", |payload, _| {
+            .on("message", |payload, _, _| {
                 async move { println!("{:#?}", payload) }.boxed()
             })
             .connect_manual()

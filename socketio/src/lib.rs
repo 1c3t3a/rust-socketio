@@ -9,7 +9,7 @@
 //! // define a callback which is called when a payload is received
 //! // this callback gets the payload as well as an instance of the
 //! // socket to communicate with the server
-//! let callback = |payload: Payload, socket: RawClient| {
+//! let callback = |payload: Payload, socket: RawClient, _id: Option<i32>| {
 //!        match payload {
 //!            Payload::Text(values) => println!("Received: {:#?}", values),
 //!            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -23,7 +23,7 @@
 //! let mut socket = ClientBuilder::new("http://localhost:4200/")
 //!      .namespace("/admin")
 //!      .on("test", callback)
-//!      .on("error", |err, _| eprintln!("Error: {:#?}", err))
+//!      .on("error", |err, _, _| eprintln!("Error: {:#?}", err))
 //!      .connect()
 //!      .expect("Connection failed");
 //!
@@ -106,7 +106,7 @@ async fn main() {
     // define a callback which is called when a payload is received
     // this callback gets the payload as well as an instance of the
     // socket to communicate with the server
-    let callback = |payload: Payload, socket: Client| {
+    let callback = |payload: Payload, socket: Client, _id: Option<i32>| {
         async move {
             match payload {
                 Payload::Text(values) => println!("Received: {:#?}", values),
@@ -126,7 +126,7 @@ async fn main() {
     let socket = ClientBuilder::new("http://localhost:4200/")
         .namespace("/admin")
         .on("test", callback)
-        .on("error", |err, _| {
+        .on("error", |err, _, _| {
             async move { eprintln!("Error: {:#?}", err) }.boxed()
         })
         .connect()

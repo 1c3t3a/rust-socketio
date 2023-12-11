@@ -1,7 +1,7 @@
 use rust_socketio::{ClientBuilder, Event, Payload, RawClient};
 use serde_json::json;
 
-fn handle_foo(payload: Payload, socket: RawClient) -> () {
+fn handle_foo(payload: Payload, socket: RawClient, _id: Option<i32>) -> () {
     socket.emit("bar", payload).expect("Server unreachable")
 }
 
@@ -9,7 +9,7 @@ fn main() {
     // define a callback which is called when a payload is received
     // this callback gets the payload as well as an instance of the
     // socket to communicate with the server
-    let handle_test = |payload: Payload, socket: RawClient| {
+    let handle_test = |payload: Payload, socket: RawClient, _id: Option<i32>| {
         match payload {
             Payload::Text(text) => println!("Received json: {:#?}", text),
             Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
@@ -28,15 +28,15 @@ fn main() {
         // Saved closure
         .on("test", handle_test)
         // Inline closure
-        .on("error", |err, _| eprintln!("Error: {:#?}", err))
+        .on("error", |err, _, _| eprintln!("Error: {:#?}", err))
         // Function call with signature (payload: Payload, socket: RawClient) -> ()
         .on("foo", handle_foo)
         // Reserved event names are case insensitive
-        .on("oPeN", |_, _| println!("Connected"))
+        .on("oPeN", |_, _, _| println!("Connected"))
         // Custom names are case sensitive
-        .on("Test", |_, _| println!("TesT received"))
+        .on("Test", |_, _, _| println!("TesT received"))
         // Event specified by enum
-        .on(Event::Close, |_, socket| {
+        .on(Event::Close, |_, socket, _| {
             println!("Socket Closed");
             socket
                 .emit("message", json!({"foo": "Hello server"}))

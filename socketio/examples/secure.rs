@@ -23,7 +23,7 @@ fn main() {
         .tls_config(tls_connector)
         // Not strictly required for HTTPS
         .opening_header("HOST", "localhost")
-        .on("error", |err, _| eprintln!("Error: {:#?}", err))
+        .on("error", |err, _, _| eprintln!("Error: {:#?}", err))
         .connect()
         .expect("Connection failed");
 

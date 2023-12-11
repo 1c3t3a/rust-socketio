@@ -6,7 +6,7 @@ fn main() {
     // define a callback which is called when a payload is received
     // this callback gets the payload as well as an instance of the
     // socket to communicate with the server
-    let callback = |payload: Payload, socket: RawClient| {
+    let callback = |payload: Payload, socket: RawClient, _id: Option<i32>| {
         match payload {
             #[allow(deprecated)]
             Payload::String(str) => println!("Received: {}", str),
@@ -22,7 +22,7 @@ fn main() {
     let socket = ClientBuilder::new("http://localhost:4200")
         .namespace("/admin")
         .on("test", callback)
-        .on("error", |err, _| eprintln!("Error: {:#?}", err))
+        .on("error", |err, _, _| eprintln!("Error: {:#?}", err))
         .connect()
         .expect("Connection failed");
 
@@ -33,7 +33,7 @@ fn main() {
         .expect("Server unreachable");
 
     // define a callback, that's executed when the ack got acked
-    let ack_callback = |message: Payload, _| {
+    let ack_callback = |message: Payload, _, _| {
         println!("Yehaa! My ack got acked?");
         println!("Ack data: {:#?}", message);
     };
