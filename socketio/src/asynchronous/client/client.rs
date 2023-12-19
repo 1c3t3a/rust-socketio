@@ -221,12 +221,8 @@ impl Client {
         D: Into<Payload>,
     {
         let id = thread_rng().gen_range(0..999);
-        let socket_packet = Packet::new_from_payload(
-            data.into(),
-            event.into(),
-            &self.nsp,
-            Some(id),
-        )?;
+        let socket_packet =
+            Packet::new_from_payload(data.into(), event.into(), &self.nsp, Some(id))?;
 
         let ack = Ack {
             id,
@@ -280,12 +276,8 @@ impl Client {
             }
             Some(el) => el,
         };
-        let socket_packet = Packet::new_from_payload(
-            data.into(),
-            Event::Message,
-            &self.nsp,
-            Some(id)
-        )?;
+        let socket_packet =
+            Packet::new_from_payload(data.into(), Event::Message, &self.nsp, Some(id))?;
 
         self.socket.send(socket_packet).await
     }
@@ -341,7 +333,7 @@ impl Client {
                             .await;
                         }
                         if let Some(ref attachments) = socket_packet.attachments {
-                            if let Some(payload) = attachments.get(0) {
+                            if let Some(payload) = attachments.first() {
                                 ack.callback.deref_mut()(
                                     Payload::Binary(payload.to_owned()),
                                     self.clone(),
@@ -372,7 +364,7 @@ impl Client {
         };
 
         if let Some(attachments) = &packet.attachments {
-            if let Some(binary_payload) = attachments.get(0) {
+            if let Some(binary_payload) = attachments.first() {
                 self.callback(
                     &event,
                     Payload::Binary(binary_payload.to_owned()),

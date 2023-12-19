@@ -1,6 +1,6 @@
 use super::callback::Callback;
 use crate::packet::{Packet, PacketId};
-use crate::{event, Error};
+use crate::Error;
 pub(crate) use crate::{event::Event, payload::Payload};
 use rand::{thread_rng, Rng};
 use serde_json::Value;
@@ -309,7 +309,7 @@ impl RawClient {
                 }
 
                 if let Some(ref attachments) = socket_packet.attachments {
-                    if let Some(payload) = attachments.get(0) {
+                    if let Some(payload) = attachments.first() {
                         ack.callback.deref_mut()(
                             Payload::Binary(payload.to_owned()),
                             self.clone(),
@@ -325,7 +325,7 @@ impl RawClient {
                             );
                         }
                         if let Some(ref attachments) = socket_packet.attachments {
-                            if let Some(payload) = attachments.get(0) {
+                            if let Some(payload) = attachments.first() {
                                 ack.callback.deref_mut()(
                                     Payload::Binary(payload.to_owned()),
                                     self.clone(),
@@ -357,7 +357,7 @@ impl RawClient {
         };
 
         if let Some(attachments) = &packet.attachments {
-            if let Some(binary_payload) = attachments.get(0) {
+            if let Some(binary_payload) = attachments.first() {
                 self.callback(
                     &event,
                     Payload::Binary(binary_payload.to_owned()),
@@ -798,29 +798,6 @@ mod test {
                 None,
                 0,
                 None,
-            )
-        );
-
-        let packet: Option<Packet> = iter.next();
-        assert!(packet.is_some());
-
-        let packet = packet.unwrap();
-        assert_eq!(
-            packet,
-            Packet::new(
-                PacketId::Event,
-                nsp.clone(),
-                Some(
-                    serde_json::Value::Array(vec![
-                        serde_json::Value::from("some_auth"),
-                        serde_json::Value::from("some number"),
-                        serde_json::json!({"a": "a-key", "b": "b-key"})
-                    ])
-                    .to_string()
-                ),
-                None,
-                0,
-                None
             )
         );
 

@@ -216,7 +216,7 @@ impl TryFrom<&Bytes> for Packet {
     /// this member. This is done because the attachment is usually
     /// send in another packet.
     fn try_from(payload: &Bytes) -> Result<Packet> {
-        let mut payload = str_from_utf8(&payload).map_err(Error::InvalidUtf8)?;
+        let mut payload = str_from_utf8(payload).map_err(Error::InvalidUtf8)?;
         let mut packet = Packet::default();
 
         // packet_type

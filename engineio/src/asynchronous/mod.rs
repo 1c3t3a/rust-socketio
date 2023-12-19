@@ -1,7 +1,7 @@
 pub mod async_transports;
 pub mod transport;
 
-pub(self) mod async_socket;
+mod async_socket;
 #[cfg(feature = "async-callbacks")]
 mod callback;
 #[cfg(feature = "async")]
