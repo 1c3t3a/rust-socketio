@@ -47,7 +47,7 @@ async fn main() {
         .expect("Server unreachable");
 
     // define a callback, that's executed when the ack got acked
-    let ack_callback = |message: Payload, _: Client| {
+    let ack_callback = |message: Payload, _: Client, _: Option<i32>| {
         async move {
             println!("Yehaa! My ack got acked?");
             println!("Ack data: {:#?}", message);

@@ -284,8 +284,7 @@ impl Client {
             data.into(),
             Event::Message,
             &self.nsp,
-            Some(id),
-            true,
+            Some(id)
         )?;
 
         self.socket.send(socket_packet).await
@@ -554,7 +553,7 @@ mod test {
                 "test",
                 Payload::from(payload),
                 Duration::from_secs(1),
-                |message: Payload, socket: Client| {
+                |message: Payload, socket: Client, _: Option<i32>| {
                     async move {
                         let result = socket
                             .emit("test", Payload::from(json!({"got ack": true})))
@@ -652,7 +651,7 @@ mod test {
                 "binary",
                 json!("pls ack"),
                 Duration::from_secs(1),
-                |payload, _| async move {
+                |payload, _, _| async move {
                     println!("Yehaa the ack got acked");
                     println!("With data: {:#?}", payload);
                 }
@@ -703,7 +702,7 @@ mod test {
                 "binary",
                 json!("pls ack"),
                 Duration::from_secs(1),
-                |payload, _| async move {
+                |payload, _, _| async move {
                     println!("Yehaa the ack got acked");
                     println!("With data: {:#?}", payload);
                 }
@@ -724,7 +723,7 @@ mod test {
         let mut _socket = ClientBuilder::new(url)
             .namespace("/")
             .auth(json!({ "password": "123" }))
-            .on_any(move |event, payload, _| {
+            .on_any(move |event, payload, _, _| {
                 let clone_tx = tx.clone();
                 async move {
                     if let Payload::Text(values) = payload {
@@ -915,7 +914,7 @@ mod test {
             )
         );
 
-        let cb = |message: Payload, _| {
+        let cb = |message: Payload, _, _| {
             async {
                 println!("Yehaa! My ack got acked?");
                 if let Payload::Text(values) = message {

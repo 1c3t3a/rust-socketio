@@ -1,7 +1,7 @@
 use super::generator::StreamGenerator;
 use crate::{
     error::Result,
-    packet::{self, Packet, PacketId},
+    packet::{Packet, PacketId},
     Error, Event, Payload,
 };
 use async_stream::try_stream;
