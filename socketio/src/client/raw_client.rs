@@ -288,8 +288,29 @@ impl RawClient {
                 }
 
                 if let Some(ref attachments) = socket_packet.attachments {
-                    if let Some(payload) = attachments.get(0) {
-                        ack.callback.deref_mut()(Payload::Binary(payload.to_owned()), self.clone());
+                    if let Some(payload) = attachments.first() {
+                        ack.callback.deref_mut()(
+                            Payload::Binary(payload.to_owned()),
+                            self.clone(),
+                        );
+                    }
+                    if ack.time_started.elapsed() < ack.timeout {
+                        if let Some(ref payload) = socket_packet.data {
+                            ack.callback.deref_mut()(
+                                Payload::from(payload.to_owned()),
+                                self.clone(),
+                            );
+                        }
+                        if let Some(ref attachments) = socket_packet.attachments {
+                            if let Some(payload) = attachments.first() {
+                                ack.callback.deref_mut()(
+                                    Payload::Binary(payload.to_owned()),
+                                    self.clone(),
+                                );
+                            }
+                        }
+                    } else {
+                        // Do something with timed out acks?
                     }
                 }
             } else {
@@ -312,8 +333,11 @@ impl RawClient {
         };
 
         if let Some(attachments) = &packet.attachments {
-            if let Some(binary_payload) = attachments.get(0) {
-                self.callback(&event, Payload::Binary(binary_payload.to_owned()))?;
+            if let Some(binary_payload) = attachments.first() {
+                self.callback(
+                    &event,
+                    Payload::Binary(binary_payload.to_owned())
+                )?;
             }
         }
         Ok(())
@@ -332,24 +356,23 @@ impl RawClient {
         // in case 2, the message is ment for the default message event, in case 1 the event
         // is specified
         if let Ok(Value::Array(contents)) = serde_json::from_str::<Value>(data) {
-            let (event, data) = if contents.len() > 1 {
-                // case 1
-                let event = match contents.first() {
-                    Some(Value::String(ev)) => Event::from(ev.as_str()),
-                    _ => Event::Message,
-                };
-
-                (event, contents.get(1).ok_or(Error::IncompletePacket())?)
-            } else {
-                // case 2
-                (
-                    Event::Message,
-                    contents.first().ok_or(Error::IncompletePacket())?,
-                )
+            let (event, payloads) = match contents.len() {
+                0 => return Err(Error::IncompletePacket()),
+                1 => {
+                    (
+                        Event::Message,
+                        contents.as_slice(), // safe to unwrap, checked above
+                    )
+                }
+                _ => match contents.first() {
+                    // get rest of data if first is a event
+                    Some(Value::String(ev)) => (Event::from(ev.as_str()), &contents[1..]),
+                    _ => (Event::Message, contents.as_slice()),
+                },
             };
 
             // call the correct callback
-            self.callback(&event, data.to_string())?;
+            self.callback(&event, payloads.to_vec())?;
         }
 
         Ok(())
