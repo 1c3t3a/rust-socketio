@@ -340,17 +340,26 @@ impl Client {
                     _ => Event::Message,
                 };
 
-                (event, contents.get(1).ok_or(Error::IncompletePacket())?)
+                let msg = if let Some((_, payload)) = contents.split_first() {
+                    payload.to_vec()
+                } else {
+                    return Err(Error::IncompletePacket());
+                };
+
+                (event, msg)
             } else {
                 // case 2
                 (
                     Event::Message,
-                    contents.first().ok_or(Error::IncompletePacket())?,
+                    vec![contents
+                        .first()
+                        .ok_or(Error::IncompletePacket())?
+                        .to_owned()],
                 )
             };
 
             // call the correct callback
-            self.callback(&event, data.to_string()).await?;
+            self.callback(&event, data).await?;
         }
 
         Ok(())

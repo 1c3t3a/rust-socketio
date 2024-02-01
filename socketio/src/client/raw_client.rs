@@ -327,7 +327,7 @@ impl RawClient {
         };
 
         // a socketio message always comes in one of the following two flavors (both JSON):
-        // 1: `["event", "msg"]`
+        // 1: `["event", "msg", ...]`
         // 2: `["msg"]`
         // in case 2, the message is ment for the default message event, in case 1 the event
         // is specified
@@ -339,17 +339,28 @@ impl RawClient {
                     _ => Event::Message,
                 };
 
-                (event, contents.get(1).ok_or(Error::IncompletePacket())?)
+                let msg = if let Some((_, payload)) = contents.split_first() {
+                    payload.to_vec()
+                } else {
+                    return Err(Error::IncompletePacket());
+                };
+
+                (event, msg)
             } else {
                 // case 2
+                // FIXME: `["msg", "msg", ...]` could technically happen I believe?
+                // Case 2 could still possibly return less data than desired
                 (
                     Event::Message,
-                    contents.first().ok_or(Error::IncompletePacket())?,
+                    vec![contents
+                        .first()
+                        .ok_or(Error::IncompletePacket())?
+                        .to_owned()],
                 )
             };
 
             // call the correct callback
-            self.callback(&event, data.to_string())?;
+            self.callback(&event, data)?;
         }
 
         Ok(())
