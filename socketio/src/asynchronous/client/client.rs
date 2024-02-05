@@ -461,29 +461,28 @@ impl Client {
         };
 
         // a socketio message always comes in one of the following two flavors (both JSON):
-        // 1: `["event", "msg"]`
+        // 1: `["event", "msg", ...]`
         // 2: `["msg"]`
         // in case 2, the message is ment for the default message event, in case 1 the event
         // is specified
         if let Ok(Value::Array(contents)) = serde_json::from_str::<Value>(data) {
-            let (event, data) = if contents.len() > 1 {
-                // case 1
-                let event = match contents.first() {
-                    Some(Value::String(ev)) => Event::from(ev.as_str()),
-                    _ => Event::Message,
-                };
-
-                (event, contents.get(1).ok_or(Error::IncompletePacket())?)
-            } else {
-                // case 2
-                (
-                    Event::Message,
-                    contents.first().ok_or(Error::IncompletePacket())?,
-                )
+            let (event, payloads) = match contents.len() {
+                0 => return Err(Error::IncompletePacket()),
+                1 => {
+                    (
+                        Event::Message,
+                        contents.as_slice(), // safe to unwrap, checked above
+                    )
+                }
+                _ => match contents.first() {
+                    // get rest of data if first is a event
+                    Some(Value::String(ev)) => (Event::from(ev.as_str()), &contents[1..]),
+                    _ => (Event::Message, contents.as_slice()),
+                },
             };
 
             // call the correct callback
-            self.callback(&event, data.to_string()).await?;
+            self.callback(&event, payloads.to_vec()).await?;
         }
 
         Ok(())

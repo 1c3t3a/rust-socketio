@@ -351,7 +351,7 @@ impl RawClient {
         };
 
         // a socketio message always comes in one of the following two flavors (both JSON):
-        // 1: `["event", "msg"]`
+        // 1: `["event", "msg", ...]`
         // 2: `["msg"]`
         // in case 2, the message is ment for the default message event, in case 1 the event
         // is specified
