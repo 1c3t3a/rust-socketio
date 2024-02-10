@@ -1,4 +1,3 @@
-extern crate base64;
 use base64::{engine::general_purpose, Engine as _};
 use bytes::{BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
