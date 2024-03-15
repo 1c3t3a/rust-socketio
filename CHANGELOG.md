@@ -44,7 +44,6 @@ _2024.03.15_
 
 ## <a name="044">[0.4.4] - _Bump dependencies_ </a>
 
-
 _2023.11.18_
 
 - Bump tungstenite version to v0.20.1 (avoiding security vulnerability) [#368](https://github.com/1c3t3a/rust-socketio/pull/368)
