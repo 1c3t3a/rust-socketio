@@ -34,9 +34,16 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 ## _[Unreleased]_
 
-_nothing new to show for… yet!_
+_nothing new to show for… yet!_>
+
+_async callback macro_
+
+_2024.03.15_
+
+- Add macro `async_callback` and `async_any_callback` for async callbacks [#395](https://github.com/1c3t3a/rust-socketio/issue/395) [#399](https://github.com/1c3t3a/rust-socketio/pull/399)
 
 ## <a name="044">[0.4.4] - _Bump dependencies_ </a>
+
 
 _2023.11.18_
 
