@@ -8,9 +8,9 @@ pub use client::client::{Client, ReconnectSettings};
 
 
 #[doc = r#"
-A macro to wrap a async callback function to be used in the client.
+A macro to wrap an async callback function to be used in the client.
 
-This macro is used to wrap a callback function that can handle any event.
+This macro is used to wrap a callback function that can handle a specific event.
 
 ```rust
 pub async fn callback(payload: Payload, client: Client) {}
@@ -30,7 +30,7 @@ macro_rules! async_callback {
 }
 
 #[doc = r#"
-A macro to wrap a async callback function to be used in the client.
+A macro to wrap an async callback function to be used in the client.
 
 This macro is used to wrap a callback function that can handle any event.
 
