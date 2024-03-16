@@ -6,7 +6,6 @@ mod socket;
 pub use client::builder::ClientBuilder;
 pub use client::client::{Client, ReconnectSettings};
 
-
 #[doc = r#"
 A macro to wrap an async callback function to be used in the client.
 
