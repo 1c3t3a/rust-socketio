@@ -1,17 +1,26 @@
-use std::{collections::HashMap, ops::DerefMut, pin::Pin, sync::Arc};
+use std::{
+    ops::DerefMut,
+    pin::Pin,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
+use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures_util::{future::BoxFuture, stream, Stream, StreamExt};
 use log::trace;
 use rand::{thread_rng, Rng};
 use serde_json::Value;
 use tokio::{
     sync::RwLock,
-    time::{Duration, Instant},
+    time::{sleep, Duration, Instant},
 };
 
 use super::{
     ack::Ack,
-    callback::{Callback, DynAsyncAnyCallback, DynAsyncCallback},
+    builder::ClientBuilder,
+    callback::{Callback, DynAsyncCallback},
 };
 use crate::{
     asynchronous::socket::Socket as InnerSocket,
@@ -26,14 +35,15 @@ use crate::{
 #[derive(Clone)]
 pub struct Client {
     /// The inner socket client to delegate the methods to.
-    socket: InnerSocket,
-    on: Arc<RwLock<HashMap<Event, Callback<DynAsyncCallback>>>>,
-    on_any: Arc<RwLock<Option<Callback<DynAsyncAnyCallback>>>>,
+    socket: Arc<RwLock<InnerSocket>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
     // namespace, for multiplexing messages
     nsp: String,
     // Data send in the opening packet (commonly used as for auth)
     auth: Option<serde_json::Value>,
+    builder: Arc<RwLock<ClientBuilder>>,
+    manually_disconnected: Arc<AtomicBool>,
+    server_disconnected: Arc<AtomicBool>,
 }
 
 impl Client {
@@ -41,20 +51,15 @@ impl Client {
     /// namespace. If `None` is passed in as namespace, the default namespace
     /// `"/"` is taken.
     /// ```
-    pub(crate) fn new<T: Into<String>>(
-        socket: InnerSocket,
-        namespace: T,
-        on: HashMap<Event, Callback<DynAsyncCallback>>,
-        on_any: Option<Callback<DynAsyncAnyCallback>>,
-        auth: Option<serde_json::Value>,
-    ) -> Result<Self> {
+    pub(crate) fn new(socket: InnerSocket, builder: ClientBuilder) -> Result<Self> {
         Ok(Client {
-            socket,
-            nsp: namespace.into(),
-            on: Arc::new(RwLock::new(on)),
-            on_any: Arc::new(RwLock::new(on_any)),
+            socket: Arc::new(RwLock::new(socket)),
+            nsp: builder.namespace.to_owned(),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
-            auth,
+            auth: builder.auth.clone(),
+            builder: Arc::new(RwLock::new(builder)),
+            manually_disconnected: Arc::new(AtomicBool::new(false)),
+            server_disconnected: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -62,13 +67,89 @@ impl Client {
     /// called to interact with the server.
     pub(crate) async fn connect(&self) -> Result<()> {
         // Connect the underlying socket
-        self.socket.connect().await?;
+        self.socket.read().await.connect().await?;
 
         // construct the opening packet
         let auth = self.auth.as_ref().map(|data| data.to_string());
         let open_packet = Packet::new(PacketId::Connect, self.nsp.clone(), auth, None, 0, None);
 
-        self.socket.send(open_packet).await?;
+        self.socket.read().await.send(open_packet).await?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn reconnect(&mut self) -> Result<()> {
+        let builder = self.builder.write().await;
+        let socket = builder.inner_create().await?;
+
+        // New inner socket that can be connected
+        let mut client_socket = self.socket.write().await;
+        *client_socket = socket;
+        drop(client_socket);
+
+        self.connect().await?;
+
+        Ok(())
+    }
+
+    /// Drives the stream using a thread so messages are processed
+    pub(crate) async fn poll_stream(&mut self) -> Result<()> {
+        let builder = self.builder.read().await;
+        let reconnect_delay_min = builder.reconnect_delay_min;
+        let reconnect_delay_max = builder.reconnect_delay_max;
+        let max_reconnect_attempts = builder.max_reconnect_attempts;
+        drop(builder);
+
+        let mut client_clone = self.clone();
+
+        tokio::runtime::Handle::current().spawn(async move {
+            loop {
+                let mut stream = client_clone.as_stream();
+                // Consume the stream until it returns None and the stream is closed.
+                while let Some(item) = stream.next().await {
+                    if let Err(e) = item {
+                        trace!("Network error occurred: {}", e);
+                    }
+                }
+
+                // Drop the stream so we can once again use `socket_clone` as mutable
+                drop(stream);
+
+                if client_clone.should_reconnect().await {
+                    let mut reconnect_attempts = 0;
+                    let mut backoff = ExponentialBackoffBuilder::new()
+                        .with_initial_interval(Duration::from_millis(reconnect_delay_min))
+                        .with_max_interval(Duration::from_millis(reconnect_delay_max))
+                        .build();
+
+                    loop {
+                        if let Some(max_reconnect_attempts) = max_reconnect_attempts {
+                            reconnect_attempts += 1;
+                            if reconnect_attempts > max_reconnect_attempts {
+                                trace!("Max reconnect attempts reached without success");
+                                break;
+                            }
+                        }
+                        match client_clone.reconnect().await {
+                            Ok(_) => {
+                                trace!("Reconnected after {reconnect_attempts} attempts");
+                                break;
+                            }
+                            Err(e) => {
+                                trace!("Failed to reconnect: {e:?}");
+                                if let Some(delay) = backoff.next_backoff() {
+                                    let delay_ms = delay.as_millis();
+                                    trace!("Waiting for {delay_ms}ms before reconnecting");
+                                    sleep(delay).await;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+        });
 
         Ok(())
     }
@@ -111,7 +192,11 @@ impl Client {
         E: Into<Event>,
         D: Into<Payload>,
     {
-        self.socket.emit(&self.nsp, event.into(), data.into()).await
+        self.socket
+            .read()
+            .await
+            .emit(&self.nsp, event.into(), data.into())
+            .await
     }
 
     /// Disconnects this client from the server by sending a `socket.io` closing
@@ -148,11 +233,13 @@ impl Client {
     /// }
     /// ```
     pub async fn disconnect(&self) -> Result<()> {
+        self.manually_disconnected.store(true, Ordering::Release);
+
         let disconnect_packet =
             Packet::new(PacketId::Disconnect, self.nsp.clone(), None, None, 0, None);
 
-        self.socket.send(disconnect_packet).await?;
-        self.socket.disconnect().await?;
+        self.socket.read().await.send(disconnect_packet).await?;
+        self.socket.read().await.disconnect().await?;
 
         Ok(())
     }
@@ -195,7 +282,7 @@ impl Client {
     ///                 Payload::String(str) => println!("{}", str),
     ///             }
     ///         }.boxed()
-    ///     };    
+    ///     };
     ///
     ///
     ///     let payload = json!({"token": 123});
@@ -234,33 +321,27 @@ impl Client {
         // add the ack to the tuple of outstanding acks
         self.outstanding_acks.write().await.push(ack);
 
-        self.socket.send(socket_packet).await
+        self.socket.read().await.send(socket_packet).await
     }
 
     async fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {
-        let mut on = self.on.write().await;
-        let mut on_any = self.on_any.write().await;
-
-        let on_lock = on.deref_mut();
-        let on_any_lock = on_any.deref_mut();
+        let mut builder = self.builder.write().await;
         let payload = payload.into();
 
-        if let Some(callback) = on_lock.get_mut(event) {
+        if let Some(callback) = builder.on.get_mut(event) {
             callback(payload.clone(), self.clone()).await;
         }
 
         // Call on_any for all common and custom events.
         match event {
             Event::Message | Event::Custom(_) => {
-                if let Some(callback) = on_any_lock {
+                if let Some(callback) = builder.on_any.as_mut() {
                     callback(event.clone(), payload, self.clone()).await;
                 }
             }
             _ => (),
         }
 
-        drop(on);
-        drop(on_any);
         Ok(())
     }
 
@@ -375,9 +456,11 @@ impl Client {
                     }
                 }
                 PacketId::Connect => {
+                    self.server_disconnected.store(false, Ordering::Release);
                     self.callback(&Event::Connect, "").await?;
                 }
                 PacketId::Disconnect => {
+                    self.server_disconnected.store(true, Ordering::Release);
                     self.callback(&Event::Close, "").await?;
                 }
                 PacketId::ConnectError => {
@@ -401,13 +484,31 @@ impl Client {
         Ok(())
     }
 
+    /// Indicates whether the client should try to reconnect
+    pub(crate) async fn should_reconnect(&self) -> bool {
+        let manually_disconnected = self.manually_disconnected.load(Ordering::Acquire);
+        let server_disconnected = self.server_disconnected.load(Ordering::Acquire);
+
+        if server_disconnected {
+            self.builder.read().await.reconnect_on_disconnect
+        } else {
+            !manually_disconnected
+        }
+    }
+
     /// Returns the packet stream for the client.
     pub(crate) fn as_stream<'a>(
         &'a self,
     ) -> Pin<Box<dyn Stream<Item = Result<Packet>> + Send + 'a>> {
-        stream::unfold(self.socket.clone(), |mut socket| async {
+        let socket_clone = self.socket.clone();
+
+        stream::unfold(socket_clone, |socket| async {
+            let mut socket_read = {
+                let s = socket.read().await;
+                (*s).clone()
+            };
             // wait for the next payload
-            let packet: Option<std::result::Result<Packet, Error>> = socket.next().await;
+            let packet: Option<std::result::Result<Packet, Error>> = socket_read.next().await;
             match packet {
                 // end the stream if the underlying one is closed
                 None => None,
@@ -431,7 +532,13 @@ impl Client {
 #[cfg(test)]
 mod test {
 
-    use std::{sync::Arc, time::Duration};
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        time::Duration,
+    };
 
     use bytes::Bytes;
     use futures_util::{FutureExt, StreamExt};
@@ -587,6 +694,68 @@ mod test {
 
         sleep(Duration::from_secs(2)).await;
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn socket_io_reconnect_integration() -> Result<()> {
+        static CONNECT_NUM: AtomicUsize = AtomicUsize::new(0);
+        static MESSAGE_NUM: AtomicUsize = AtomicUsize::new(0);
+
+        let url = crate::test::socket_io_restart_server();
+
+        let socket = ClientBuilder::new(url)
+            .reconnect(true)
+            .max_reconnect_attempts(100)
+            .reconnect_delay(100, 100)
+            .on("open", |_, socket| {
+                async move {
+                    CONNECT_NUM.fetch_add(1, Ordering::Release);
+                    let r = socket.emit_with_ack(
+                        "message",
+                        json!(""),
+                        Duration::from_millis(100),
+                        |_, _| async move {}.boxed(),
+                    );
+                    assert!(r.await.is_ok(), "should emit message success");
+                }
+                .boxed()
+            })
+            .on("message", |_, _socket| {
+                async move {
+                    // test the iterator implementation and make sure there is a constant
+                    // stream of packets, even when reconnecting
+                    MESSAGE_NUM.fetch_add(1, Ordering::Release);
+                }
+                .boxed()
+            })
+            .connect()
+            .await;
+
+        assert!(socket.is_ok(), "should connect success");
+        let socket = socket.unwrap();
+
+        // waiting for server to emit message
+        sleep(Duration::from_millis(500)).await;
+
+        assert_eq!(load(&CONNECT_NUM), 1, "should connect once");
+        assert_eq!(load(&MESSAGE_NUM), 1, "should receive one");
+
+        let r = socket.emit("restart_server", json!("")).await;
+        assert!(r.is_ok(), "should emit restart success");
+
+        // waiting for server to restart
+        for _ in 0..10 {
+            sleep(Duration::from_millis(400)).await;
+            if load(&CONNECT_NUM) == 2 && load(&MESSAGE_NUM) == 2 {
+                break;
+            }
+        }
+
+        assert_eq!(load(&CONNECT_NUM), 2, "should connect twice");
+        assert_eq!(load(&MESSAGE_NUM), 2, "should receive two messages");
+
+        socket.disconnect().await?;
         Ok(())
     }
 
@@ -893,5 +1062,9 @@ mod test {
         ));
 
         Ok(())
+    }
+
+    fn load(num: &AtomicUsize) -> usize {
+        num.load(Ordering::Acquire)
     }
 }
