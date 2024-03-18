@@ -29,6 +29,12 @@ pub struct ClientBuilder {
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
     auth: Option<serde_json::Value>,
+    pub(crate) reconnect: bool,
+    pub(crate) reconnect_on_disconnect: bool,
+    // None implies infinite attempts
+    pub(crate) max_reconnect_attempts: Option<u8>,
+    pub(crate) reconnect_delay_min: u64,
+    pub(crate) reconnect_delay_max: u64,
 }
 
 impl ClientBuilder {
@@ -81,6 +87,12 @@ impl ClientBuilder {
             opening_headers: None,
             transport_type: TransportType::Any,
             auth: None,
+            reconnect: true,
+            reconnect_on_disconnect: false,
+            // None implies infinite attempts
+            max_reconnect_attempts: None,
+            reconnect_delay_min: 1000,
+            reconnect_delay_max: 5000,
         }
     }
 
@@ -312,6 +324,34 @@ impl ClientBuilder {
     pub fn transport_type(mut self, transport_type: TransportType) -> Self {
         self.transport_type = transport_type;
 
+        self
+    }
+
+    /// If set to `false` do not try to reconnect on network errors. Defaults to
+    /// `true`
+    pub fn reconnect(mut self, reconnect: bool) -> Self {
+        self.reconnect = reconnect;
+        self
+    }
+
+    /// If set to `true` try to reconnect when the server disconnects the
+    /// client. Defaults to `false`
+    pub fn reconnect_on_disconnect(mut self, reconnect_on_disconnect: bool) -> Self {
+        self.reconnect_on_disconnect = reconnect_on_disconnect;
+        self
+    }
+
+    /// Sets the minimum and maximum delay between reconnection attempts
+    pub fn reconnect_delay(mut self, min: u64, max: u64) -> Self {
+        self.reconnect_delay_min = min;
+        self.reconnect_delay_max = max;
+        self
+    }
+
+    /// Sets the maximum number of times to attempt reconnections. Defaults to
+    /// an infinite number of attempts
+    pub fn max_reconnect_attempts(mut self, reconnect_attempts: u8) -> Self {
+        self.max_reconnect_attempts = Some(reconnect_attempts);
         self
     }
 
