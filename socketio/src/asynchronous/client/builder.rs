@@ -11,8 +11,10 @@ use url::Url;
 use crate::{error::Result, Event, Payload, TransportType};
 
 use super::{
-    callback::{Callback, DynAsyncAnyCallback, DynAsyncCallback},
-    client::Client,
+    callback::{
+        Callback, DynAsyncAnyCallback, DynAsyncCallback, DynAsyncReconnectSettingsCallback,
+    },
+    client::{Client, ReconnectSettings},
 };
 use crate::asynchronous::socket::Socket as InnerSocket;
 
@@ -21,9 +23,10 @@ use crate::asynchronous::socket::Socket as InnerSocket;
 /// namespace is specified, the default namespace `/` is taken. The `connect` method
 /// acts the `build` method and returns a connected [`Client`].
 pub struct ClientBuilder {
-    address: String,
+    pub(crate) address: String,
     pub(crate) on: HashMap<Event, Callback<DynAsyncCallback>>,
     pub(crate) on_any: Option<Callback<DynAsyncAnyCallback>>,
+    pub(crate) on_reconnect: Option<Callback<DynAsyncReconnectSettingsCallback>>,
     pub(crate) namespace: String,
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
@@ -82,6 +85,7 @@ impl ClientBuilder {
             address: address.into(),
             on: HashMap::new(),
             on_any: None,
+            on_reconnect: None,
             namespace: "/".to_owned(),
             tls_config: None,
             opening_headers: None,
@@ -189,6 +193,42 @@ impl ClientBuilder {
     {
         self.on
             .insert(event.into(), Callback::<DynAsyncCallback>::new(callback));
+        self
+    }
+
+    /// Registers a callback for reconnect events. The event handler must return
+    /// a [ReconnectSettings] struct with the settings that should be updated.
+    ///
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{asynchronous::{ClientBuilder, ReconnectSettings}};
+    /// use futures_util::future::FutureExt;
+    /// use serde_json::json;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let client = ClientBuilder::new("http://localhost:4200/")
+    ///         .namespace("/admin")
+    ///         .on_reconnect(|| {
+    ///             async {
+    ///                 let mut settings = ReconnectSettings::new();
+    ///                 settings.address("http://server?test=123");
+    ///                 settings.auth(json!({ "token": "abc" }));
+    ///                 settings
+    ///             }.boxed()
+    ///         })
+    ///         .connect()
+    ///         .await;
+    /// }
+    /// ```
+    pub fn on_reconnect<F>(mut self, callback: F) -> Self
+    where
+        F: for<'a> std::ops::FnMut() -> BoxFuture<'static, ReconnectSettings>
+            + 'static
+            + Send
+            + Sync,
+    {
+        self.on_reconnect = Some(Callback::<DynAsyncReconnectSettingsCallback>::new(callback));
         self
     }
 

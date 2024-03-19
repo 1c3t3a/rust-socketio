@@ -33,6 +33,33 @@ enum DisconnectReason {
     Server,
 }
 
+/// Settings that can be updated before reconnecting to a server
+#[derive(Default)]
+pub struct ReconnectSettings {
+    address: Option<String>,
+    auth: Option<serde_json::Value>,
+}
+
+impl ReconnectSettings {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the URL that will be used when reconnecting to the server
+    pub fn address<T>(&mut self, address: T) -> &mut Self
+    where
+        T: Into<String>,
+    {
+        self.address = Some(address.into());
+        self
+    }
+
+    /// Sets the authentication data that will be send in the opening request
+    pub fn auth(&mut self, auth: serde_json::Value) {
+        self.auth = Some(auth);
+    }
+}
+
 /// A socket which handles communication with the server. It's initialized with
 /// a specific address as well as an optional namespace to connect to. If `None`
 /// is given the client will connect to the default namespace `"/"`.
@@ -81,7 +108,19 @@ impl Client {
     }
 
     pub(crate) async fn reconnect(&mut self) -> Result<()> {
-        let builder = self.builder.write().await;
+        let mut builder = self.builder.write().await;
+
+        if let Some(config) = builder.on_reconnect.as_mut() {
+            let reconnect_settings = config().await;
+            if let Some(address) = reconnect_settings.address {
+                builder.address = address;
+            }
+
+            if let Some(auth) = reconnect_settings.auth {
+                self.auth = Some(auth);
+            }
+        }
+
         let socket = builder.inner_create().await?;
 
         // New inner socket that can be connected
