@@ -1,11 +1,4 @@
-use std::{
-    ops::DerefMut,
-    pin::Pin,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
+use std::{ops::DerefMut, pin::Pin, sync::Arc};
 
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures_util::{future::BoxFuture, stream, Stream, StreamExt};
@@ -118,7 +111,7 @@ impl Client {
 
         tokio::runtime::Handle::current().spawn(async move {
             loop {
-                let mut stream = client_clone.as_stream();
+                let mut stream = client_clone.as_stream().await;
                 // Consume the stream until it returns None and the stream is closed.
                 while let Some(item) = stream.next().await {
                     if let Err(e) = item {
@@ -505,10 +498,10 @@ impl Client {
     }
 
     /// Returns the packet stream for the client.
-    pub(crate) fn as_stream<'a>(
+    pub(crate) async fn as_stream<'a>(
         &'a self,
     ) -> Pin<Box<dyn Stream<Item = Result<Packet>> + Send + 'a>> {
-        let socket_clone = (*self.socket.blocking_read()).clone();
+        let socket_clone = (*self.socket.read().await).clone();
 
         stream::unfold(socket_clone, |mut socket| async {
             // wait for the next payload
@@ -854,7 +847,7 @@ mod test {
             .await?;
 
         // open packet
-        let mut socket_stream = socket.as_stream();
+        let mut socket_stream = socket.as_stream().await;
         let _ = socket_stream.next().await.unwrap()?;
 
         println!("Here12");
@@ -916,7 +909,7 @@ mod test {
 
     async fn test_socketio_socket(socket: Client, nsp: String) -> Result<()> {
         // open packet
-        let mut socket_stream = socket.as_stream();
+        let mut socket_stream = socket.as_stream().await;
         let _: Option<Packet> = Some(socket_stream.next().await.unwrap()?);
 
         let packet: Option<Packet> = Some(socket_stream.next().await.unwrap()?);
