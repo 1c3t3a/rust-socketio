@@ -850,7 +850,6 @@ mod test {
         let mut socket_stream = socket.as_stream().await;
         let _ = socket_stream.next().await.unwrap()?;
 
-        println!("Here12");
         let packet = socket_stream.next().await.unwrap()?;
         assert_eq!(
             packet,
