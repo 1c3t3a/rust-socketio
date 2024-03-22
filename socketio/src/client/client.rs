@@ -278,10 +278,12 @@ mod test {
     use crate::error::Result;
     use crate::ClientBuilder;
     use serde_json::json;
+    use serial_test::serial;
     use std::time::{Duration, SystemTime};
     use url::Url;
 
     #[test]
+    #[serial(reconnect)]
     fn socket_io_reconnect_integration() -> Result<()> {
         static CONNECT_NUM: AtomicUsize = AtomicUsize::new(0);
         static CLOSE_NUM: AtomicUsize = AtomicUsize::new(0);

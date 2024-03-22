@@ -541,6 +541,7 @@ mod test {
     use futures_util::{FutureExt, StreamExt};
     use native_tls::TlsConnector;
     use serde_json::json;
+    use serial_test::serial;
     use tokio::{
         sync::mpsc,
         time::{sleep, timeout},
@@ -695,6 +696,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[serial(reconnect)]
     async fn socket_io_reconnect_integration() -> Result<()> {
         static CONNECT_NUM: AtomicUsize = AtomicUsize::new(0);
         static MESSAGE_NUM: AtomicUsize = AtomicUsize::new(0);
