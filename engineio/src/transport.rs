@@ -2,7 +2,7 @@ use super::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTra
 use crate::error::Result;
 use adler32::adler32;
 use bytes::Bytes;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use url::Url;
 
 pub trait Transport {
@@ -13,7 +13,7 @@ pub trait Transport {
     /// Performs the server long polling procedure as long as the client is
     /// connected. This should run separately at all time to ensure proper
     /// response handling from the server.
-    fn poll(&self) -> Result<Bytes>;
+    fn poll(&self, timeout: Duration) -> Result<Bytes>;
 
     /// Returns start of the url. ex. http://localhost:2998/engine.io/?EIO=4&transport=polling
     /// Must have EIO and transport already set.

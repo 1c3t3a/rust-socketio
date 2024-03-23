@@ -10,7 +10,7 @@ use crate::{
 use bytes::Bytes;
 use http::HeaderMap;
 use native_tls::TlsConnector;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio::runtime::Runtime;
 use url::Url;
 
@@ -54,9 +54,12 @@ impl Transport for WebsocketSecureTransport {
             .block_on(async { self.inner.emit(data, is_binary_att).await })
     }
 
-    fn poll(&self) -> Result<Bytes> {
+    fn poll(&self, timeout: Duration) -> Result<Bytes> {
         self.runtime.block_on(async {
-            let r = self.inner.poll_next().await;
+            let r = match tokio::time::timeout(timeout, self.inner.poll_next()).await {
+                Ok(r) => r,
+                Err(_) => return Err(Error::PingTimeout()),
+            };
             match r {
                 Ok(b) => b.ok_or(Error::IncompletePacket()),
                 Err(_) => Err(Error::IncompletePacket()),

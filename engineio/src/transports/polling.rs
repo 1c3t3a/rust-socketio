@@ -8,6 +8,7 @@ use reqwest::{
     header::HeaderMap,
 };
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -77,8 +78,13 @@ impl Transport for PollingTransport {
         Ok(())
     }
 
-    fn poll(&self) -> Result<Bytes> {
-        Ok(self.client.get(self.address()?).send()?.bytes()?)
+    fn poll(&self, timeout: Duration) -> Result<Bytes> {
+        Ok(self
+            .client
+            .get(self.address()?)
+            .timeout(timeout)
+            .send()?
+            .bytes()?)
     }
 
     fn base_url(&self) -> Result<Url> {
