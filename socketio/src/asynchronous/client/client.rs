@@ -587,7 +587,10 @@ mod test {
     };
 
     use crate::{
-        asynchronous::client::{builder::ClientBuilder, client::Client},
+        asynchronous::{
+            client::{builder::ClientBuilder, client::Client},
+            ReconnectSettings,
+        },
         error::Result,
         packet::{Packet, PacketId},
         Payload, TransportType,
@@ -739,13 +742,28 @@ mod test {
     async fn socket_io_reconnect_integration() -> Result<()> {
         static CONNECT_NUM: AtomicUsize = AtomicUsize::new(0);
         static MESSAGE_NUM: AtomicUsize = AtomicUsize::new(0);
+        static ON_RECONNECT_CALLED: AtomicUsize = AtomicUsize::new(0);
 
         let url = crate::test::socket_io_restart_server();
 
-        let socket = ClientBuilder::new(url)
+        let socket = ClientBuilder::new(url.clone())
             .reconnect(true)
             .max_reconnect_attempts(100)
             .reconnect_delay(100, 100)
+            .on_reconnect(move || {
+                let url = url.clone();
+                async move {
+                    ON_RECONNECT_CALLED.fetch_add(1, Ordering::Release);
+
+                    let mut settings = ReconnectSettings::new();
+
+                    // Try setting the address to what we already have, just
+                    // to test. This is not strictly necessary in real usage.
+                    settings.address(url.to_string());
+                    settings
+                }
+                .boxed()
+            })
             .on("open", |_, socket| {
                 async move {
                     CONNECT_NUM.fetch_add(1, Ordering::Release);
@@ -792,6 +810,10 @@ mod test {
 
         assert_eq!(load(&CONNECT_NUM), 2, "should connect twice");
         assert_eq!(load(&MESSAGE_NUM), 2, "should receive two messages");
+        assert!(
+            load(&ON_RECONNECT_CALLED) > 1,
+            "should call on_reconnect at least once"
+        );
 
         socket.disconnect().await?;
         Ok(())
