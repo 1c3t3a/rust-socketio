@@ -2,9 +2,8 @@ use crate::callback::OptionalCallback;
 use crate::transport::TransportType;
 
 use crate::error::{Error, Result};
-use crate::packet::{HandshakePacket, Packet, PacketId, Payload};
+use crate::packet::{HandshakePacket, Packet, PacketId, PacketSerializer, Payload};
 use bytes::Bytes;
-use std::convert::TryFrom;
 use std::sync::RwLock;
 use std::time::Duration;
 use std::{fmt::Debug, sync::atomic::Ordering};
@@ -23,6 +22,7 @@ pub const DEFAULT_MAX_POLL_TIMEOUT: Duration = Duration::from_secs(45);
 #[derive(Clone)]
 pub struct Socket {
     transport: Arc<TransportType>,
+    serializer: PacketSerializer,
     on_close: OptionalCallback<()>,
     on_data: OptionalCallback<Bytes>,
     on_error: OptionalCallback<String>,
@@ -40,6 +40,7 @@ pub struct Socket {
 impl Socket {
     pub(crate) fn new(
         transport: TransportType,
+        serializer: PacketSerializer,
         handshake: HandshakePacket,
         on_close: OptionalCallback<()>,
         on_data: OptionalCallback<Bytes>,
@@ -56,6 +57,7 @@ impl Socket {
             on_open,
             on_packet,
             transport: Arc::new(transport),
+            serializer,
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
@@ -148,7 +150,8 @@ impl Socket {
                     continue;
                 }
 
-                let payload = Payload::try_from(data)?;
+                // let payload = Payload::try_from(data)?;
+                let payload = self.serializer.decode_payload(data)?;
                 let mut iter = payload.into_iter();
 
                 if let Some(packet) = iter.next() {

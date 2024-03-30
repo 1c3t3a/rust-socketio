@@ -2,12 +2,94 @@ use base64::{engine::general_purpose, Engine as _};
 use bytes::{BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use std::char;
-use std::convert::TryFrom;
-use std::convert::TryInto;
 use std::fmt::{Display, Formatter, Result as FmtResult, Write};
 use std::ops::Index;
 
 use crate::error::{Error, Result};
+
+pub struct PacketSerializer {
+    decode: Box<dyn Fn(Bytes) -> Result<Packet> + Send + Sync>,
+    encode: Box<dyn Fn(Packet) -> Bytes + Send + Sync>,
+}
+
+fn default_decode(bytes: Bytes) -> Result<Packet> {
+    if bytes.is_empty() {
+        return Err(Error::IncompletePacket());
+    }
+
+    let is_base64 = *bytes.first().ok_or(Error::IncompletePacket())? == b'b';
+
+    // only 'messages' packets could be encoded
+    let packet_id = if is_base64 {
+        PacketId::MessageBinary
+    } else {
+        (*bytes.first().ok_or(Error::IncompletePacket())?).try_into()?
+    };
+
+    if bytes.len() == 1 && packet_id == PacketId::Message {
+        return Err(Error::IncompletePacket());
+    }
+
+    let data: Bytes = bytes.slice(1..);
+
+    Ok(Packet {
+        packet_id,
+        data: if is_base64 {
+            Bytes::from(general_purpose::STANDARD.decode(data.as_ref())?)
+        } else {
+            data
+        },
+    })
+}
+
+fn default_encode(packet: Packet) -> Bytes {
+    let mut result = BytesMut::with_capacity(packet.data.len() + 1);
+    result.put_u8(packet.packet_id.to_string_byte());
+    if packet.packet_id == PacketId::MessageBinary {
+        result.extend(general_purpose::STANDARD.encode(packet.data).into_bytes());
+    } else {
+        result.put(packet.data);
+    }
+    result.freeze()
+}
+
+
+impl PacketSerializer {
+    const SEPARATOR: char = '\x1e';
+
+    pub fn new(
+        decode: Box<dyn Fn(Bytes) -> Result<Packet> + Send + Sync>,
+        encode: Box<dyn Fn(Packet) -> Bytes + Send + Sync>,
+    ) -> Self {
+        Self {
+            decode,
+            encode,
+        }
+    }
+
+    pub fn default() -> Self {
+        let decode = Box::new(default_decode);
+        let encode = Box::new(default_encode);
+        Self::new(decode, encode)
+    }
+
+    pub fn decode(&self, datas: Bytes) -> Result<Packet> {
+        (self.decode)(datas)
+    }
+
+    pub fn decode_payload(&self, datas: Bytes) -> Result<Payload> {
+        datas
+            .split(|&c| c as char == PacketSerializer::SEPARATOR)
+            .map(|slice| self.decode(datas.slice_ref(slice)))
+            .collect::<Result<Vec<Packet>>>()
+            .map(Payload)
+    }
+
+    pub fn encode(&self, packet: Packet) -> Bytes {
+        (self.encode)(packet)
+    }
+}
+
 /// Enumeration of the `engine.io` `Packet` types.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum PacketId {

@@ -193,7 +193,7 @@ pub use error::Error;
 
 pub use {event::Event, payload::Payload};
 
-pub use client::{ClientBuilder, RawClient, TransportType};
+pub use client::{ClientBuilder, PacketSerializer, RawClient, TransportType};
 
 // TODO: 0.4.0 remove
 #[deprecated(since = "0.3.0-alpha-2", note = "Socket renamed to Client")]

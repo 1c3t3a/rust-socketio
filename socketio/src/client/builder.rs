@@ -27,6 +27,36 @@ pub enum TransportType {
     Polling,
 }
 
+impl Default for TransportType {
+    fn default() -> Self {
+        TransportType::Any
+    }
+}
+
+/// Serializer of Engine.IO packet
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PacketSerializer {
+    /// Normal serializer
+    Normal,
+    /// MessagePack serializer
+    MessagePack,
+}
+
+impl Into<rust_engineio::packet::PacketSerializer> for PacketSerializer {
+    fn into(self) -> rust_engineio::packet::PacketSerializer {
+        match self {
+            PacketSerializer::Normal => rust_engineio::packet::PacketSerializer::Normal,
+            PacketSerializer::MessagePack => rust_engineio::packet::PacketSerializer::MessagePack,
+        }
+    }
+}
+
+impl Default for PacketSerializer {
+    fn default() -> Self {
+        PacketSerializer::Normal
+    }
+}
+
 /// A builder class for a `socket.io` socket. This handles setting up the client and
 /// configuring the callback, the namespace and metadata of the socket. If no
 /// namespace is specified, the default namespace `/` is taken. The `connect` method
@@ -40,6 +70,7 @@ pub struct ClientBuilder {
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
+    packet_serializer: PacketSerializer,
     auth: Option<serde_json::Value>,
     pub(crate) reconnect: bool,
     pub(crate) reconnect_on_disconnect: bool,
@@ -90,7 +121,8 @@ impl ClientBuilder {
             namespace: "/".to_owned(),
             tls_config: None,
             opening_headers: None,
-            transport_type: TransportType::Any,
+            transport_type: TransportType::default(),
+            packet_serializer: PacketSerializer::default(),
             auth: None,
             reconnect: true,
             reconnect_on_disconnect: false,
@@ -306,6 +338,30 @@ impl ClientBuilder {
         self
     }
 
+    /// Specifies the [`PacketSerializer`] to use for encoding and decoding packets.
+    ///
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{asynchronous::ClientBuilder, PacketSerializer};
+    /// use futures_util::FutureExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let socket = ClientBuilder::new("http://localhost:4200/")
+    ///         .namespace("/admin")
+    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .packet_serializer(PacketSerializer::Normal)
+    ///         .connect()
+    ///         .await
+    ///         .expect("connection failed");
+    /// }
+    /// ```
+    pub fn packet_serializer(mut self, packet_serializer: PacketSerializer) -> Self {
+        self.packet_serializer = packet_serializer;
+
+        self
+    }
+
     /// Connects the socket to a certain endpoint. This returns a connected
     /// [`Client`] instance. This method returns an [`std::result::Result::Err`]
     /// value if something goes wrong during connection. Also starts a separate
@@ -341,7 +397,8 @@ impl ClientBuilder {
             url.set_path("/socket.io/");
         }
 
-        let mut builder = EngineIoClientBuilder::new(url);
+        let mut builder =
+            EngineIoClientBuilder::new(url).packet_serializer(self.packet_serializer.into());
 
         if let Some(tls_config) = self.tls_config {
             builder = builder.tls_config(tls_config);

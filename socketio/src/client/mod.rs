@@ -1,8 +1,7 @@
 mod builder;
 mod raw_client;
 
-pub use builder::ClientBuilder;
-pub use builder::TransportType;
+pub use builder::{ClientBuilder, PacketSerializer, TransportType};
 pub use client::Client;
 pub use raw_client::RawClient;
 

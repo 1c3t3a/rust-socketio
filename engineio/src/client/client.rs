@@ -5,7 +5,7 @@ use crate::transport::Transport;
 
 use crate::error::{Error, Result};
 use crate::header::HeaderMap;
-use crate::packet::{HandshakePacket, Packet, PacketId};
+use crate::packet::{HandshakePacket, Packet, PacketId, PacketSerializer};
 use crate::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
 use crate::ENGINE_IO_VERSION;
 use bytes::Bytes;
@@ -32,6 +32,7 @@ pub struct ClientBuilder {
     url: Url,
     tls_config: Option<TlsConnector>,
     headers: Option<HeaderMap>,
+    serializer: PacketSerializer,
     handshake: Option<HandshakePacket>,
     on_error: OptionalCallback<String>,
     on_open: OptionalCallback<()>,
@@ -55,12 +56,20 @@ impl ClientBuilder {
             headers: None,
             tls_config: None,
             handshake: None,
+            serializer: PacketSerializer::default(),
             on_close: OptionalCallback::default(),
             on_data: OptionalCallback::default(),
             on_error: OptionalCallback::default(),
             on_open: OptionalCallback::default(),
             on_packet: OptionalCallback::default(),
         }
+    }
+
+    /// Specify Packet Serializer
+    pub fn packet_serializer(mut self, packet_serializer: PacketSerializer) -> Self {
+        self.serializer = packet_serializer;
+
+        self
     }
 
     /// Specify transport's tls config
@@ -183,6 +192,7 @@ impl ClientBuilder {
         Ok(Client {
             socket: InnerSocket::new(
                 transport.into(),
+                self.serializer,
                 self.handshake.unwrap(),
                 self.on_close,
                 self.on_data,
@@ -228,6 +238,7 @@ impl ClientBuilder {
                 Ok(Client {
                     socket: InnerSocket::new(
                         transport.into(),
+                        self.serializer,
                         self.handshake.unwrap(),
                         self.on_close,
                         self.on_data,
@@ -250,6 +261,7 @@ impl ClientBuilder {
                 Ok(Client {
                     socket: InnerSocket::new(
                         transport.into(),
+                        self.serializer,
                         self.handshake.unwrap(),
                         self.on_close,
                         self.on_data,

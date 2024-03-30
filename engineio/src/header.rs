@@ -5,7 +5,6 @@ use http::{
     HeaderValue as HttpHeaderValue,
 };
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::FromStr;
 

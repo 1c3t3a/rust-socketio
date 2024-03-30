@@ -101,24 +101,11 @@ impl Stream for PollingTransport {
 
 #[async_trait]
 impl AsyncTransport for PollingTransport {
-    async fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()> {
-        let data_to_send = if is_binary_att {
-            // the binary attachment gets `base64` encoded
-            let mut packet_bytes = BytesMut::with_capacity(data.len() + 1);
-            packet_bytes.put_u8(b'b');
-
-            let encoded_data = general_purpose::STANDARD.encode(data);
-            packet_bytes.put(encoded_data.as_bytes());
-
-            packet_bytes.freeze()
-        } else {
-            data
-        };
-
+    async fn emit(&self, data: Bytes) -> Result<()> {
         let status = self
             .client
             .post(self.address().await?)
-            .body(data_to_send)
+            .body(data)
             .send()
             .await?
             .status()
