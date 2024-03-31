@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.5.0`](#050) - _2024.03.31_
 * [`0.4.4`](#044) - _2023.11.18_
 * [`0.4.3`](#043) - _2023.07.08_
 * [`0.4.2`](#042) - _2023.06.25_
@@ -36,11 +37,23 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 _nothing new to show for… yet!_>
 
-_async callback macro_
+## <a name="050">[0.5.0] - _Packed with changes!_ </a>
 
-_2024.03.15_
+_2024.03.31_
 
-- Add macro `async_callback` and `async_any_callback` for async callbacks [#395](https://github.com/1c3t3a/rust-socketio/issue/395) [#399](https://github.com/1c3t3a/rust-socketio/pull/399)
+- Support multiple arguments to the payload through a new Payload variant called
+  `Text` that holds a JSON value ([#384](https://github.com/1c3t3a/rust-socketio/pull/384)).
+  Credits to ctrlaltf24@ and SalahaldinBilal@!
+  Please note: This is a breaking change: `Payload::String` is deprecated and will be removed soon.
+- Async reconnections: Support for automatic reconnection in the async version of the crate!
+  ([#400](https://github.com/1c3t3a/rust-socketio/pull/400)). Credits to rageshkrishna@.
+- Add an `on_reconnect` callback that allows to change the connection configuration
+  ([#405](https://github.com/1c3t3a/rust-socketio/pull/405)). Credits to rageshkrishna@.
+- Fix bug that ignored the ping interval ([#359](https://github.com/1c3t3a/rust-socketio/pull/359)).
+  Credits to sirkrypt0@. This is a breaking change that removes the engine.io's stream impl.
+  It is however replaced by a method called `as_stream` on the engine.io socket.
+- Add macro `async_callback` and `async_any_callback` for async callbacks ([#399](https://github.com/1c3t3a/rust-socketio/pull/399).
+  Credits to shenjackyuanjie@.
 
 ## <a name="044">[0.4.4] - _Bump dependencies_ </a>
 
