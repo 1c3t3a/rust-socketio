@@ -289,33 +289,15 @@ impl RawClient {
 
                 if let Some(ref attachments) = socket_packet.attachments {
                     if let Some(payload) = attachments.first() {
-                        ack.callback.deref_mut()(
-                            Payload::Binary(payload.to_owned()),
-                            self.clone(),
-                        );
-                    }
-                    if ack.time_started.elapsed() < ack.timeout {
-                        if let Some(ref payload) = socket_packet.data {
-                            ack.callback.deref_mut()(
-                                Payload::from(payload.to_owned()),
-                                self.clone(),
-                            );
-                        }
-                        if let Some(ref attachments) = socket_packet.attachments {
-                            if let Some(payload) = attachments.first() {
-                                ack.callback.deref_mut()(
-                                    Payload::Binary(payload.to_owned()),
-                                    self.clone(),
-                                );
-                            }
-                        }
-                    } else {
-                        // Do something with timed out acks?
+                        ack.callback.deref_mut()(Payload::Binary(payload.to_owned()), self.clone());
                     }
                 }
-            } else {
-                // Do something with timed out acks?
             }
+            // nope, just ignore it, the official implment just remove the ack id when timeout
+            // https://github.com/socketio/socket.io-client/blob/main/lib/socket.ts#L467-L495
+            // } else {
+            //     // Do something with timed out acks?
+            // }
 
             false
         });
@@ -334,10 +316,7 @@ impl RawClient {
 
         if let Some(attachments) = &packet.attachments {
             if let Some(binary_payload) = attachments.first() {
-                self.callback(
-                    &event,
-                    Payload::Binary(binary_payload.to_owned())
-                )?;
+                self.callback(&event, Payload::Binary(binary_payload.to_owned()))?;
             }
         }
         Ok(())
