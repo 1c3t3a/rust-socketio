@@ -10,6 +10,9 @@ keywords = ["engineio", "network", "protocol", "client"]
 categories = ["network-programming", "web-programming", "web-programming::websocket"]
 license = "MIT"
 
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 base64 = "0.21.5"
 bytes = "1"
