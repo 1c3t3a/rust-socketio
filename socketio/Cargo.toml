@@ -10,6 +10,9 @@ keywords = ["socketio", "engineio", "network", "protocol", "client"]
 categories = ["network-programming", "web-programming", "web-programming::websocket"]
 license = "MIT"
 
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 rust_engineio = { version = "0.5.0", path = "../engineio" }
 base64 = "0.21.5"
