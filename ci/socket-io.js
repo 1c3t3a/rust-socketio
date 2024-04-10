@@ -43,6 +43,10 @@ var callback = client => {
     client.emit('This is the first argument', 'This is the second argument', {
         argCount: 3
     });
+    client.emit('on_abc_event', '', {
+        abc: 0,
+        some_other: 'value',
+    });
 };
 io.on('connection', callback);
 io.of('/admin').on('connection', callback);
