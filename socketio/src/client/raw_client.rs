@@ -753,6 +753,29 @@ mod test {
             )
         );
 
+        let packet: Option<Packet> = iter.next();
+
+        assert!(packet.is_some());
+
+        let packet = packet.unwrap();
+        assert_eq!(
+            packet,
+            Packet::new(
+                PacketId::Event,
+                "on_abc_event".to_string(),
+                Some(
+                    serde_json::json!({
+                        "abc": 0,
+                        "some_other": "value",
+                    }).to_string()
+                ),
+                None,
+                0,
+                None,
+            )
+        );
+
+
         assert!(socket
             .emit_with_ack(
                 "test",
