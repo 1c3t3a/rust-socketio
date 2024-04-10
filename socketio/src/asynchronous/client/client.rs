@@ -1073,19 +1073,23 @@ mod test {
             packet,
             Packet::new(
                 PacketId::Event,
-                "on_abc_event".to_string(),
+                nsp.clone(),
                 Some(
-                    serde_json::json!({
+                    serde_json::json!([
+                        "on_abc_event",
+                        "",
+                        {
                         "abc": 0,
                         "some_other": "value",
-                    }).to_string()
+                        }
+                    ])
+                    .to_string()
                 ),
                 None,
                 0,
                 None,
             )
         );
-
 
         let cb = |message: Payload, _| {
             async {
