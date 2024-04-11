@@ -461,29 +461,26 @@ impl Client {
         };
 
         // a socketio message always comes in one of the following two flavors (both JSON):
-        // 1: `["event", "msg"]`
+        // 1: `["event", "msg", ...]`
         // 2: `["msg"]`
         // in case 2, the message is ment for the default message event, in case 1 the event
         // is specified
         if let Ok(Value::Array(contents)) = serde_json::from_str::<Value>(data) {
-            let (event, data) = if contents.len() > 1 {
-                // case 1
-                let event = match contents.first() {
-                    Some(Value::String(ev)) => Event::from(ev.as_str()),
-                    _ => Event::Message,
-                };
-
-                (event, contents.get(1).ok_or(Error::IncompletePacket())?)
-            } else {
-                // case 2
-                (
-                    Event::Message,
-                    contents.first().ok_or(Error::IncompletePacket())?,
-                )
+            let (event, payloads) = match contents.len() {
+                0 => return Err(Error::IncompletePacket()),
+                // Incorrect packet, ignore it
+                1 => (Event::Message, contents.as_slice()),
+                // it's a message event
+                _ => match contents.first() {
+                    Some(Value::String(ev)) => (Event::from(ev.as_str()), &contents[1..]),
+                    // get rest(1..) of them as data, not just take the 2nd element
+                    _ => (Event::Message, contents.as_slice()),
+                    // take them all as data
+                },
             };
 
             // call the correct callback
-            self.callback(&event, data.to_string()).await?;
+            self.callback(&event, payloads.to_vec()).await?;
         }
 
         Ok(())
@@ -1058,6 +1055,33 @@ mod test {
                         serde_json::Value::from("This is the first argument"),
                         serde_json::Value::from("This is the second argument"),
                         serde_json::json!({"argCount":3})
+                    ])
+                    .to_string()
+                ),
+                None,
+                0,
+                None,
+            )
+        );
+
+        let packet: Option<Packet> = Some(socket_stream.next().await.unwrap()?);
+
+        assert!(packet.is_some());
+
+        let packet = packet.unwrap();
+        assert_eq!(
+            packet,
+            Packet::new(
+                PacketId::Event,
+                nsp.clone(),
+                Some(
+                    serde_json::json!([
+                        "on_abc_event",
+                        "",
+                        {
+                        "abc": 0,
+                        "some_other": "value",
+                        }
                     ])
                     .to_string()
                 ),
