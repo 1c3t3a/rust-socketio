@@ -295,10 +295,6 @@ impl RawClient {
             }
             // nope, just ignore it, the official implment just remove the ack id when timeout
             // https://github.com/socketio/socket.io-client/blob/main/lib/socket.ts#L467-L495
-            // } else {
-            //     // Do something with timed out acks?
-            // }
-
             false
         });
 
@@ -337,16 +333,13 @@ impl RawClient {
         if let Ok(Value::Array(contents)) = serde_json::from_str::<Value>(data) {
             let (event, payloads) = match contents.len() {
                 0 => return Err(Error::IncompletePacket()),
-                1 => {
-                    (
-                        Event::Message,
-                        contents.as_slice(), // safe to unwrap, checked above
-                    )
-                }
+                1 => (Event::Message, contents.as_slice()),
+                // get rest of data if first is a event
                 _ => match contents.first() {
-                    // get rest of data if first is a event
                     Some(Value::String(ev)) => (Event::from(ev.as_str()), &contents[1..]),
+                    // get rest(1..) of them as data, not just take the 2nd element
                     _ => (Event::Message, contents.as_slice()),
+                    // take them all as data
                 },
             };
 
