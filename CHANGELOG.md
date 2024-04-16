@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## Overview
 
 * [unreleased](#unreleased)
+* [`0.5.1`](#051) - _2024.04.16_
 * [`0.5.0`](#050) - _2024.03.31_
 * [`0.4.4`](#044) - _2023.11.18_
 * [`0.4.3`](#043) - _2023.07.08_
@@ -36,6 +37,14 @@ The format is based on [Keep a Changelog], and this project adheres to
 ## _[Unreleased]_
 
 _nothing new to show for… yet!_>
+
+## <a name="051">[0.5.1] - _Multi-payload fix and http 1.0_ </a>
+
+_2024.04.16_
+
+- Fix issues with processing multi-payload messages ([#392](https://github.com/1c3t3a/rust-socketio/pull/392)).
+  Credits to shenjackyuanjie@.
+- Bump http to 1.0 and all dependencies that use http to a version that also uses http 1.0 ([#418](https://github.com/1c3t3a/rust-socketio/pull/418)).
 
 ## <a name="050">[0.5.0] - _Packed with changes!_ </a>
 
