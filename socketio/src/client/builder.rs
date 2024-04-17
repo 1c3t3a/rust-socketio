@@ -33,29 +33,7 @@ impl Default for TransportType {
     }
 }
 
-/// Serializer of Engine.IO packet
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum PacketSerializer {
-    /// Normal serializer
-    Normal,
-    /// MessagePack serializer
-    MessagePack,
-}
-
-impl Into<rust_engineio::packet::PacketSerializer> for PacketSerializer {
-    fn into(self) -> rust_engineio::packet::PacketSerializer {
-        match self {
-            PacketSerializer::Normal => rust_engineio::packet::PacketSerializer::Normal,
-            PacketSerializer::MessagePack => rust_engineio::packet::PacketSerializer::MessagePack,
-        }
-    }
-}
-
-impl Default for PacketSerializer {
-    fn default() -> Self {
-        PacketSerializer::Normal
-    }
-}
+pub use rust_engineio::Packet::PacketSerializer;
 
 /// A builder class for a `socket.io` socket. This handles setting up the client and
 /// configuring the callback, the namespace and metadata of the socket. If no
