@@ -41,6 +41,7 @@ pub struct ClientBuilder {
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
     auth: Option<serde_json::Value>,
+    data: Option<Arc<dyn std::any::Any + Send + Sync>>,
     pub(crate) reconnect: bool,
     pub(crate) reconnect_on_disconnect: bool,
     // None reconnect attempts represent infinity.
@@ -98,7 +99,13 @@ impl ClientBuilder {
             max_reconnect_attempts: None,
             reconnect_delay_min: 1000,
             reconnect_delay_max: 5000,
+            data: None,
         }
+    }
+
+    pub fn data<D: std::any::Any + Send + Sync>(mut self, data: Arc<D>) -> Self {
+        self.data = Some(data);
+        self
     }
 
     /// Sets the target namespace of the client. The namespace should start
@@ -365,6 +372,7 @@ impl ClientBuilder {
             self.on,
             self.on_any,
             self.auth,
+            self.data.unwrap_or(Arc::new(())),
         )?;
         socket.connect()?;
 

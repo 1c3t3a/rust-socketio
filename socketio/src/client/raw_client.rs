@@ -41,6 +41,7 @@ pub struct RawClient {
     nsp: String,
     // Data send in the opening packet (commonly used as for auth)
     auth: Option<Value>,
+    data: Arc<dyn std::any::Any + Send + Sync>,
 }
 
 impl RawClient {
@@ -54,6 +55,7 @@ impl RawClient {
         on: Arc<Mutex<HashMap<Event, Callback<SocketCallback>>>>,
         on_any: Arc<Mutex<Option<Callback<SocketAnyCallback>>>>,
         auth: Option<Value>,
+        data: Arc<dyn std::any::Any + Send + Sync>,
     ) -> Result<Self> {
         Ok(RawClient {
             socket,
@@ -62,7 +64,19 @@ impl RawClient {
             on_any,
             outstanding_acks: Arc::new(Mutex::new(Vec::new())),
             auth,
+            data,
         })
+    }
+
+    // TODO: Write documentation
+    pub fn data<D: Send + Sync + 'static>(&self) -> Arc<D> {
+        self.try_data()
+            .expect("RawClient::data does not match ClientBuilder::data")
+    }
+
+    // TODO: Write documentation
+    pub fn try_data<D: Send + Sync + 'static>(&self) -> Option<Arc<D>> {
+        Arc::clone(&self.data).downcast().ok()
     }
 
     /// Connects the client to a server. Afterwards the `emit_*` methods can be
