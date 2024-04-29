@@ -74,6 +74,7 @@ pub struct Client {
     auth: Option<serde_json::Value>,
     builder: Arc<RwLock<ClientBuilder>>,
     disconnect_reason: Arc<RwLock<DisconnectReason>>,
+    data: Arc<dyn std::any::Any + Send + Sync>,
 }
 
 impl Client {
@@ -87,9 +88,21 @@ impl Client {
             nsp: builder.namespace.to_owned(),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
             auth: builder.auth.clone(),
+            data: builder.data.clone().unwrap_or(Arc::new(())),
             builder: Arc::new(RwLock::new(builder)),
             disconnect_reason: Arc::new(RwLock::new(DisconnectReason::default())),
         })
+    }
+
+    // TODO: Documentation
+    pub fn data<D: Send + Sync + 'static>(&self) -> Arc<D> {
+        self.try_data()
+            .expect("Client::data does not match ClientBuilder::data")
+    }
+
+    // TODO: Documentation
+    pub fn try_data<D: Send + Sync + 'static>(&self) -> Option<Arc<D>> {
+        Arc::clone(&self.data).downcast().ok()
     }
 
     /// Connects the client to a server. Afterwards the `emit_*` methods can be
