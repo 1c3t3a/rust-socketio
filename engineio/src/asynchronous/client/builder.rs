@@ -7,7 +7,7 @@ use crate::{
     },
     error::Result,
     header::HeaderMap,
-    packet::HandshakePacket,
+    packet::{HandshakePacket, PacketSerializer},
     Error, Packet, ENGINE_IO_VERSION,
 };
 use bytes::Bytes;
@@ -22,6 +22,7 @@ pub struct ClientBuilder {
     url: Url,
     tls_config: Option<TlsConnector>,
     headers: Option<HeaderMap>,
+    serializer: PacketSerializer,
     handshake: Option<HandshakePacket>,
     on_error: OptionalCallback<String>,
     on_open: OptionalCallback<()>,
@@ -45,12 +46,20 @@ impl ClientBuilder {
             headers: None,
             tls_config: None,
             handshake: None,
+            serializer: PacketSerializer::default(),
             on_close: OptionalCallback::default(),
             on_data: OptionalCallback::default(),
             on_error: OptionalCallback::default(),
             on_open: OptionalCallback::default(),
             on_packet: OptionalCallback::default(),
         }
+    }
+
+    /// Specify Packet Serializer
+    pub fn packet_serializer(mut self, packet_serializer: PacketSerializer) -> Self {
+        self.serializer = packet_serializer;
+
+        self
     }
 
     /// Specify transport's tls config
@@ -127,9 +136,10 @@ impl ClientBuilder {
 
         let mut url = self.url.clone();
 
-        let handshake: HandshakePacket =
-            Packet::try_from(transport.next().await.ok_or(Error::IncompletePacket())??)?
-                .try_into()?;
+        let handshake: HandshakePacket = self
+            .serializer
+            .decode(transport.next().await.ok_or(Error::IncompletePacket())??)?
+            .try_into()?;
 
         // update the base_url with the new sid
         url.query_pairs_mut().append_pair("sid", &handshake.sid[..]);

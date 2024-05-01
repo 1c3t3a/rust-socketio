@@ -10,8 +10,6 @@ use crate::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTra
 use crate::ENGINE_IO_VERSION;
 use bytes::Bytes;
 use native_tls::TlsConnector;
-use std::convert::TryFrom;
-use std::convert::TryInto;
 use std::fmt::Debug;
 use url::Url;
 
@@ -138,8 +136,10 @@ impl ClientBuilder {
 
         let mut url = self.url.clone();
 
-        let handshake: HandshakePacket =
-            Packet::try_from(transport.poll(DEFAULT_MAX_POLL_TIMEOUT)?)?.try_into()?;
+        let handshake: HandshakePacket = self
+            .serializer
+            .decode(transport.poll(DEFAULT_MAX_POLL_TIMEOUT)?)?
+            .try_into()?;
 
         // update the base_url with the new sid
         url.query_pairs_mut().append_pair("sid", &handshake.sid[..]);

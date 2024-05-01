@@ -22,7 +22,7 @@ pub const DEFAULT_MAX_POLL_TIMEOUT: Duration = Duration::from_secs(45);
 #[derive(Clone)]
 pub struct Socket {
     transport: Arc<TransportType>,
-    serializer: PacketSerializer,
+    serializer: Arc<PacketSerializer>,
     on_close: OptionalCallback<()>,
     on_data: OptionalCallback<Bytes>,
     on_error: OptionalCallback<String>,
@@ -57,7 +57,7 @@ impl Socket {
             on_open,
             on_packet,
             transport: Arc::new(transport),
-            serializer,
+            serializer: Arc::new(serializer),
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
@@ -114,7 +114,8 @@ impl Socket {
         let data: Bytes = if is_binary {
             packet.data
         } else {
-            packet.into()
+            // packet.into()
+            self.serializer.encode(packet)
         };
 
         if let Err(error) = self.transport.as_transport().emit(data, is_binary) {

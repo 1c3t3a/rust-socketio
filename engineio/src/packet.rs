@@ -2,7 +2,7 @@ use base64::{engine::general_purpose, Engine as _};
 use bytes::{BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use std::char;
-use std::fmt::{Display, Formatter, Result as FmtResult, Write};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult, Write};
 use std::ops::Index;
 
 use crate::error::{Error, Result};
@@ -53,7 +53,6 @@ fn default_encode(packet: Packet) -> Bytes {
     result.freeze()
 }
 
-
 impl PacketSerializer {
     const SEPARATOR: char = '\x1e';
 
@@ -61,16 +60,7 @@ impl PacketSerializer {
         decode: Box<dyn Fn(Bytes) -> Result<Packet> + Send + Sync>,
         encode: Box<dyn Fn(Packet) -> Bytes + Send + Sync>,
     ) -> Self {
-        Self {
-            decode,
-            encode,
-        }
-    }
-
-    pub fn default() -> Self {
-        let decode = Box::new(default_decode);
-        let encode = Box::new(default_encode);
-        Self::new(decode, encode)
+        Self { decode, encode }
     }
 
     pub fn decode(&self, datas: Bytes) -> Result<Packet> {
@@ -87,6 +77,39 @@ impl PacketSerializer {
 
     pub fn encode(&self, packet: Packet) -> Bytes {
         (self.encode)(packet)
+    }
+
+    pub fn encode_payload(&self, packets: Payload) -> Bytes {
+        let mut buf = BytesMut::new();
+        for packet in packets {
+            // at the moment no base64 encoding is used
+            buf.extend(self.encode(packet.clone()));
+            buf.put_u8(PacketSerializer::SEPARATOR as u8);
+        }
+
+        // remove the last separator
+        let _ = buf.split_off(buf.len() - 1);
+        buf.freeze()
+    }
+}
+
+impl Default for PacketSerializer {
+    fn default() -> Self {
+        let decode = Box::new(default_decode);
+        let encode = Box::new(default_encode);
+        Self::new(decode, encode)
+    }
+}
+
+impl Display for PacketSerializer {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.write_str("PacketSerializer")
+    }
+}
+
+impl Debug for PacketSerializer {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.debug_struct("PacketSerializer").finish()
     }
 }
 
@@ -187,56 +210,6 @@ impl Packet {
     }
 }
 
-impl TryFrom<Bytes> for Packet {
-    type Error = Error;
-    /// Decodes a single `Packet` from an `u8` byte stream.
-    fn try_from(
-        bytes: Bytes,
-    ) -> std::result::Result<Self, <Self as std::convert::TryFrom<Bytes>>::Error> {
-        if bytes.is_empty() {
-            return Err(Error::IncompletePacket());
-        }
-
-        let is_base64 = *bytes.first().ok_or(Error::IncompletePacket())? == b'b';
-
-        // only 'messages' packets could be encoded
-        let packet_id = if is_base64 {
-            PacketId::MessageBinary
-        } else {
-            (*bytes.first().ok_or(Error::IncompletePacket())?).try_into()?
-        };
-
-        if bytes.len() == 1 && packet_id == PacketId::Message {
-            return Err(Error::IncompletePacket());
-        }
-
-        let data: Bytes = bytes.slice(1..);
-
-        Ok(Packet {
-            packet_id,
-            data: if is_base64 {
-                Bytes::from(general_purpose::STANDARD.decode(data.as_ref())?)
-            } else {
-                data
-            },
-        })
-    }
-}
-
-impl From<Packet> for Bytes {
-    /// Encodes a `Packet` into an `u8` byte stream.
-    fn from(packet: Packet) -> Self {
-        let mut result = BytesMut::with_capacity(packet.data.len() + 1);
-        result.put_u8(packet.packet_id.to_string_byte());
-        if packet.packet_id == PacketId::MessageBinary {
-            result.extend(general_purpose::STANDARD.encode(packet.data).into_bytes());
-        } else {
-            result.put(packet.data);
-        }
-        result.freeze()
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct Payload(Vec<Packet>);
 
@@ -247,38 +220,6 @@ impl Payload {
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.0.len()
-    }
-}
-
-impl TryFrom<Bytes> for Payload {
-    type Error = Error;
-    /// Decodes a `payload` which in the `engine.io` context means a chain of normal
-    /// packets separated by a certain SEPARATOR, in this case the delimiter `\x30`.
-    fn try_from(payload: Bytes) -> Result<Self> {
-        payload
-            .split(|&c| c as char == Self::SEPARATOR)
-            .map(|slice| Packet::try_from(payload.slice_ref(slice)))
-            .collect::<Result<Vec<_>>>()
-            .map(Self)
-    }
-}
-
-impl TryFrom<Payload> for Bytes {
-    type Error = Error;
-    /// Encodes a payload. Payload in the `engine.io` context means a chain of
-    /// normal `packets` separated by a SEPARATOR, in this case the delimiter
-    /// `\x30`.
-    fn try_from(packets: Payload) -> Result<Self> {
-        let mut buf = BytesMut::new();
-        for packet in packets {
-            // at the moment no base64 encoding is used
-            buf.extend(Bytes::from(packet.clone()));
-            buf.put_u8(Payload::SEPARATOR as u8);
-        }
-
-        // remove the last separator
-        let _ = buf.split_off(buf.len() - 1);
-        Ok(buf.freeze())
     }
 }
 
@@ -317,38 +258,38 @@ mod tests {
 
     #[test]
     fn test_packet_error() {
-        let err = Packet::try_from(BytesMut::with_capacity(10).freeze());
+        let err = PacketSerializer::default().decode(BytesMut::with_capacity(10).freeze());
         assert!(err.is_err())
     }
 
     #[test]
     fn test_is_reflexive() {
         let data = Bytes::from_static(b"1Hello World");
-        let packet = Packet::try_from(data).unwrap();
+        let packet = PacketSerializer::default().decode(data).unwrap();
 
         assert_eq!(packet.packet_id, PacketId::Close);
         assert_eq!(packet.data, Bytes::from_static(b"Hello World"));
 
         let data = Bytes::from_static(b"1Hello World");
-        assert_eq!(Bytes::from(packet), data);
+        assert_eq!(PacketSerializer::default().encode(packet), data);
     }
 
     #[test]
     fn test_binary_packet() {
         // SGVsbG8= is the encoded string for 'Hello'
         let data = Bytes::from_static(b"bSGVsbG8=");
-        let packet = Packet::try_from(data.clone()).unwrap();
+        let packet = PacketSerializer::default().decode(data.clone()).unwrap();
 
         assert_eq!(packet.packet_id, PacketId::MessageBinary);
         assert_eq!(packet.data, Bytes::from_static(b"Hello"));
 
-        assert_eq!(Bytes::from(packet), data);
+        assert_eq!(PacketSerializer::default().encode(packet), data);
     }
 
     #[test]
     fn test_decode_payload() -> Result<()> {
         let data = Bytes::from_static(b"1Hello\x1e1HelloWorld");
-        let packets = Payload::try_from(data)?;
+        let packets = PacketSerializer::default().decode_payload(data)?;
 
         assert_eq!(packets[0].packet_id, PacketId::Close);
         assert_eq!(packets[0].data, Bytes::from_static(b"Hello"));
@@ -356,7 +297,7 @@ mod tests {
         assert_eq!(packets[1].data, Bytes::from_static(b"HelloWorld"));
 
         let data = "1Hello\x1e1HelloWorld".to_owned().into_bytes();
-        assert_eq!(Bytes::try_from(packets).unwrap(), data);
+        assert_eq!(PacketSerializer::default().encode_payload(packets), data);
 
         Ok(())
     }
@@ -364,7 +305,9 @@ mod tests {
     #[test]
     fn test_binary_payload() {
         let data = Bytes::from_static(b"bSGVsbG8=\x1ebSGVsbG9Xb3JsZA==\x1ebSGVsbG8=");
-        let packets = Payload::try_from(data.clone()).unwrap();
+        let packets = PacketSerializer::default()
+            .decode_payload(data.clone())
+            .unwrap();
 
         assert!(packets.len() == 3);
         assert_eq!(packets[0].packet_id, PacketId::MessageBinary);
@@ -374,12 +317,12 @@ mod tests {
         assert_eq!(packets[2].packet_id, PacketId::MessageBinary);
         assert_eq!(packets[2].data, Bytes::from_static(b"Hello"));
 
-        assert_eq!(Bytes::try_from(packets).unwrap(), data);
+        assert_eq!(PacketSerializer::default().encode_payload(packets), data);
     }
 
     #[test]
     fn test_packet_id_conversion_and_incompl_packet() -> Result<()> {
-        let sut = Packet::try_from(Bytes::from_static(b"4"));
+        let sut = PacketSerializer::default().decode(Bytes::from_static(b"4"));
         assert!(sut.is_err());
         let _sut = sut.unwrap_err();
         assert!(matches!(Error::IncompletePacket, _sut));

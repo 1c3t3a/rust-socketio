@@ -1,7 +1,6 @@
 use crate::error::{Error, Result};
 use crate::transport::Transport;
-use base64::{engine::general_purpose, Engine as _};
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use native_tls::TlsConnector;
 use reqwest::{
     blocking::{Client, ClientBuilder},

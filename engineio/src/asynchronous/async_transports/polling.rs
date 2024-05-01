@@ -1,8 +1,7 @@
 use adler32::adler32;
 use async_stream::try_stream;
 use async_trait::async_trait;
-use base64::{engine::general_purpose, Engine as _};
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use http::HeaderMap;
 use native_tls::TlsConnector;
@@ -101,7 +100,7 @@ impl Stream for PollingTransport {
 
 #[async_trait]
 impl AsyncTransport for PollingTransport {
-    async fn emit(&self, data: Bytes) -> Result<()> {
+    async fn emit(&self, data: Bytes, is_binary_att: bool) -> Result<()> {
         let status = self
             .client
             .post(self.address().await?)
