@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     asynchronous::{
         async_socket::Socket as InnerSocket,
@@ -22,7 +24,7 @@ pub struct ClientBuilder {
     url: Url,
     tls_config: Option<TlsConnector>,
     headers: Option<HeaderMap>,
-    serializer: PacketSerializer,
+    serializer: Arc<PacketSerializer>,
     handshake: Option<HandshakePacket>,
     on_error: OptionalCallback<String>,
     on_open: OptionalCallback<()>,
@@ -46,7 +48,7 @@ impl ClientBuilder {
             headers: None,
             tls_config: None,
             handshake: None,
-            serializer: PacketSerializer::default(),
+            serializer: Arc::new(PacketSerializer::default()),
             on_close: OptionalCallback::default(),
             on_data: OptionalCallback::default(),
             on_error: OptionalCallback::default(),
@@ -57,7 +59,7 @@ impl ClientBuilder {
 
     /// Specify Packet Serializer
     pub fn packet_serializer(mut self, packet_serializer: PacketSerializer) -> Self {
-        self.serializer = packet_serializer;
+        self.serializer = Arc::new(packet_serializer);
 
         self
     }
@@ -194,6 +196,7 @@ impl ClientBuilder {
         // SAFETY: handshake function called previously.
         Ok(Client::new(InnerSocket::new(
             transport.into(),
+            self.serializer,
             self.handshake.unwrap(),
             self.on_close,
             self.on_data,
@@ -235,6 +238,7 @@ impl ClientBuilder {
                 // SAFETY: handshake function called previously.
                 Ok(Client::new(InnerSocket::new(
                     transport.into(),
+                    self.serializer,
                     self.handshake.unwrap(),
                     self.on_close,
                     self.on_data,
@@ -260,6 +264,7 @@ impl ClientBuilder {
                 // SAFETY: handshake function called previously.
                 Ok(Client::new(InnerSocket::new(
                     transport.into(),
+                    self.serializer,
                     self.handshake.unwrap(),
                     self.on_close,
                     self.on_data,

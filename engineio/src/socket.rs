@@ -2,7 +2,7 @@ use crate::callback::OptionalCallback;
 use crate::transport::TransportType;
 
 use crate::error::{Error, Result};
-use crate::packet::{HandshakePacket, Packet, PacketId, PacketSerializer, Payload};
+use crate::packet::{HandshakePacket, Packet, PacketId, PacketSerializer};
 use bytes::Bytes;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -40,7 +40,7 @@ pub struct Socket {
 impl Socket {
     pub(crate) fn new(
         transport: TransportType,
-        serializer: PacketSerializer,
+        serializer: Arc<PacketSerializer>,
         handshake: HandshakePacket,
         on_close: OptionalCallback<()>,
         on_data: OptionalCallback<Bytes>,
@@ -57,7 +57,7 @@ impl Socket {
             on_open,
             on_packet,
             transport: Arc::new(transport),
-            serializer: Arc::new(serializer),
+            serializer,
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
@@ -225,8 +225,9 @@ impl Socket {
 impl Debug for Socket {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "EngineSocket(transport: {:?}, on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, connection_data: {:?})",
+            "EngineSocket(transport: {:?}, serializer: {:?}, on_error: {:?}, on_open: {:?}, on_close: {:?}, on_packet: {:?}, on_data: {:?}, connected: {:?}, last_ping: {:?}, last_pong: {:?}, connection_data: {:?})",
             self.transport,
+            self.serializer,
             self.on_error,
             self.on_open,
             self.on_close,

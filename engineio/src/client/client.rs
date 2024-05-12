@@ -11,6 +11,7 @@ use crate::ENGINE_IO_VERSION;
 use bytes::Bytes;
 use native_tls::TlsConnector;
 use std::fmt::Debug;
+use std::sync::Arc;
 use url::Url;
 
 /// An engine.io client that allows interaction with the connected engine.io
@@ -30,7 +31,7 @@ pub struct ClientBuilder {
     url: Url,
     tls_config: Option<TlsConnector>,
     headers: Option<HeaderMap>,
-    serializer: PacketSerializer,
+    serializer: Arc<PacketSerializer>,
     handshake: Option<HandshakePacket>,
     on_error: OptionalCallback<String>,
     on_open: OptionalCallback<()>,
@@ -54,7 +55,7 @@ impl ClientBuilder {
             headers: None,
             tls_config: None,
             handshake: None,
-            serializer: PacketSerializer::default(),
+            serializer: Arc::new(PacketSerializer::default()),
             on_close: OptionalCallback::default(),
             on_data: OptionalCallback::default(),
             on_error: OptionalCallback::default(),
@@ -65,7 +66,7 @@ impl ClientBuilder {
 
     /// Specify Packet Serializer
     pub fn packet_serializer(mut self, packet_serializer: PacketSerializer) -> Self {
-        self.serializer = packet_serializer;
+        self.serializer = Arc::new(packet_serializer);
 
         self
     }
@@ -192,7 +193,7 @@ impl ClientBuilder {
         Ok(Client {
             socket: InnerSocket::new(
                 transport.into(),
-                self.serializer,
+                self.serializer.clone(),
                 self.handshake.unwrap(),
                 self.on_close,
                 self.on_data,

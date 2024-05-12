@@ -15,7 +15,7 @@ use tokio::{runtime::Handle, sync::Mutex, time::Instant};
 use crate::{
     asynchronous::{callback::OptionalCallback, transport::AsyncTransportType},
     error::Result,
-    packet::{HandshakePacket, Payload},
+    packet::{HandshakePacket, PacketSerializer},
     Error, Packet, PacketId,
 };
 
@@ -24,6 +24,7 @@ pub struct Socket {
     handle: Handle,
     transport: Arc<Mutex<AsyncTransportType>>,
     transport_raw: AsyncTransportType,
+    serializer: Arc<PacketSerializer>,
     on_close: OptionalCallback<()>,
     on_data: OptionalCallback<Bytes>,
     on_error: OptionalCallback<String>,
@@ -39,6 +40,7 @@ pub struct Socket {
 impl Socket {
     pub(crate) fn new(
         transport: AsyncTransportType,
+        serializer: Arc<PacketSerializer>,
         handshake: HandshakePacket,
         on_close: OptionalCallback<()>,
         on_data: OptionalCallback<Bytes>,
@@ -57,6 +59,7 @@ impl Socket {
             on_packet,
             transport: Arc::new(Mutex::new(transport.clone())),
             transport_raw: transport,
+            serializer,
             connected: Arc::new(AtomicBool::default()),
             last_ping: Arc::new(Mutex::new(Instant::now())),
             last_pong: Arc::new(Mutex::new(Instant::now())),
@@ -117,9 +120,10 @@ impl Socket {
     }
 
     /// Helper method that parses bytes and returns an iterator over the elements.
-    fn parse_payload(bytes: Bytes) -> impl Stream<Item = Result<Packet>> {
+    fn parse_payload(bytes: Bytes, serializer: Arc<PacketSerializer>) -> impl Stream<Item = Result<Packet>> {
         try_stream! {
-            let payload = Payload::try_from(bytes);
+            // let payload = Payload::try_from(bytes);
+            let payload = serializer.decode_payload(bytes);
 
             for elem in payload?.into_iter() {
                 yield elem;
@@ -131,12 +135,13 @@ impl Socket {
     /// underlying transport types.
     fn stream(
         mut transport: AsyncTransportType,
+        serialzer: Arc<PacketSerializer>,
     ) -> Pin<Box<impl Stream<Item = Result<Packet>> + 'static + Send>> {
         // map the byte stream of the underlying transport
         // to a packet stream
         Box::pin(try_stream! {
             for await payload in transport.as_pin_box() {
-                for await packet in Self::parse_payload(payload?) {
+                for await packet in Self::parse_payload(payload?, serialzer.clone()) {
                     yield packet?;
                 }
             }
@@ -172,7 +177,8 @@ impl Socket {
         let data: Bytes = if is_binary {
             packet.data
         } else {
-            packet.into()
+            // packet.into()
+            self.serializer.encode(packet)
         };
 
         let lock = self.transport.lock().await;
@@ -249,7 +255,7 @@ impl Socket {
         &'a self,
     ) -> Pin<Box<dyn Stream<Item = Result<Packet>> + Send + 'a>> {
         stream::unfold(
-            Self::stream(self.transport_raw.clone()),
+            Self::stream(self.transport_raw.clone(), self.serializer.clone()),
             |mut stream| async {
                 // Wait for the next payload or until we should have received the next ping.
                 match tokio::time::timeout(
