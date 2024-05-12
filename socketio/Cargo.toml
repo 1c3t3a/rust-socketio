@@ -24,18 +24,18 @@ serde_json = "1.0"
 thiserror = "1.0"
 native-tls = "0.2.11"
 url = "2.4.1"
-tokio = { version = "1.36.0", optional = true }
+tokio = { version = "1.37.0", optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["sink"], optional = true }
 async-stream = { version = "0.3.5", optional = true }
-log = "0.4.20"
-serde = "1.0.197"
+log = "0.4.21"
+serde = "1.0.200"
 
 [dev-dependencies]
 cargo-tarpaulin = "0.18.5"
 serial_test = "3.0.0"
 
 [dev-dependencies.tokio]
-version = "1.36.0"
+version = "1.37.0"
 # we need the `#[tokio::test]` macro
 features = ["macros", "rt-multi-thread"]
 
