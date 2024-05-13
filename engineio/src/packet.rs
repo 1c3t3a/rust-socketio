@@ -91,6 +91,10 @@ impl PacketSerializer {
         let _ = buf.split_off(buf.len() - 1);
         buf.freeze()
     }
+
+    pub fn default_arc() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self::default())
+    }
 }
 
 impl Default for PacketSerializer {

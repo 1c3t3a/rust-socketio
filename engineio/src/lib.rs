@@ -97,7 +97,7 @@ pub mod error;
 
 pub use client::{Client, ClientBuilder};
 pub use error::Error;
-pub use packet::{Packet, PacketId};
+pub use packet::{Packet, PacketId, PacketSerializer};
 
 #[cfg(test)]
 pub(crate) mod test {

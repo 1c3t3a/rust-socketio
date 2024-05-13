@@ -1,6 +1,6 @@
 use std::{borrow::Cow, str::from_utf8, sync::Arc, task::Poll};
 
-use crate::{error::Result, Error, Packet, PacketId};
+use crate::{error::Result, Error, Packet, PacketId, PacketSerializer};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{
     ready,
@@ -22,16 +22,19 @@ type AsyncWebsocketReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStre
 pub(crate) struct AsyncWebsocketGeneralTransport {
     sender: Arc<Mutex<AsyncWebsocketSender>>,
     receiver: Arc<Mutex<AsyncWebsocketReceiver>>,
+    serializer: Arc<PacketSerializer>,
 }
 
 impl AsyncWebsocketGeneralTransport {
     pub(crate) async fn new(
         sender: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
         receiver: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+        serializer: Arc<PacketSerializer>,
     ) -> Self {
         AsyncWebsocketGeneralTransport {
             sender: Arc::new(Mutex::new(sender)),
             receiver: Arc::new(Mutex::new(receiver)),
+            serializer,
         }
     }
 
@@ -41,10 +44,11 @@ impl AsyncWebsocketGeneralTransport {
         let mut receiver = self.receiver.lock().await;
         let mut sender = self.sender.lock().await;
 
+        let ping_packet = Packet::new(PacketId::Ping, Bytes::from("probe"));
+        let ping_packet = self.serializer.encode(ping_packet);
+
         sender
-            .send(Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
-                Packet::new(PacketId::Ping, Bytes::from("probe")),
-            ))?)))
+            .send(Message::text(Cow::Borrowed(from_utf8(&ping_packet)?)))
             .await?;
 
         let msg = receiver
@@ -52,14 +56,18 @@ impl AsyncWebsocketGeneralTransport {
             .await
             .ok_or(Error::IllegalWebsocketUpgrade())??;
 
-        if msg.into_data() != Bytes::from(Packet::new(PacketId::Pong, Bytes::from("probe"))) {
+        let pong_packet = Packet::new(PacketId::Pong, Bytes::from("probe"));
+        let pong_packet = self.serializer.encode(pong_packet);
+
+        if msg.into_data() != pong_packet {
             return Err(Error::InvalidPacket());
         }
 
+        let upgrade_packet = Packet::new(PacketId::Upgrade, Bytes::from(""));
+        let upgrade_packet = self.serializer.encode(upgrade_packet);
+
         sender
-            .send(Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
-                Packet::new(PacketId::Upgrade, Bytes::from("")),
-            ))?)))
+            .send(Message::text(Cow::Borrowed(from_utf8(&upgrade_packet)?)))
             .await?;
 
         Ok(())

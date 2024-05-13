@@ -227,7 +227,9 @@ impl ClientBuilder {
 
         match self.url.scheme() {
             "http" | "ws" => {
-                let mut transport = WebsocketTransport::new(self.url.clone(), headers).await?;
+                let mut transport =
+                    WebsocketTransport::new(self.url.clone(), headers, self.serializer.clone())
+                        .await?;
 
                 if self.handshake.is_some() {
                     transport.upgrade().await?;
@@ -252,6 +254,7 @@ impl ClientBuilder {
                     self.url.clone(),
                     self.tls_config.clone(),
                     headers,
+                    self.serializer.clone(),
                 )
                 .await?;
 

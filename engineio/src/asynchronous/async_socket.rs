@@ -120,7 +120,10 @@ impl Socket {
     }
 
     /// Helper method that parses bytes and returns an iterator over the elements.
-    fn parse_payload(bytes: Bytes, serializer: Arc<PacketSerializer>) -> impl Stream<Item = Result<Packet>> {
+    fn parse_payload(
+        bytes: Bytes,
+        serializer: Arc<PacketSerializer>,
+    ) -> impl Stream<Item = Result<Packet>> {
         try_stream! {
             // let payload = Payload::try_from(bytes);
             let payload = serializer.decode_payload(bytes);

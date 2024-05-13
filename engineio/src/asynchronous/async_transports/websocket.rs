@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::asynchronous::transport::AsyncTransport;
 use crate::error::Result;
+use crate::PacketSerializer;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::stream::StreamExt;
@@ -27,7 +28,11 @@ pub struct WebsocketTransport {
 
 impl WebsocketTransport {
     /// Creates a new instance over a request that might hold additional headers and an URL.
-    pub async fn new(base_url: Url, headers: Option<HeaderMap>) -> Result<Self> {
+    pub async fn new(
+        base_url: Url,
+        headers: Option<HeaderMap>,
+        serializer: Arc<PacketSerializer>,
+    ) -> Result<Self> {
         let mut url = base_url;
         url.query_pairs_mut().append_pair("transport", "websocket");
         url.set_scheme("ws").unwrap();
@@ -41,7 +46,7 @@ impl WebsocketTransport {
         let (ws_stream, _) = connect_async(req).await?;
         let (sen, rec) = ws_stream.split();
 
-        let inner = AsyncWebsocketGeneralTransport::new(sen, rec).await;
+        let inner = AsyncWebsocketGeneralTransport::new(sen, rec, serializer).await;
         Ok(WebsocketTransport {
             inner,
             base_url: Arc::new(RwLock::new(url)),
@@ -118,7 +123,12 @@ mod test {
         let url = crate::test::engine_io_server()?.to_string()
             + "engine.io/?EIO="
             + &ENGINE_IO_VERSION.to_string();
-        WebsocketTransport::new(Url::from_str(&url[..])?, None).await
+        WebsocketTransport::new(
+            Url::from_str(&url[..])?,
+            None,
+            PacketSerializer::default_arc(),
+        )
+        .await
     }
 
     #[tokio::test]

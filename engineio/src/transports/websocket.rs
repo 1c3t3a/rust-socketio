@@ -4,7 +4,7 @@ use crate::{
     },
     error::Result,
     transport::Transport,
-    Error,
+    Error, PacketSerializer,
 };
 use bytes::Bytes;
 use http::HeaderMap;
@@ -20,12 +20,17 @@ pub struct WebsocketTransport {
 
 impl WebsocketTransport {
     /// Creates an instance of `WebsocketTransport`.
-    pub fn new(base_url: Url, headers: Option<HeaderMap>) -> Result<Self> {
+    pub fn new(
+        base_url: Url,
+        headers: Option<HeaderMap>,
+        serializer: Arc<PacketSerializer>,
+    ) -> Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
 
-        let inner = runtime.block_on(AsyncWebsocketTransport::new(base_url, headers))?;
+        let inner =
+            runtime.block_on(AsyncWebsocketTransport::new(base_url, headers, serializer))?;
 
         Ok(WebsocketTransport {
             runtime: Arc::new(runtime),
@@ -90,7 +95,11 @@ mod test {
         let url = crate::test::engine_io_server()?.to_string()
             + "engine.io/?EIO="
             + &ENGINE_IO_VERSION.to_string();
-        WebsocketTransport::new(Url::from_str(&url[..])?, None)
+        WebsocketTransport::new(
+            Url::from_str(&url[..])?,
+            None,
+            PacketSerializer::default_arc(),
+        )
     }
 
     #[test]

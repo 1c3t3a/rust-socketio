@@ -5,7 +5,7 @@ use crate::{
     },
     error::Result,
     transport::Transport,
-    Error,
+    Error, PacketSerializer,
 };
 use bytes::Bytes;
 use http::HeaderMap;
@@ -26,13 +26,14 @@ impl WebsocketSecureTransport {
         base_url: Url,
         tls_config: Option<TlsConnector>,
         headers: Option<HeaderMap>,
+        serializer: Arc<PacketSerializer>,
     ) -> Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
 
         let inner = runtime.block_on(AsyncWebsocketSecureTransport::new(
-            base_url, tls_config, headers,
+            base_url, tls_config, headers, serializer,
         ))?;
 
         Ok(WebsocketSecureTransport {
@@ -99,6 +100,7 @@ mod test {
             Url::from_str(&url[..])?,
             Some(crate::test::tls_connector()?),
             None,
+            PacketSerializer::default_arc(),
         )
     }
 

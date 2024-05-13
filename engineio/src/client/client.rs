@@ -65,8 +65,8 @@ impl ClientBuilder {
     }
 
     /// Specify Packet Serializer
-    pub fn packet_serializer(mut self, packet_serializer: PacketSerializer) -> Self {
-        self.serializer = Arc::new(packet_serializer);
+    pub fn packet_serializer(mut self, packet_serializer: Arc<PacketSerializer>) -> Self {
+        self.serializer = packet_serializer;
 
         self
     }
@@ -228,7 +228,7 @@ impl ClientBuilder {
 
         match url.scheme() {
             "http" | "ws" => {
-                let transport = WebsocketTransport::new(url, headers)?;
+                let transport = WebsocketTransport::new(url, headers, self.serializer.clone())?;
                 if self.handshake.is_some() {
                     transport.upgrade()?;
                 } else {
@@ -250,8 +250,12 @@ impl ClientBuilder {
                 })
             }
             "https" | "wss" => {
-                let transport =
-                    WebsocketSecureTransport::new(url, self.tls_config.clone(), headers)?;
+                let transport = WebsocketSecureTransport::new(
+                    url,
+                    self.tls_config.clone(),
+                    headers,
+                    self.serializer.clone(),
+                )?;
                 if self.handshake.is_some() {
                     transport.upgrade()?;
                 } else {

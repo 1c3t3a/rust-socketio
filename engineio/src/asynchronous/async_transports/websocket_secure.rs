@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::asynchronous::transport::AsyncTransport;
 use crate::error::Result;
+use crate::PacketSerializer;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::Stream;
@@ -34,6 +35,7 @@ impl WebsocketSecureTransport {
         base_url: Url,
         tls_config: Option<TlsConnector>,
         headers: Option<HeaderMap>,
+        serializer: Arc<PacketSerializer>,
     ) -> Result<Self> {
         let mut url = base_url;
         url.query_pairs_mut().append_pair("transport", "websocket");
@@ -61,7 +63,7 @@ impl WebsocketSecureTransport {
         .await?;
 
         let (sen, rec) = ws_stream.split();
-        let inner = AsyncWebsocketGeneralTransport::new(sen, rec).await;
+        let inner = AsyncWebsocketGeneralTransport::new(sen, rec, serializer).await;
 
         Ok(WebsocketSecureTransport {
             inner,
@@ -143,6 +145,7 @@ mod test {
             Url::from_str(&url[..])?,
             Some(crate::test::tls_connector()?),
             None,
+            PacketSerializer::default_arc(),
         )
         .await
     }
