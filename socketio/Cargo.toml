@@ -40,11 +40,16 @@ version = "1.37.0"
 features = ["macros", "rt-multi-thread"]
 
 [features]
-default = []
+default = ["async"]
 async-callbacks = ["rust_engineio/async-callbacks"]
 async = ["async-callbacks", "rust_engineio/async", "tokio", "futures-util", "async-stream"]
 
 [[example]]
 name = "async"
 path = "examples/async.rs"
+required-features = ["async"]
+
+[[example]]
+name = "async-transmitter"
+path = "examples/async_transmitter.rs"
 required-features = ["async"]

@@ -1,10 +1,9 @@
-use std::{ops::DerefMut, pin::Pin, sync::Arc};
-
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures_util::{future::BoxFuture, stream, Stream, StreamExt};
 use log::trace;
 use rand::{thread_rng, Rng};
 use serde_json::Value;
+use std::{ops::DerefMut, pin::Pin, sync::Arc};
 use tokio::{
     sync::RwLock,
     time::{sleep, Duration, Instant},
@@ -68,10 +67,13 @@ pub struct Client {
     /// The inner socket client to delegate the methods to.
     socket: Arc<RwLock<InnerSocket>>,
     outstanding_acks: Arc<RwLock<Vec<Ack>>>,
-    // namespace, for multiplexing messages
+    /// namespace, for multiplexing messages
     nsp: String,
-    // Data send in the opening packet (commonly used as for auth)
+    /// Data send in the opening packet (commonly used as for auth)
     auth: Option<serde_json::Value>,
+    /// Ideally a Arc<mpsc::Sender<T>> to send data to a receiver that is outside
+    /// the 'static lifetime restrictions of the callback handlers.
+    transmitter: Arc<dyn std::any::Any + Send + Sync>,
     builder: Arc<RwLock<ClientBuilder>>,
     disconnect_reason: Arc<RwLock<DisconnectReason>>,
 }
@@ -87,9 +89,66 @@ impl Client {
             nsp: builder.namespace.to_owned(),
             outstanding_acks: Arc::new(RwLock::new(Vec::new())),
             auth: builder.auth.clone(),
+            transmitter: builder.transmitter.clone().unwrap_or(Arc::new(())),
             builder: Arc::new(RwLock::new(builder)),
             disconnect_reason: Arc::new(RwLock::new(DisconnectReason::default())),
         })
+    }
+
+    /// Attempts to retrieve the transmitted data of type `D` from the transmitter.
+    ///
+    /// This function clones the transmitter and attempts to downcast it to an `Arc<D>`.
+    /// If the downcast is successful, it returns the cloned data wrapped in a `Result`.
+    /// If the downcast fails, indicating that the transmitter contains data of an incompatible type,
+    /// it returns an `Err` with an `Error::TransmitterTypeResolutionFailure`.
+    ///
+    /// # Generic Parameters
+    ///
+    /// - `D`: The type of data expected to be transmitted.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Arc<D>>`: A `Result` containing the cloned data if successful, or an error otherwise.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::sync::{Arc, mpsc};
+    /// use rust_socketio::{
+    ///     asynchronous::{Client, ClientBuilder},
+    ///     Payload,
+    /// };
+    ///
+    /// let callback = | payload: Payload, socket: Client | {
+    ///     async move {
+    ///         match payload {
+    ///             Payload::Text(values) => {
+    ///                 if let Some(value) = values.first() {
+    ///                     if value.is_string() {
+    ///                         let result = socket.try_transmitter::<mpsc::Sender<String>>();
+    ///
+    ///                         result
+    ///                             .map(|transmitter| {
+    ///                                 transmitter.send(String::from(value.as_str().unwrap()))
+    ///                             })
+    ///                             .map_err(|err| eprintln!("{}", err))
+    ///                             .ok();
+    ///                     }
+    ///                 }
+    ///             }
+    ///             Payload::Binary(_bin_data) => println!(),
+    ///             #[allow(deprecated)]
+    ///             Payload::String(str) => println!("Received: {}", str),
+    ///         }
+    ///     }
+    ///     .boxed()
+    /// })
+    /// ```
+    pub fn try_transitter<D: Send + Sync + 'static>(&self) -> Result<Arc<D>> {
+        match Arc::clone(&self.transmitter).downcast() {
+            Ok(data) => Ok(data),
+            Err(_) => Err(Error::TransmitterTypeResolutionFailure),
+        }
     }
 
     /// Connects the client to a server. Afterwards the `emit_*` methods can be
@@ -415,7 +474,7 @@ impl Client {
                             .await;
                         }
                         if let Some(ref attachments) = socket_packet.attachments {
-                            if let Some(payload) = attachments.get(0) {
+                            if let Some(payload) = attachments.first() {
                                 ack.callback.deref_mut()(
                                     Payload::Binary(payload.to_owned()),
                                     self.clone(),
@@ -445,7 +504,7 @@ impl Client {
         };
 
         if let Some(attachments) = &packet.attachments {
-            if let Some(binary_payload) = attachments.get(0) {
+            if let Some(binary_payload) = attachments.first() {
                 self.callback(&event, Payload::Binary(binary_payload.to_owned()))
                     .await?;
             }

@@ -1,3 +1,11 @@
+use super::{
+    callback::{
+        Callback, DynAsyncAnyCallback, DynAsyncCallback, DynAsyncReconnectSettingsCallback,
+    },
+    client::{Client, ReconnectSettings},
+};
+use crate::asynchronous::socket::Socket as InnerSocket;
+use crate::{error::Result, Event, Payload, TransportType};
 use futures_util::future::BoxFuture;
 use log::trace;
 use native_tls::TlsConnector;
@@ -6,17 +14,8 @@ use rust_engineio::{
     header::{HeaderMap, HeaderValue},
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 use url::Url;
-
-use crate::{error::Result, Event, Payload, TransportType};
-
-use super::{
-    callback::{
-        Callback, DynAsyncAnyCallback, DynAsyncCallback, DynAsyncReconnectSettingsCallback,
-    },
-    client::{Client, ReconnectSettings},
-};
-use crate::asynchronous::socket::Socket as InnerSocket;
 
 /// A builder class for a `socket.io` socket. This handles setting up the client and
 /// configuring the callback, the namespace and metadata of the socket. If no
@@ -38,6 +37,7 @@ pub struct ClientBuilder {
     pub(crate) max_reconnect_attempts: Option<u8>,
     pub(crate) reconnect_delay_min: u64,
     pub(crate) reconnect_delay_max: u64,
+    pub(crate) transmitter: Option<Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 impl ClientBuilder {
@@ -97,7 +97,52 @@ impl ClientBuilder {
             max_reconnect_attempts: None,
             reconnect_delay_min: 1000,
             reconnect_delay_max: 5000,
+            transmitter: None,
         }
+    }
+
+    /// Sets the data transmission object, ideally the standard libraries
+    /// multi-producer single consumer [`std::sync::mpsc::Sender`] should be used.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    ///
+    ///  let (sender, receiver) = mpsc::channel::<String>();
+    ///  let client = ClientBuilder::new(url)
+    ///      .namespace("/admin")
+    ///      .on("test", |payload: Payload, socket: SocketIOClient| {
+    ///          async move {
+    ///              match payload {
+    ///                  Payload::Text(values) => {
+    ///                      if let Some(value) = values.first() {
+    ///                          if value.is_string() {
+    ///                              let result = socket.try_transitter::<mpsc::Sender<String>>();
+    ///
+    ///                              result
+    ///                                  .map(|transmitter| {
+    ///                                      transmitter.send(String::from(value.as_str().unwrap()))
+    ///                                  })
+    ///                                  .map_err(|err| eprintln!("{}", err))
+    ///                                  .ok();
+    ///                          }
+    ///                      }
+    ///                  }
+    ///                  Payload::Binary(_bin_data) => println!(),
+    ///                  #[allow(deprecated)]
+    ///                  Payload::String(str) => println!("Received: {}", str),
+    ///              }
+    ///          }
+    ///          .boxed()
+    ///      })
+    ///      .transmitter(Arc::new(sender))
+    ///      .connect()
+    ///      .await
+    ///      .expect("Connection failed");
+    /// ```
+    pub fn transmitter<D: std::any::Any + Send + Sync>(mut self, data: Arc<D>) -> Self {
+        self.transmitter = Some(data);
+        self
     }
 
     /// Sets the target namespace of the client. The namespace should start
