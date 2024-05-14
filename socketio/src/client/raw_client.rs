@@ -41,6 +41,7 @@ pub struct RawClient {
     nsp: String,
     // Data send in the opening packet (commonly used as for auth)
     auth: Option<Value>,
+    transmitter: Arc<dyn std::any::Any + Send + Sync>,
 }
 
 impl RawClient {
@@ -54,6 +55,7 @@ impl RawClient {
         on: Arc<Mutex<HashMap<Event, Callback<SocketCallback>>>>,
         on_any: Arc<Mutex<Option<Callback<SocketAnyCallback>>>>,
         auth: Option<Value>,
+        transmitter: Arc<dyn std::any::Any + Send + Sync>,
     ) -> Result<Self> {
         Ok(RawClient {
             socket,
@@ -62,7 +64,56 @@ impl RawClient {
             on_any,
             outstanding_acks: Arc::new(Mutex::new(Vec::new())),
             auth,
+            transmitter,
         })
+    }
+
+    /// Attempts to retrieve the transmitted data of type `D` from the transmitter.
+    ///
+    /// This function clones the transmitter and attempts to downcast it to an `Arc<D>`.
+    /// If the downcast is successful, it returns the cloned data wrapped in a `Result`.
+    /// If the downcast fails, indicating that the transmitter contains data of an incompatible type,
+    /// it returns an `Err` with an `Error::TransmitterTypeResolutionFailure`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use rust_socketio::{
+    ///     client::Client, ClientBuilder,
+    ///     Error , Payload, RawClient,
+    /// };
+    /// use std::sync::mpsc;
+    ///
+    ///
+    /// let callback = |payload: Payload, socket: RawClient| {
+    ///     match payload {
+    ///         Payload::Text(values) => {
+    ///             if let Some(value) = values.first() {
+    ///                if value.is_string() {
+    ///                    socket.try_transmitter::<mpsc::Sender<String>>().map_or_else(
+    ///                        |err| eprintln!("{}", err),
+    ///                        |tx| {
+    ///                            tx.send(String::from(value.as_str().unwrap()))
+    ///                                .map_or_else(
+    ///                                    |err| eprintln!("{}", err),
+    ///                                    |_| println!("Data transmitted successfully"),
+    ///                                );
+    ///                        },
+    ///                    );
+    ///                }
+    ///            }
+    ///        }
+    ///        Payload::Binary(bin_data) => println!("{:#?}", bin_data),
+    ///        #[allow(deprecated)]
+    ///        Payload::String(str) => println!("Received: {}", str),
+    ///    }
+    /// };
+    /// ```
+    pub fn try_transmitter<D: Send + Sync + 'static>(&self) -> Result<Arc<D>> {
+        match Arc::clone(&self.transmitter).downcast() {
+            Ok(data) => Ok(data),
+            Err(_) => Err(Error::TransmitterTypeResolutionFailure),
+        }
     }
 
     /// Connects the client to a server. Afterwards the `emit_*` methods can be

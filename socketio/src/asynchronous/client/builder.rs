@@ -114,7 +114,7 @@ impl ClientBuilder {
     ///     Payload, Error,
     /// };
     ///
-    /// async fn connect(url: &str) -> Result<(), Error> {
+    /// async fn connect(url: &str) -> Result<Client, Error> {
     ///     let (sender, receiver) = mpsc::channel::<String>();
     ///
     ///     let client = ClientBuilder::new(url)
@@ -126,7 +126,7 @@ impl ClientBuilder {
     ///         .connect()
     ///         .await?;
     ///
-    ///     Ok(())
+    ///     Ok(client)
     /// }
     /// ```
     pub fn transmitter<D: std::any::Any + Send + Sync>(mut self, data: Arc<D>) -> Self {

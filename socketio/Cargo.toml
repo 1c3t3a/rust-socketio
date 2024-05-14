@@ -40,7 +40,7 @@ version = "1.37.0"
 features = ["macros", "rt-multi-thread"]
 
 [features]
-default = ["async"]
+default = []
 async-callbacks = ["rust_engineio/async-callbacks"]
 async = ["async-callbacks", "rust_engineio/async", "tokio", "futures-util", "async-stream"]
 
