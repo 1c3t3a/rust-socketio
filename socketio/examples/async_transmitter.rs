@@ -32,18 +32,26 @@ impl TransmitterClient {
                         Payload::Text(values) => {
                             if let Some(value) = values.first() {
                                 if value.is_string() {
-                                    let result = socket.try_transitter::<mpsc::Sender<String>>();
-
-                                    result
-                                        .map(|transmitter| {
-                                            transmitter.send(String::from(value.as_str().unwrap()))
-                                        })
-                                        .map_err(|err| eprintln!("{}", err))
-                                        .ok();
+                                    socket
+                                        .try_transmitter::<mpsc::Sender<String>>()
+                                        .map_or_else(
+                                            |err| eprintln!("{}", err),
+                                            |tx| {
+                                                tx.send(String::from(value.as_str().unwrap()))
+                                                    .map_or_else(
+                                                        |err| eprintln!("{}", err),
+                                                        |_| {
+                                                            println!(
+                                                                "Data transmitted successfully"
+                                                            )
+                                                        },
+                                                    );
+                                            },
+                                        );
                                 }
                             }
                         }
-                        Payload::Binary(_bin_data) => println!(),
+                        Payload::Binary(bin_data) => println!("Binary data: {:#?}", bin_data),
                         #[allow(deprecated)]
                         Payload::String(str) => println!("Received: {}", str),
                     }
@@ -100,10 +108,9 @@ async fn main() {
             }
         }
         Err(err) => {
-            eprintln!("{}", err);
+            eprintln!("Failed to connect to server: {}", err);
         }
     }
 
-    // Wait so we can see our response
     sleep(Duration::from_secs(2)).await;
 }

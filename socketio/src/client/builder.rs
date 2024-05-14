@@ -1,18 +1,16 @@
 use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
-use super::client::Client;
+use crate::client::callback::{SocketAnyCallback, SocketCallback};
+use crate::client::Client;
+use crate::error::Result;
+use crate::socket::Socket as InnerSocket;
 use crate::RawClient;
 use native_tls::TlsConnector;
 use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
 use rust_engineio::header::{HeaderMap, HeaderValue};
-use url::Url;
-
-use crate::client::callback::{SocketAnyCallback, SocketCallback};
-use crate::error::Result;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-
-use crate::socket::Socket as InnerSocket;
+use url::Url;
 
 /// Flavor of Engine.IO transport.
 #[derive(Clone, Eq, PartialEq)]

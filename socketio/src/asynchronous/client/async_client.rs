@@ -1,14 +1,3 @@
-use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
-use futures_util::{future::BoxFuture, stream, Stream, StreamExt};
-use log::trace;
-use rand::{thread_rng, Rng};
-use serde_json::Value;
-use std::{ops::DerefMut, pin::Pin, sync::Arc};
-use tokio::{
-    sync::RwLock,
-    time::{sleep, Duration, Instant},
-};
-
 use super::{
     ack::Ack,
     builder::ClientBuilder,
@@ -19,6 +8,16 @@ use crate::{
     error::{Error, Result},
     packet::{Packet, PacketId},
     Event, Payload,
+};
+use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
+use futures_util::{future::BoxFuture, stream, Stream, StreamExt};
+use log::trace;
+use rand::{thread_rng, Rng};
+use serde_json::Value;
+use std::{ops::DerefMut, pin::Pin, sync::Arc};
+use tokio::{
+    sync::RwLock,
+    time::{sleep, Duration, Instant},
 };
 
 #[derive(Default)]
@@ -113,9 +112,10 @@ impl Client {
     /// # Example
     ///
     /// ```no_run
+    /// use futures_util::FutureExt;
     /// use std::sync::{Arc, mpsc};
     /// use rust_socketio::{
-    ///     asynchronous::{Client, ClientBuilder},
+    ///     asynchronous::Client,
     ///     Payload,
     /// };
     ///
@@ -125,26 +125,28 @@ impl Client {
     ///             Payload::Text(values) => {
     ///                 if let Some(value) = values.first() {
     ///                     if value.is_string() {
-    ///                         let result = socket.try_transmitter::<mpsc::Sender<String>>();
-    ///
-    ///                         result
-    ///                             .map(|transmitter| {
-    ///                                 transmitter.send(String::from(value.as_str().unwrap()))
-    ///                             })
-    ///                             .map_err(|err| eprintln!("{}", err))
-    ///                             .ok();
+    ///                         socket.try_transmitter::<mpsc::Sender<String>>().map_or_else(
+    ///                             |err| eprintln!("{}", err),
+    ///                             |tx| {
+    ///                                 tx.send(String::from(value.as_str().unwrap()))
+    ///                                     .map_or_else(
+    ///                                         |err| eprintln!("{}", err),
+    ///                                         |_| println!("Data transmitted successfully"),
+    ///                                     );
+    ///                             },
+    ///                         );
     ///                     }
     ///                 }
     ///             }
-    ///             Payload::Binary(_bin_data) => println!(),
+    ///             Payload::Binary(bin_data) => println!("{:#?}", bin_data),
     ///             #[allow(deprecated)]
     ///             Payload::String(str) => println!("Received: {}", str),
     ///         }
     ///     }
     ///     .boxed()
-    /// })
+    /// };
     /// ```
-    pub fn try_transitter<D: Send + Sync + 'static>(&self) -> Result<Arc<D>> {
+    pub fn try_transmitter<D: Send + Sync + 'static>(&self) -> Result<Arc<D>> {
         match Arc::clone(&self.transmitter).downcast() {
             Ok(data) => Ok(data),
             Err(_) => Err(Error::TransmitterTypeResolutionFailure),
@@ -644,7 +646,7 @@ mod test {
 
     use crate::{
         asynchronous::{
-            client::{builder::ClientBuilder, client::Client},
+            client::{async_client::Client, builder::ClientBuilder},
             ReconnectSettings,
         },
         error::Result,

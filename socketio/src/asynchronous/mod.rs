@@ -2,9 +2,9 @@ mod client;
 mod generator;
 mod socket;
 
+pub use client::async_client::{Client, ReconnectSettings};
 #[cfg(feature = "async")]
 pub use client::builder::ClientBuilder;
-pub use client::client::{Client, ReconnectSettings};
 
 // re-export the macro
 pub use crate::{async_any_callback, async_callback};

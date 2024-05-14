@@ -85,7 +85,7 @@ pub mod client;
 /// Generic header map
 pub mod header;
 pub mod packet;
-pub(self) mod socket;
+mod socket;
 pub mod transport;
 pub mod transports;
 

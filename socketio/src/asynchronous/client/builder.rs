@@ -1,8 +1,8 @@
 use super::{
+    async_client::{Client, ReconnectSettings},
     callback::{
         Callback, DynAsyncAnyCallback, DynAsyncCallback, DynAsyncReconnectSettingsCallback,
     },
-    client::{Client, ReconnectSettings},
 };
 use crate::asynchronous::socket::Socket as InnerSocket;
 use crate::{error::Result, Event, Payload, TransportType};
@@ -107,38 +107,27 @@ impl ClientBuilder {
     /// # Example
     ///
     /// ```no_run
+    /// use futures_util::FutureExt;
+    /// use std::sync::{Arc, mpsc};
+    /// use rust_socketio::{
+    ///     asynchronous::{Client , ClientBuilder},
+    ///     Payload, Error,
+    /// };
     ///
-    ///  let (sender, receiver) = mpsc::channel::<String>();
-    ///  let client = ClientBuilder::new(url)
-    ///      .namespace("/admin")
-    ///      .on("test", |payload: Payload, socket: SocketIOClient| {
-    ///          async move {
-    ///              match payload {
-    ///                  Payload::Text(values) => {
-    ///                      if let Some(value) = values.first() {
-    ///                          if value.is_string() {
-    ///                              let result = socket.try_transitter::<mpsc::Sender<String>>();
+    /// async fn connect(url: &str) -> Result<(), Error> {
+    ///     let (sender, receiver) = mpsc::channel::<String>();
     ///
-    ///                              result
-    ///                                  .map(|transmitter| {
-    ///                                      transmitter.send(String::from(value.as_str().unwrap()))
-    ///                                  })
-    ///                                  .map_err(|err| eprintln!("{}", err))
-    ///                                  .ok();
-    ///                          }
-    ///                      }
-    ///                  }
-    ///                  Payload::Binary(_bin_data) => println!(),
-    ///                  #[allow(deprecated)]
-    ///                  Payload::String(str) => println!("Received: {}", str),
-    ///              }
-    ///          }
-    ///          .boxed()
-    ///      })
-    ///      .transmitter(Arc::new(sender))
-    ///      .connect()
-    ///      .await
-    ///      .expect("Connection failed");
+    ///     let client = ClientBuilder::new(url)
+    ///         .namespace("/admin")
+    ///         .on("error", |err, _| {
+    ///             async move { eprintln!("Error: {:#?}", err) }.boxed()
+    ///         })
+    ///         .transmitter(Arc::new(sender))
+    ///         .connect()
+    ///         .await?;
+    ///
+    ///     Ok(())
+    /// }
     /// ```
     pub fn transmitter<D: std::any::Any + Send + Sync>(mut self, data: Arc<D>) -> Self {
         self.transmitter = Some(data);

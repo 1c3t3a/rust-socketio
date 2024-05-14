@@ -2,7 +2,6 @@ use crate::error::{Error, Result};
 use crate::{Event, Payload};
 use bytes::Bytes;
 use serde::de::IgnoredAny;
-
 use std::convert::TryFrom;
 use std::fmt::Write;
 use std::str::from_utf8 as str_from_utf8;
@@ -34,10 +33,10 @@ impl Packet {
     /// Returns a packet for a payload, could be used for both binary and non binary
     /// events and acks. Convenience method.
     #[inline]
-    pub(crate) fn new_from_payload<'a>(
+    pub(crate) fn new_from_payload(
         payload: Payload,
         event: Event,
-        nsp: &'a str,
+        nsp: &str,
         id: Option<i32>,
     ) -> Result<Packet> {
         match payload {
@@ -216,7 +215,7 @@ impl TryFrom<&Bytes> for Packet {
     /// this member. This is done because the attachment is usually
     /// send in another packet.
     fn try_from(payload: &Bytes) -> Result<Packet> {
-        let mut payload = str_from_utf8(&payload).map_err(Error::InvalidUtf8)?;
+        let mut payload = str_from_utf8(payload).map_err(Error::InvalidUtf8)?;
         let mut packet = Packet::default();
 
         // packet_type
