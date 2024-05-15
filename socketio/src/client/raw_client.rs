@@ -72,7 +72,7 @@ impl RawClient {
     /// Attempts to fetch data given by [`ClientBuilder::data`]
     ///
     /// None is returned if data was not given or data does not match [`ClientBuilder::data`]
-    pub fn try_data<D: Send + Sync + 'static>(&self) -> Option<Arc<D>> {
+    pub fn custom_data<D: Send + Sync + 'static>(&self) -> Option<Arc<D>> {
         Arc::clone(&self.data).downcast().ok()
     }
 
