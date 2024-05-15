@@ -103,6 +103,8 @@ impl ClientBuilder {
         }
     }
 
+    /// Sets the client's custom data.
+    // TODO: write example usage
     pub fn set_data<D: std::any::Any + Send + Sync>(mut self, data: Arc<D>) -> Self {
         self.data = Some(data);
         self
