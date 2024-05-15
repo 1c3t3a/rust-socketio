@@ -94,7 +94,7 @@ impl Client {
         })
     }
 
-    /// Attempts to fetch data given by [`ClientBuilder::data`]
+    /// Attempts to fetch data given by [`ClientBuilder::set_data`]
     ///
     /// None is returned if data was not given or data does not match [`ClientBuilder::data`]
     pub fn custom_data<D: Send + Sync + 'static>(&self) -> Option<Arc<D>> {

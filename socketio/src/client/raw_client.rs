@@ -14,7 +14,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::socket::Socket as InnerSocket;
-use crate::asynchronous::ClientBuilder;
+use crate::client::builder::ClientBuilder;
 
 /// Represents an `Ack` as given back to the caller. Holds the internal `id` as
 /// well as the current ack'ed state. Holds data which will be accessible as
@@ -69,7 +69,7 @@ impl RawClient {
         })
     }
 
-    /// Attempts to fetch data given by [`ClientBuilder::data`]
+    /// Attempts to fetch data given by [`ClientBuilder::set_data`]
     ///
     /// None is returned if data was not given or data does not match [`ClientBuilder::data`]
     pub fn custom_data<D: Send + Sync + 'static>(&self) -> Option<Arc<D>> {
