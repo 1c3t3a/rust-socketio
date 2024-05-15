@@ -94,12 +94,6 @@ impl Client {
         })
     }
 
-    /// Fetches data given by [`ClientBuilder::data`]
-    pub fn data<D: Send + Sync + 'static>(&self) -> Arc<D> {
-        self.try_data()
-            .expect("Client::data does not match ClientBuilder::data")
-    }
-
     /// Attempts to fetch data given by [`ClientBuilder::data`]
     ///
     /// None is returned if data was not given or data does not match [`ClientBuilder::data`]
