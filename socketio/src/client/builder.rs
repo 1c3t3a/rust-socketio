@@ -103,7 +103,7 @@ impl ClientBuilder {
         }
     }
 
-    pub fn data<D: std::any::Any + Send + Sync>(mut self, data: Arc<D>) -> Self {
+    pub fn set_data<D: std::any::Any + Send + Sync>(mut self, data: Arc<D>) -> Self {
         self.data = Some(data);
         self
     }
