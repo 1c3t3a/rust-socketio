@@ -88,7 +88,7 @@ impl Debug for Client {
     }
 }
 
-#[cfg(all(test))]
+#[cfg(test)]
 mod test {
 
     use super::*;

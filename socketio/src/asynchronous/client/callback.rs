@@ -1,12 +1,10 @@
+use super::async_client::{Client, ReconnectSettings};
+use crate::{Event, Payload};
 use futures_util::future::BoxFuture;
 use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
 };
-
-use crate::{Event, Payload};
-
-use super::client::{Client, ReconnectSettings};
 
 /// Internal type, provides a way to store futures and return them in a boxed manner.
 pub(crate) type DynAsyncCallback =

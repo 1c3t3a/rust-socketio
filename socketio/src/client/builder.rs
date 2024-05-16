@@ -1,18 +1,16 @@
 use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
-use super::client::Client;
+use crate::client::callback::{SocketAnyCallback, SocketCallback};
+use crate::client::Client;
+use crate::error::Result;
+use crate::socket::Socket as InnerSocket;
 use crate::RawClient;
 use native_tls::TlsConnector;
 use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
 use rust_engineio::header::{HeaderMap, HeaderValue};
-use url::Url;
-
-use crate::client::callback::{SocketAnyCallback, SocketCallback};
-use crate::error::Result;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-
-use crate::socket::Socket as InnerSocket;
+use url::Url;
 
 /// Flavor of Engine.IO transport.
 #[derive(Clone, Eq, PartialEq)]
@@ -41,6 +39,7 @@ pub struct ClientBuilder {
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
     auth: Option<serde_json::Value>,
+    transmitter: Option<Arc<dyn std::any::Any + Send + Sync>>,
     pub(crate) reconnect: bool,
     pub(crate) reconnect_on_disconnect: bool,
     // None reconnect attempts represent infinity.
@@ -92,6 +91,7 @@ impl ClientBuilder {
             opening_headers: None,
             transport_type: TransportType::Any,
             auth: None,
+            transmitter: None,
             reconnect: true,
             reconnect_on_disconnect: false,
             // None means infinity
@@ -99,6 +99,35 @@ impl ClientBuilder {
             reconnect_delay_min: 1000,
             reconnect_delay_max: 5000,
         }
+    }
+
+    /// Sets the data transmission object, ideally the standard libraries
+    /// multi-producer single consumer [`std::sync::mpsc::Sender`] should be used.
+    ///
+    /// ```rust
+    /// use rust_socketio::{
+    ///     client::Client, ClientBuilder,
+    ///     Error , Payload, RawClient,
+    /// };
+    /// use std::sync::{Arc, mpsc};
+    ///
+    /// fn connect(url: &str) -> Result<Client, Error> {
+    ///     let (sender, receiver) = mpsc::channel::<serde_json::Value>();
+    ///
+    ///     let client = ClientBuilder::new(url)
+    ///         .namespace("/admin")
+    ///         .on("error", |err, _| {
+    ///             eprintln!("Error: {:#?}", err);
+    ///         })
+    ///         .transmitter(Arc::new(sender))
+    ///         .connect()?;
+    ///
+    ///     Ok(client)
+    /// }
+    /// ```
+    pub fn transmitter<D: std::any::Any + Send + Sync>(mut self, transmitter: Arc<D>) -> Self {
+        self.transmitter = Some(transmitter);
+        self
     }
 
     /// Sets the target namespace of the client. The namespace should start
@@ -365,6 +394,7 @@ impl ClientBuilder {
             self.on,
             self.on_any,
             self.auth,
+            self.transmitter.unwrap_or(Arc::new(())),
         )?;
         socket.connect()?;
 

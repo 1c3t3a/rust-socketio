@@ -1,11 +1,10 @@
 use super::super::socket::Socket as InnerSocket;
 use crate::callback::OptionalCallback;
-use crate::socket::DEFAULT_MAX_POLL_TIMEOUT;
-use crate::transport::Transport;
-
 use crate::error::{Error, Result};
 use crate::header::HeaderMap;
 use crate::packet::{HandshakePacket, Packet, PacketId};
+use crate::socket::DEFAULT_MAX_POLL_TIMEOUT;
+use crate::transport::Transport;
 use crate::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
 use crate::ENGINE_IO_VERSION;
 use bytes::Bytes;

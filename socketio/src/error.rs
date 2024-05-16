@@ -46,6 +46,8 @@ pub enum Error {
     InvalidAttachmentPacketType(u8),
     #[error("Underlying Engine.IO connection has closed")]
     StoppedEngineIoSocket,
+    #[error("Client::transmitter does not match the ClientBuilder::transmitter type")]
+    TransmitterTypeResolutionFailure,
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
