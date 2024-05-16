@@ -111,40 +111,32 @@ impl Client {
     ///
     /// # Example
     ///
-    /// ```no_run
-    /// use futures_util::FutureExt;
+    /// ```rust
+    /// use futures_util::future::{BoxFuture, FutureExt};
     /// use std::sync::{Arc, mpsc};
     /// use rust_socketio::{
     ///     asynchronous::Client,
     ///     Payload,
     /// };
     ///
-    /// let callback = | payload: Payload, socket: Client | {
+    /// fn event_handler<'event>(payload: Payload, socket: Client) -> BoxFuture<'event, ()> {
     ///     async move {
-    ///         match payload {
-    ///             Payload::Text(values) => {
-    ///                 if let Some(value) = values.first() {
-    ///                     if value.is_string() {
-    ///                         socket.try_transmitter::<mpsc::Sender<String>>().map_or_else(
-    ///                             |err| eprintln!("{}", err),
-    ///                             |tx| {
-    ///                                 tx.send(String::from(value.as_str().unwrap()))
-    ///                                     .map_or_else(
-    ///                                         |err| eprintln!("{}", err),
-    ///                                         |_| println!("Data transmitted successfully"),
-    ///                                     );
-    ///                             },
-    ///                         );
-    ///                     }
+    ///         if let Payload::Text(values) = payload {
+    ///             match socket.try_transmitter::<mpsc::Sender<Vec<serde_json::Value>>>() {
+    ///                 Ok(tx) => {
+    ///                     tx.send(values.to_owned()).map_or_else(
+    ///                         |err| eprintln!("{}", err),
+    ///                         |_| println!("Data transmitted successfully"),
+    ///                     );
+    ///                 }
+    ///                 Err(err) => {
+    ///                     eprintln!("{}", err);
     ///                 }
     ///             }
-    ///             Payload::Binary(bin_data) => println!("{:#?}", bin_data),
-    ///             #[allow(deprecated)]
-    ///             Payload::String(str) => println!("Received: {}", str),
     ///         }
     ///     }
     ///     .boxed()
-    /// };
+    /// }
     /// ```
     pub fn try_transmitter<D: Send + Sync + 'static>(&self) -> Result<Arc<D>> {
         match Arc::clone(&self.transmitter).downcast() {

@@ -106,16 +106,15 @@ impl ClientBuilder {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```rust
     /// use futures_util::FutureExt;
     /// use std::sync::{Arc, mpsc};
     /// use rust_socketio::{
-    ///     asynchronous::{Client , ClientBuilder},
-    ///     Payload, Error,
+    ///     asynchronous::{Client , ClientBuilder}, Error,
     /// };
     ///
     /// async fn connect(url: &str) -> Result<Client, Error> {
-    ///     let (sender, receiver) = mpsc::channel::<String>();
+    ///     let (sender, receiver) = mpsc::channel::<Vec<serde_json::Value>>();
     ///
     ///     let client = ClientBuilder::new(url)
     ///         .namespace("/admin")

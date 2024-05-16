@@ -77,37 +77,28 @@ impl RawClient {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```rust
     /// use rust_socketio::{
     ///     client::Client, ClientBuilder,
     ///     Error , Payload, RawClient,
     /// };
     /// use std::sync::mpsc;
     ///
-    ///
-    /// let callback = |payload: Payload, socket: RawClient| {
-    ///     match payload {
-    ///         Payload::Text(values) => {
-    ///             if let Some(value) = values.first() {
-    ///                if value.is_string() {
-    ///                    socket.try_transmitter::<mpsc::Sender<String>>().map_or_else(
-    ///                        |err| eprintln!("{}", err),
-    ///                        |tx| {
-    ///                            tx.send(String::from(value.as_str().unwrap()))
-    ///                                .map_or_else(
-    ///                                    |err| eprintln!("{}", err),
-    ///                                    |_| println!("Data transmitted successfully"),
-    ///                                );
-    ///                        },
-    ///                    );
-    ///                }
-    ///            }
-    ///        }
-    ///        Payload::Binary(bin_data) => println!("{:#?}", bin_data),
-    ///        #[allow(deprecated)]
-    ///        Payload::String(str) => println!("Received: {}", str),
-    ///    }
-    /// };
+    /// fn event_handler(payload: Payload, socket: RawClient) {
+    ///     if let Payload::Text(values) = payload {
+    ///         match socket.try_transmitter::<mpsc::Sender<Vec<serde_json::Value>>>() {
+    ///             Ok(tx) => {
+    ///                 tx.send(values.to_owned()).map_or_else(
+    ///                     |err| eprintln!("{}", err),
+    ///                     |_| println!("Data transmitted successfully"),
+    ///                 );
+    ///             }
+    ///             Err(err) => {
+    ///                 eprintln!("{}", err);
+    ///             }
+    ///         }
+    ///     }
+    /// }
     /// ```
     pub fn try_transmitter<D: Send + Sync + 'static>(&self) -> Result<Arc<D>> {
         match Arc::clone(&self.transmitter).downcast() {

@@ -104,7 +104,7 @@ impl ClientBuilder {
     /// Sets the data transmission object, ideally the standard libraries
     /// multi-producer single consumer [`std::sync::mpsc::Sender`] should be used.
     ///
-    /// ```no_run
+    /// ```rust
     /// use rust_socketio::{
     ///     client::Client, ClientBuilder,
     ///     Error , Payload, RawClient,
@@ -112,7 +112,7 @@ impl ClientBuilder {
     /// use std::sync::{Arc, mpsc};
     ///
     /// fn connect(url: &str) -> Result<Client, Error> {
-    ///     let (sender, receiver) = mpsc::channel::<String>();
+    ///     let (sender, receiver) = mpsc::channel::<serde_json::Value>();
     ///
     ///     let client = ClientBuilder::new(url)
     ///         .namespace("/admin")
@@ -125,8 +125,8 @@ impl ClientBuilder {
     ///     Ok(client)
     /// }
     /// ```
-    pub fn transmitter<D: std::any::Any + Send + Sync>(mut self, data: Arc<D>) -> Self {
-        self.transmitter = Some(data);
+    pub fn transmitter<D: std::any::Any + Send + Sync>(mut self, transmitter: Arc<D>) -> Self {
+        self.transmitter = Some(transmitter);
         self
     }
 
