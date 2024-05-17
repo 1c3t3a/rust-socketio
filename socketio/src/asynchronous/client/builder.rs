@@ -5,7 +5,7 @@ use rust_engineio::{
     asynchronous::ClientBuilder as EngineIoClientBuilder,
     header::{HeaderMap, HeaderValue},
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use url::Url;
 
 use crate::{error::Result, Event, PacketSerializer, Payload, TransportType};
@@ -31,7 +31,7 @@ pub struct ClientBuilder {
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
-    packet_serializer: PacketSerializer,
+    packet_serializer: Arc<PacketSerializer>,
     pub(crate) auth: Option<serde_json::Value>,
     pub(crate) reconnect: bool,
     pub(crate) reconnect_on_disconnect: bool,
@@ -91,7 +91,7 @@ impl ClientBuilder {
             tls_config: None,
             opening_headers: None,
             transport_type: TransportType::default(),
-            packet_serializer: PacketSerializer::default(),
+            packet_serializer: PacketSerializer::default_arc(),
             auth: None,
             reconnect: true,
             reconnect_on_disconnect: false,
@@ -415,7 +415,7 @@ impl ClientBuilder {
     /// }
     /// ```
     pub fn packet_serializer(mut self, packet_serializer: PacketSerializer) -> Self {
-        self.packet_serializer = packet_serializer;
+        self.packet_serializer = Arc::new(packet_serializer);
 
         self
     }
@@ -462,7 +462,8 @@ impl ClientBuilder {
             url.set_path("/socket.io/");
         }
 
-        let mut builder = EngineIoClientBuilder::new(url);
+        let mut builder =
+            EngineIoClientBuilder::new(url).packet_serializer(self.packet_serializer.clone());
 
         if let Some(tls_config) = &self.tls_config {
             builder = builder.tls_config(tls_config.to_owned());

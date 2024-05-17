@@ -58,8 +58,8 @@ impl ClientBuilder {
     }
 
     /// Specify Packet Serializer
-    pub fn packet_serializer(mut self, packet_serializer: PacketSerializer) -> Self {
-        self.serializer = Arc::new(packet_serializer);
+    pub fn packet_serializer(mut self, packet_serializer: Arc<PacketSerializer>) -> Self {
+        self.serializer = packet_serializer;
 
         self
     }
