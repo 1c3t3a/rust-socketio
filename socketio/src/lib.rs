@@ -193,7 +193,8 @@ pub use error::Error;
 
 pub use {event::Event, payload::Payload};
 
-pub use client::{ClientBuilder, PacketSerializer, RawClient, TransportType};
+pub use rust_engineio::Error as EngineIOError;
+pub use client::{ClientBuilder, EngineIOPacket, PacketSerializer, RawClient, TransportType};
 
 // TODO: 0.4.0 remove
 #[deprecated(since = "0.3.0-alpha-2", note = "Socket renamed to Client")]

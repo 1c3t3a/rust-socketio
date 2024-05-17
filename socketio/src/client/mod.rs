@@ -1,7 +1,7 @@
 mod builder;
 mod raw_client;
 
-pub use builder::{ClientBuilder, PacketSerializer, TransportType};
+pub use builder::{ClientBuilder, EngineIOPacket, PacketSerializer, TransportType};
 pub use client::Client;
 pub use raw_client::RawClient;
 

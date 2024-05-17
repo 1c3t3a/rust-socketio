@@ -33,7 +33,7 @@ impl Default for TransportType {
     }
 }
 
-pub use rust_engineio::PacketSerializer;
+pub use rust_engineio::{Packet as EngineIOPacket, PacketSerializer};
 
 /// A builder class for a `socket.io` socket. This handles setting up the client and
 /// configuring the callback, the namespace and metadata of the socket. If no
