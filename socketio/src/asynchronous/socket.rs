@@ -1,7 +1,7 @@
 use super::generator::StreamGenerator;
 use crate::{
     error::Result,
-    packet::{Packet, PacketId},
+    packet::{Packet, PacketId, PacketParser},
     Error, Event, Payload,
 };
 use async_stream::try_stream;
@@ -24,16 +24,22 @@ pub(crate) struct Socket {
     engine_client: Arc<EngineClient>,
     connected: Arc<AtomicBool>,
     generator: StreamGenerator<Packet>,
+    packet_parser: PacketParser,
 }
 
 impl Socket {
     /// Creates an instance of `Socket`.
-    pub(super) fn new(engine_client: EngineClient) -> Result<Self> {
+    pub(super) fn new(engine_client: EngineClient, packet_parser: PacketParser) -> Result<Self> {
         let connected = Arc::new(AtomicBool::default());
         Ok(Socket {
             engine_client: Arc::new(engine_client.clone()),
             connected: connected.clone(),
-            generator: StreamGenerator::new(Self::stream(engine_client, connected)),
+            generator: StreamGenerator::new(Self::stream(
+                engine_client,
+                connected,
+                packet_parser.clone(),
+            )),
+            packet_parser,
         })
     }
 
@@ -68,7 +74,8 @@ impl Socket {
         }
 
         // the packet, encoded as an engine.io message packet
-        let engine_packet = EnginePacket::new(EnginePacketId::Message, Bytes::from(&packet));
+        let engine_packet =
+            EnginePacket::new(EnginePacketId::Message, self.packet_parser.encode(&packet));
         self.engine_client.emit(engine_packet).await?;
 
         if let Some(attachments) = packet.attachments {
@@ -92,6 +99,7 @@ impl Socket {
     fn stream(
         client: EngineClient,
         is_connected: Arc<AtomicBool>,
+        parser: PacketParser,
     ) -> Pin<Box<impl Stream<Item = Result<Packet>> + Send>> {
         Box::pin(try_stream! {
                 for await received_data in client.clone() {
@@ -100,7 +108,7 @@ impl Socket {
                     if packet.packet_id == EnginePacketId::Message
                         || packet.packet_id == EnginePacketId::MessageBinary
                     {
-                        let packet = Self::handle_engineio_packet(packet, client.clone()).await?;
+                        let packet = Self::handle_engineio_packet(packet, client.clone(), &parser).await?;
                         Self::handle_socketio_packet(&packet, is_connected.clone());
 
                         yield packet;
@@ -130,8 +138,9 @@ impl Socket {
     async fn handle_engineio_packet(
         packet: EnginePacket,
         mut client: EngineClient,
+        parser: &PacketParser,
     ) -> Result<Packet> {
-        let mut socket_packet = Packet::try_from(&packet.data)?;
+        let mut socket_packet = parser.decode(&packet.data)?;
 
         // Only handle attachments if there are any
         if socket_packet.attachment_count > 0 {
