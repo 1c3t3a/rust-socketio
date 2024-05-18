@@ -5,7 +5,6 @@ use crate::{
     Error, Event, Payload,
 };
 use async_stream::try_stream;
-use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use rust_engineio::{
     asynchronous::Client as EngineClient, Packet as EnginePacket, PacketId as EnginePacketId,

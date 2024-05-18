@@ -1,10 +1,10 @@
 use crate::error::{Error, Result};
+use crate::event::Event;
 use crate::packet::{Packet, PacketId, PacketParser};
+use crate::payload::Payload;
 use rust_engineio::{Client as EngineClient, Packet as EnginePacket, PacketId as EnginePacketId};
 use std::sync::{atomic::AtomicBool, Arc};
 use std::{fmt::Debug, sync::atomic::Ordering};
-
-use super::{event::Event, payload::Payload};
 
 /// Handles communication in the `socket.io` protocol.
 #[derive(Clone, Debug)]

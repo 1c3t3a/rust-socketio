@@ -1,7 +1,6 @@
 use crate::error::{Error, Result};
 use crate::{Event, Payload};
 use bytes::Bytes;
-use rust_engineio::packet;
 use serde::de::IgnoredAny;
 
 use std::convert::TryFrom;
