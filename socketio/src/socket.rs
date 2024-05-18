@@ -1,8 +1,6 @@
 use crate::error::{Error, Result};
-use crate::packet::{Packet, PacketId};
-use bytes::Bytes;
+use crate::packet::{Packet, PacketId, PacketParser};
 use rust_engineio::{Client as EngineClient, Packet as EnginePacket, PacketId as EnginePacketId};
-use std::convert::TryFrom;
 use std::sync::{atomic::AtomicBool, Arc};
 use std::{fmt::Debug, sync::atomic::Ordering};
 
@@ -11,18 +9,20 @@ use super::{event::Event, payload::Payload};
 /// Handles communication in the `socket.io` protocol.
 #[derive(Clone, Debug)]
 pub(crate) struct Socket {
-    //TODO: 0.4.0 refactor this
+    // TODO: 0.4.0 refactor this
     engine_client: Arc<EngineClient>,
     connected: Arc<AtomicBool>,
+    packet_parser: PacketParser,
 }
 
 impl Socket {
     /// Creates an instance of `Socket`.
 
-    pub(super) fn new(engine_client: EngineClient) -> Result<Self> {
+    pub(super) fn new(engine_client: EngineClient, packet_parser: PacketParser) -> Result<Self> {
         Ok(Socket {
             engine_client: Arc::new(engine_client),
             connected: Arc::new(AtomicBool::default()),
+            packet_parser,
         })
     }
 
@@ -57,7 +57,8 @@ impl Socket {
         }
 
         // the packet, encoded as an engine.io message packet
-        let engine_packet = EnginePacket::new(EnginePacketId::Message, Bytes::from(&packet));
+        let engine_packet =
+            EnginePacket::new(EnginePacketId::Message, self.packet_parser.encode(&packet));
         self.engine_client.emit(engine_packet)?;
 
         if let Some(attachments) = packet.attachments {
@@ -119,7 +120,7 @@ impl Socket {
 
     /// Handles new incoming engineio packets
     fn handle_engineio_packet(&self, packet: EnginePacket) -> Result<Packet> {
-        let mut socket_packet = Packet::try_from(&packet.data)?;
+        let mut socket_packet = self.packet_parser.decode(&packet.data)?;
 
         // Only handle attachments if there are any
         if socket_packet.attachment_count > 0 {

@@ -1,6 +1,7 @@
 use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
 use super::client::Client;
+use crate::packet::PacketParser;
 use crate::RawClient;
 use native_tls::TlsConnector;
 use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
@@ -40,6 +41,7 @@ pub struct ClientBuilder {
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
+    packet_parser: PacketParser,
     auth: Option<serde_json::Value>,
     pub(crate) reconnect: bool,
     pub(crate) reconnect_on_disconnect: bool,
@@ -91,6 +93,7 @@ impl ClientBuilder {
             tls_config: None,
             opening_headers: None,
             transport_type: TransportType::Any,
+            packet_parser: PacketParser::default(),
             auth: None,
             reconnect: true,
             reconnect_on_disconnect: false,
@@ -306,6 +309,13 @@ impl ClientBuilder {
         self
     }
 
+    /// Specifies how to parser Packet
+    pub fn packet_parser(mut self, packet_parser: PacketParser) -> Self {
+        self.packet_parser = packet_parser;
+
+        self
+    }
+
     /// Connects the socket to a certain endpoint. This returns a connected
     /// [`Client`] instance. This method returns an [`std::result::Result::Err`]
     /// value if something goes wrong during connection. Also starts a separate
@@ -357,7 +367,7 @@ impl ClientBuilder {
             TransportType::WebsocketUpgrade => builder.build_websocket_with_upgrade()?,
         };
 
-        let inner_socket = InnerSocket::new(engine_client)?;
+        let inner_socket = InnerSocket::new(engine_client, self.packet_parser.clone())?;
 
         let socket = RawClient::new(
             inner_socket,
