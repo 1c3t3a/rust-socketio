@@ -1,11 +1,13 @@
 use crate::error::{Error, Result};
 use crate::{Event, Payload};
 use bytes::Bytes;
+use rust_engineio::packet;
 use serde::de::IgnoredAny;
 
 use std::convert::TryFrom;
-use std::fmt::Write;
+use std::fmt::{Display, Write};
 use std::str::from_utf8 as str_from_utf8;
+use std::sync::Arc;
 
 /// An enumeration of the different `Packet` types in the `socket.io` protocol.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -28,6 +30,133 @@ pub struct Packet {
     pub id: Option<i32>,
     pub attachment_count: u8,
     pub attachments: Option<Vec<Bytes>>,
+}
+
+#[derive(Clone)]
+/// Use to serialize and deserialize packets
+///
+/// support [Custom parser](https://socket.io/docs/v4/custom-parser/)
+pub struct PacketParser {
+    encode: Arc<Box<dyn Fn(&Packet) -> Bytes>>,
+    decode: Arc<Box<dyn Fn(&Bytes) -> Result<Packet>>>,
+}
+
+impl Display for PacketParser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PacketSerializer")
+    }
+}
+
+impl PacketParser {
+    pub fn default() -> Self {
+        Self {
+            encode: Arc::new(Box::new(Self::default_encode)),
+            decode: Arc::new(Box::new(Self::default_decode)),
+        }
+    }
+
+    pub fn default_encode(packet: &Packet) -> Bytes {
+        // first the packet type
+        let mut buffer = String::new();
+        buffer.push((packet.packet_type as u8 + b'0') as char);
+
+        // eventually a number of attachments, followed by '-'
+        if let PacketId::BinaryAck | PacketId::BinaryEvent = packet.packet_type {
+            let _ = write!(buffer, "{}-", packet.attachment_count);
+        }
+
+        // if the namespace is different from the default one append it as well,
+        // followed by ','
+        if packet.nsp != "/" {
+            buffer.push_str(&packet.nsp);
+            buffer.push(',');
+        }
+
+        // if an id is present append it...
+        if let Some(id) = packet.id {
+            let _ = write!(buffer, "{id}");
+        }
+
+        if packet.attachments.is_some() {
+            let num = packet.attachment_count - 1;
+
+            // check if an event type is present
+            if let Some(event_type) = packet.data.as_ref() {
+                let _ = write!(
+                    buffer,
+                    "[{event_type},{{\"_placeholder\":true,\"num\":{num}}}]",
+                );
+            } else {
+                let _ = write!(buffer, "[{{\"_placeholder\":true,\"num\":{num}}}]");
+            }
+        } else if let Some(data) = packet.data.as_ref() {
+            buffer.push_str(data);
+        }
+
+        Bytes::from(buffer)
+    }
+
+    pub fn default_decode(payload: &Bytes) -> Result<Packet> {
+        let mut payload = str_from_utf8(&payload).map_err(Error::InvalidUtf8)?;
+        let mut packet = Packet::default();
+
+        // packet_type
+        let id_char = payload.chars().next().ok_or(Error::IncompletePacket())?;
+        packet.packet_type = PacketId::try_from(id_char)?;
+
+        payload = &payload[id_char.len_utf8()..];
+
+        // attachment_count
+        if let PacketId::BinaryAck | PacketId::BinaryEvent = packet.packet_type {
+            let (prefix, rest) = payload.split_once('-').ok_or(Error::IncompletePacket())?;
+            payload = rest;
+            packet.attachment_count = prefix.parse().map_err(|_| Error::InvalidPacket())?;
+        }
+
+        // namespace
+        if payload.starts_with('/') {
+            let (prefix, rest) = payload.split_once(',').ok_or(Error::IncompletePacket())?;
+            payload = rest;
+            packet.nsp.clear(); // clearing the default
+            packet.nsp.push_str(prefix);
+        }
+
+        // id
+        let Some((non_digit_idx, _)) = payload.char_indices().find(|(_, c)| !c.is_ascii_digit())
+        else {
+            return Ok(packet);
+        };
+
+        if non_digit_idx > 0 {
+            let (prefix, rest) = payload.split_at(non_digit_idx);
+            payload = rest;
+            packet.id = Some(prefix.parse().map_err(|_| Error::InvalidPacket())?);
+        }
+
+        // validate json
+        serde_json::from_str::<IgnoredAny>(payload).map_err(Error::InvalidJson)?;
+
+        match packet.packet_type {
+            PacketId::BinaryAck | PacketId::BinaryEvent => {
+                if payload.starts_with('[') && payload.ends_with(']') {
+                    payload = &payload[1..payload.len() - 1];
+                }
+
+                let mut str = payload.replace("{\"_placeholder\":true,\"num\":0}", "");
+
+                if str.ends_with(',') {
+                    str.pop();
+                }
+
+                if !str.is_empty() {
+                    packet.data = Some(str);
+                }
+            }
+            _ => packet.data = Some(payload.to_string()),
+        }
+
+        Ok(packet)
+    }
 }
 
 impl Packet {
