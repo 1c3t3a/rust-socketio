@@ -14,7 +14,7 @@ license = "MIT"
 all-features = true
 
 [dependencies]
-base64 = "0.21.5"
+base64 = "0.22.0"
 bytes = "1"
 reqwest = { version = "0.12.4", features = ["blocking", "native-tls", "stream"] }
 adler32 = "1.2.0"
