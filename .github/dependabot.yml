@@ -4,3 +4,9 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "monthly"
+    groups:
+      patches:
+        # Group cargo patch updates together to minimize PR management faff
+        applies-to: version-updates
+        update-types:
+        - patch
