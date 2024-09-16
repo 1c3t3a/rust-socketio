@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::asynchronous::client::callback::Callback;
+use crate::{asynchronous::client::callback::Callback, AckId};
 use tokio::time::Instant;
 
 use super::callback::DynAsyncCallback;
@@ -11,7 +11,7 @@ use super::callback::DynAsyncCallback;
 /// won't contain data.
 #[derive(Debug)]
 pub(crate) struct Ack {
-    pub id: i32,
+    pub id: AckId,
     pub timeout: Duration,
     pub time_started: Instant,
     pub callback: Callback<DynAsyncCallback>,

@@ -176,7 +176,7 @@ pub(crate) mod packet;
 /// Defines the types of payload (binary or string), that
 /// could be sent or received.
 pub mod payload;
-pub(self) mod socket;
+mod socket;
 
 /// Deprecated import since 0.3.0-alpha-2, use Error in the crate root instead.
 /// Contains the error type which will be returned with every result in this
@@ -194,6 +194,8 @@ pub use error::Error;
 pub use {event::Event, payload::Payload};
 
 pub use client::{ClientBuilder, RawClient, TransportType};
+
+pub use payload::AckId;
 
 // TODO: 0.4.0 remove
 #[deprecated(since = "0.3.0-alpha-2", note = "Socket renamed to Client")]

@@ -1,7 +1,7 @@
 use super::callback::Callback;
 use crate::packet::{Packet, PacketId};
-use crate::Error;
 pub(crate) use crate::{event::Event, payload::Payload};
+use crate::{AckId, Error};
 use rand::{thread_rng, Rng};
 use serde_json::Value;
 
@@ -21,7 +21,7 @@ use crate::socket::Socket as InnerSocket;
 /// won't contain data.
 #[derive(Debug)]
 pub struct Ack {
-    pub id: i32,
+    pub id: AckId,
     timeout: Duration,
     time_started: Instant,
     callback: Callback<SocketCallback>,
@@ -203,7 +203,7 @@ impl RawClient {
         E: Into<Event>,
         D: Into<Payload>,
     {
-        let id = thread_rng().gen_range(0..999);
+        let id = AckId::new(thread_rng().gen_range(0..999));
         let socket_packet =
             Packet::new_from_payload(data.into(), event.into(), &self.nsp, Some(id))?;
 
