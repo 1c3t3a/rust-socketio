@@ -88,6 +88,43 @@ impl Packet {
             }
         }
     }
+
+    pub(crate) fn new_ack(payload: Payload, nsp: &str, id: i32) -> Self {
+        match payload {
+            Payload::Text(data) => Packet::new(
+                PacketId::Ack,
+                nsp.to_owned(),
+                Some(serde_json::Value::Array(data).to_string()),
+                Some(id),
+                0,
+                None,
+            ),
+            #[allow(deprecated)]
+            Payload::String(str_data) => {
+                let payload = if serde_json::from_str::<IgnoredAny>(&str_data).is_ok() {
+                    format!("[{str_data}]")
+                } else {
+                    format!("[{str_data:?}]")
+                };
+                Packet::new(
+                    PacketId::Ack,
+                    nsp.to_owned(),
+                    Some(payload),
+                    Some(id),
+                    0,
+                    None,
+                )
+            }
+            Payload::Binary(data) => Packet::new(
+                PacketId::BinaryAck,
+                nsp.to_owned(),
+                None,
+                Some(id),
+                1,
+                Some(vec![data]),
+            ),
+        }
+    }
 }
 
 impl Default for Packet {
@@ -605,7 +642,7 @@ mod test {
     #[test]
     fn test_illegal_packet_id() {
         let _sut = PacketId::try_from(42).expect_err("error!");
-        assert!(matches!(Error::InvalidPacketId(42 as char), _sut))
+        assert!(matches!(Error::InvalidPacketId(42u8 as char), _sut))
     }
 
     #[test]

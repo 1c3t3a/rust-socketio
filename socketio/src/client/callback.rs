@@ -6,8 +6,9 @@ use std::{
 use super::RawClient;
 use crate::{Event, Payload};
 
-pub(crate) type SocketCallback = Box<dyn FnMut(Payload, RawClient) + 'static + Send>;
-pub(crate) type SocketAnyCallback = Box<dyn FnMut(Event, Payload, RawClient) + 'static + Send>;
+pub(crate) type SocketCallback = Box<dyn FnMut(Payload, RawClient, Option<i32>) + 'static + Send>;
+pub(crate) type SocketAnyCallback =
+    Box<dyn FnMut(Event, Payload, RawClient, Option<i32>) + 'static + Send>;
 
 pub(crate) struct Callback<T> {
     inner: T,
@@ -22,7 +23,7 @@ impl Debug for Callback<SocketCallback> {
 }
 
 impl Deref for Callback<SocketCallback> {
-    type Target = dyn FnMut(Payload, RawClient) + 'static + Send;
+    type Target = dyn FnMut(Payload, RawClient, Option<i32>) + 'static + Send;
 
     fn deref(&self) -> &Self::Target {
         self.inner.as_ref()
@@ -36,12 +37,25 @@ impl DerefMut for Callback<SocketCallback> {
 }
 
 impl Callback<SocketCallback> {
-    pub(crate) fn new<T>(callback: T) -> Self
+    pub(crate) fn new_with_ack<T>(mut callback: T) -> Self
+    where
+        T: FnMut(Payload, RawClient, i32) + 'static + Send,
+    {
+        Callback {
+            inner: Box::new(move |p, c, a| {
+                if let Some(a) = a {
+                    callback(p, c, a)
+                }
+            }),
+        }
+    }
+
+    pub(crate) fn new<T>(mut callback: T) -> Self
     where
         T: FnMut(Payload, RawClient) + 'static + Send,
     {
         Callback {
-            inner: Box::new(callback),
+            inner: Box::new(move |p, c, _a| callback(p, c)),
         }
     }
 }
@@ -55,7 +69,7 @@ impl Debug for Callback<SocketAnyCallback> {
 }
 
 impl Deref for Callback<SocketAnyCallback> {
-    type Target = dyn FnMut(Event, Payload, RawClient) + 'static + Send;
+    type Target = dyn FnMut(Event, Payload, RawClient, Option<i32>) + 'static + Send;
 
     fn deref(&self) -> &Self::Target {
         self.inner.as_ref()
@@ -69,12 +83,25 @@ impl DerefMut for Callback<SocketAnyCallback> {
 }
 
 impl Callback<SocketAnyCallback> {
-    pub(crate) fn new<T>(callback: T) -> Self
+    pub(crate) fn new_with_ack<T>(mut callback: T) -> Self
+    where
+        T: FnMut(Event, Payload, RawClient, i32) + 'static + Send,
+    {
+        Callback {
+            inner: Box::new(move |e, p, c, a| {
+                if let Some(a) = a {
+                    callback(e, p, c, a)
+                }
+            }),
+        }
+    }
+
+    pub(crate) fn new<T>(mut callback: T) -> Self
     where
         T: FnMut(Event, Payload, RawClient) + 'static + Send,
     {
         Callback {
-            inner: Box::new(callback),
+            inner: Box::new(move |e, p, c, _a| callback(e, p, c)),
         }
     }
 }
