@@ -9,7 +9,6 @@ use bytes::Bytes;
 use futures_util::Stream;
 use futures_util::StreamExt;
 use http::HeaderMap;
-use native_tls::TlsConnector;
 use tokio::sync::RwLock;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::Connector;
@@ -17,6 +16,7 @@ use tungstenite::client::IntoClientRequest;
 use url::Url;
 
 use super::websocket_general::AsyncWebsocketGeneralTransport;
+use crate::TlsConfig;
 
 /// An asynchronous websocket transport type.
 /// This type only allows for secure websocket
@@ -32,7 +32,7 @@ impl WebsocketSecureTransport {
     /// Tls connector and an URL.
     pub(crate) async fn new(
         base_url: Url,
-        tls_config: Option<TlsConnector>,
+        tls_config: Option<TlsConfig>,
         headers: Option<HeaderMap>,
     ) -> Result<Self> {
         let mut url = base_url;
@@ -56,7 +56,12 @@ impl WebsocketSecureTransport {
             req,
             None,
             /*disable_nagle=*/ false,
+            #[cfg(all(feature = "_native-tls", not(feature = "_rustls-tls")))]
             tls_config.map(Connector::NativeTls),
+            #[cfg(feature = "_rustls-tls")]
+            tls_config.map(Arc::new).map(Connector::Rustls),
+            #[cfg(not(any(feature = "_native-tls", feature = "_rustls-tls")))]
+            None,
         )
         .await?;
 

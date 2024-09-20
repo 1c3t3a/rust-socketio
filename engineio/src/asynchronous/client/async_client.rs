@@ -95,7 +95,7 @@ mod test {
     use crate::{asynchronous::ClientBuilder, header::HeaderMap, packet::PacketId, Error};
     use bytes::Bytes;
     use futures_util::StreamExt;
-    use native_tls::TlsConnector;
+    use crate::TlsConfig;
     use url::Url;
 
     /// The purpose of this test is to check whether the Client is properly cloneable or not.
@@ -384,7 +384,7 @@ mod test {
 
         let _ = builder(url.clone())
             .tls_config(
-                TlsConnector::builder()
+                TlsConfig::builder()
                     .danger_accept_invalid_certs(true)
                     .build()
                     .unwrap(),

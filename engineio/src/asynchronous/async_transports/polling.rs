@@ -5,7 +5,6 @@ use base64::{engine::general_purpose, Engine as _};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{Stream, StreamExt};
 use http::HeaderMap;
-use native_tls::TlsConnector;
 use reqwest::{Client, ClientBuilder, Response};
 use std::fmt::Debug;
 use std::time::SystemTime;
@@ -15,6 +14,7 @@ use url::Url;
 
 use crate::asynchronous::generator::StreamGenerator;
 use crate::{asynchronous::transport::AsyncTransport, error::Result, Error};
+use crate::TlsConfig;
 
 /// An asynchronous polling type. Makes use of the nonblocking reqwest types and
 /// methods.
@@ -28,7 +28,7 @@ pub struct PollingTransport {
 impl PollingTransport {
     pub fn new(
         base_url: Url,
-        tls_config: Option<TlsConnector>,
+        tls_config: Option<TlsConfig>,
         opening_headers: Option<HeaderMap>,
     ) -> Self {
         let client = match (tls_config, opening_headers) {

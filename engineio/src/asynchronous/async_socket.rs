@@ -13,48 +13,56 @@ use futures_util::{stream, Stream, StreamExt};
 use tokio::{runtime::Handle, sync::Mutex, time::Instant};
 
 use crate::{
-    asynchronous::{callback::OptionalCallback, transport::AsyncTransportType},
+    asynchronous::transport::AsyncTransportType,
     error::Result,
     packet::{HandshakePacket, Payload},
     Error, Packet, PacketId,
 };
+#[cfg(feature = "async-callbacks")]
+use super::callback::OptionalCallback;
 
 #[derive(Clone)]
 pub struct Socket {
     handle: Handle,
     transport: Arc<Mutex<AsyncTransportType>>,
     transport_raw: AsyncTransportType,
-    on_close: OptionalCallback<()>,
-    on_data: OptionalCallback<Bytes>,
-    on_error: OptionalCallback<String>,
-    on_open: OptionalCallback<()>,
-    on_packet: OptionalCallback<Packet>,
     connected: Arc<AtomicBool>,
     last_ping: Arc<Mutex<Instant>>,
     last_pong: Arc<Mutex<Instant>>,
     connection_data: Arc<HandshakePacket>,
     max_ping_timeout: u64,
+    // Bellow are the fields that are only used when the async-callbacks feature is enabled.
+    #[cfg(feature = "async-callbacks")]
+    on_close: OptionalCallback<()>,
+    #[cfg(feature = "async-callbacks")]
+    on_data: OptionalCallback<Bytes>,
+    #[cfg(feature = "async-callbacks")]
+    on_error: OptionalCallback<String>,
+    #[cfg(feature = "async-callbacks")]
+    on_open: OptionalCallback<()>,
+    #[cfg(feature = "async-callbacks")]
+    on_packet: OptionalCallback<Packet>,
 }
 
 impl Socket {
     pub(crate) fn new(
         transport: AsyncTransportType,
         handshake: HandshakePacket,
+        #[cfg(feature = "async-callbacks")]
         on_close: OptionalCallback<()>,
+        #[cfg(feature = "async-callbacks")]
         on_data: OptionalCallback<Bytes>,
+        #[cfg(feature = "async-callbacks")]
         on_error: OptionalCallback<String>,
+        #[cfg(feature = "async-callbacks")]
         on_open: OptionalCallback<()>,
+        #[cfg(feature = "async-callbacks")]
         on_packet: OptionalCallback<Packet>,
     ) -> Self {
         let max_ping_timeout = handshake.ping_interval + handshake.ping_timeout;
 
         Socket {
             handle: Handle::current(),
-            on_close,
-            on_data,
-            on_error,
-            on_open,
-            on_packet,
             transport: Arc::new(Mutex::new(transport.clone())),
             transport_raw: transport,
             connected: Arc::new(AtomicBool::default()),
@@ -62,6 +70,16 @@ impl Socket {
             last_pong: Arc::new(Mutex::new(Instant::now())),
             connection_data: Arc::new(handshake),
             max_ping_timeout,
+            #[cfg(feature = "async-callbacks")]
+            on_close,
+            #[cfg(feature = "async-callbacks")]
+            on_data,
+            #[cfg(feature = "async-callbacks")]
+            on_error,
+            #[cfg(feature = "async-callbacks")]
+            on_open,
+            #[cfg(feature = "async-callbacks")]
+            on_packet,
         }
     }
 
@@ -71,6 +89,7 @@ impl Socket {
         // SAFETY: Has valid handshake due to type
         self.connected.store(true, Ordering::Release);
 
+        #[cfg(feature = "async-callbacks")]
         if let Some(on_open) = self.on_open.as_ref() {
             let on_open = on_open.clone();
             self.handle.spawn(async move { on_open(()).await });
@@ -85,18 +104,22 @@ impl Socket {
         Ok(())
     }
 
-    /// A helper method that distributes
+    /// A helper method that distributes the incoming packets to the appropriate callbacks.
     pub(super) async fn handle_incoming_packet(&self, packet: Packet) -> Result<()> {
         // check for the appropriate action or callback
+        #[cfg(feature = "async-callbacks")]
         self.handle_packet(packet.clone());
         match packet.packet_id {
             PacketId::MessageBinary => {
+                #[cfg(feature = "async-callbacks")]
                 self.handle_data(packet.data.clone());
             }
             PacketId::Message => {
+                #[cfg(feature = "async-callbacks")]
                 self.handle_data(packet.data.clone());
             }
             PacketId::Close => {
+                #[cfg(feature = "async-callbacks")]
                 self.handle_close();
             }
             PacketId::Upgrade => {
@@ -144,6 +167,7 @@ impl Socket {
     }
 
     pub async fn disconnect(&self) -> Result<()> {
+        #[cfg(feature = "async-callbacks")]
         if let Some(on_close) = self.on_close.as_ref() {
             let on_close = on_close.clone();
             self.handle.spawn(async move { on_close(()).await });
@@ -188,12 +212,16 @@ impl Socket {
 
     /// Calls the error callback with a given message.
     #[inline]
+    #[cfg(feature = "async-callbacks")]
     fn call_error_callback(&self, text: String) {
         if let Some(on_error) = self.on_error.as_ref() {
             let on_error = on_error.clone();
             self.handle.spawn(async move { on_error(text).await });
         }
     }
+
+    #[cfg(not(feature = "async-callbacks"))]
+    fn call_error_callback(&self, _text: String) {}
 
     // Check if the underlying transport client is connected.
     pub(crate) fn is_connected(&self) -> bool {
@@ -221,6 +249,7 @@ impl Socket {
         }
     }
 
+    #[cfg(feature = "async-callbacks")]
     pub(crate) fn handle_packet(&self, packet: Packet) {
         if let Some(on_packet) = self.on_packet.as_ref() {
             let on_packet = on_packet.clone();
@@ -228,6 +257,7 @@ impl Socket {
         }
     }
 
+    #[cfg(feature = "async-callbacks")]
     pub(crate) fn handle_data(&self, data: Bytes) {
         if let Some(on_data) = self.on_data.as_ref() {
             let on_data = on_data.clone();
@@ -235,6 +265,7 @@ impl Socket {
         }
     }
 
+    #[cfg(feature = "async-callbacks")]
     pub(crate) fn handle_close(&self) {
         if let Some(on_close) = self.on_close.as_ref() {
             let on_close = on_close.clone();
@@ -278,17 +309,22 @@ impl Socket {
 #[cfg_attr(tarpaulin, ignore)]
 impl Debug for Socket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Socket")
+        let mut debug = f.debug_struct("Socket");
+        let debug = debug
             .field("transport", &self.transport)
+            .field("connected", &self.connected)
+            .field("last_ping", &self.last_ping)
+            .field("last_pong", &self.last_pong)
+            .field("connection_data", &self.connection_data);
+
+        #[cfg(feature = "async-callbacks")]
+        debug
             .field("on_close", &self.on_close)
             .field("on_data", &self.on_data)
             .field("on_error", &self.on_error)
             .field("on_open", &self.on_open)
-            .field("on_packet", &self.on_packet)
-            .field("connected", &self.connected)
-            .field("last_ping", &self.last_ping)
-            .field("last_pong", &self.last_pong)
-            .field("connection_data", &self.connection_data)
-            .finish()
+            .field("on_packet", &self.on_packet);
+        
+        debug.finish()
     }
 }

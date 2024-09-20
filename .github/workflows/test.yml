@@ -48,5 +48,14 @@ jobs:
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run testsuite
-        run: cargo test --verbose --features "async"
+      - name: Install cargo-all-features
+        run: cargo install cargo-all-features
+
+      - name: Run unit tests
+        run: cargo test-all-features --verbose --lib --examples
+      
+      - name: Run doc tests
+        run: cargo test-all-features --verbose --lib --examples --doc
+
+      - name: Run integration tests
+        run: cargo test --verbose --features "async" --benches --tests

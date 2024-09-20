@@ -1,9 +1,9 @@
 use futures_util::future::BoxFuture;
 use log::trace;
-use native_tls::TlsConnector;
 use rust_engineio::{
     asynchronous::ClientBuilder as EngineIoClientBuilder,
     header::{HeaderMap, HeaderValue},
+    TlsConfig,
 };
 use std::collections::HashMap;
 use url::Url;
@@ -28,7 +28,7 @@ pub struct ClientBuilder {
     pub(crate) on_any: Option<Callback<DynAsyncAnyCallback>>,
     pub(crate) on_reconnect: Option<Callback<DynAsyncReconnectSettingsCallback>>,
     pub(crate) namespace: String,
-    tls_config: Option<TlsConnector>,
+    tls_config: Option<TlsConfig>,
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
     pub(crate) auth: Option<serde_json::Value>,
@@ -285,7 +285,7 @@ impl ClientBuilder {
     ///         .await;
     /// }
     /// ```
-    pub fn tls_config(mut self, tls_config: TlsConnector) -> Self {
+    pub fn tls_config(mut self, tls_config: TlsConfig) -> Self {
         self.tls_config = Some(tls_config);
         self
     }

@@ -99,6 +99,22 @@ pub use client::{Client, ClientBuilder};
 pub use error::Error;
 pub use packet::{Packet, PacketId};
 
+// Re-export TLS configurations to make sockio integration easier
+#[cfg(all(feature = "_native-tls", not(feature = "_rustls-tls")))]
+#[doc(hidden)]
+pub use native_tls::TlsConnector as TlsConfig;
+#[doc(hidden)]
+#[cfg(feature = "_rustls-tls")]
+pub use rustls::ClientConfig as TlsConfig;
+
+// Both native-tls and rustls is not supported at the same time
+#[cfg(not(feature = "_fallback-tls"))]
+#[cfg(all(feature = "_native-tls", feature = "_rustls-tls"))]
+compile_error!("Both native-tls and rustls features are enabled. Please enable only one of them.");
+
+#[cfg(not(any(feature = "_native-tls", feature = "_rustls-tls")))]
+compile_error!("No TLS feature is enabled. Please enable either native-tls or rustls.");
+
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;

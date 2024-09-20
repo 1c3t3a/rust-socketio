@@ -2,9 +2,9 @@ use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
 use super::client::Client;
 use crate::RawClient;
-use native_tls::TlsConnector;
 use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
 use rust_engineio::header::{HeaderMap, HeaderValue};
+use rust_engineio::TlsConfig;
 use url::Url;
 
 use crate::client::callback::{SocketAnyCallback, SocketCallback};
@@ -37,7 +37,7 @@ pub struct ClientBuilder {
     on: Arc<Mutex<HashMap<Event, Callback<SocketCallback>>>>,
     on_any: Arc<Mutex<Option<Callback<SocketAnyCallback>>>>,
     namespace: String,
-    tls_config: Option<TlsConnector>,
+    tls_config: Option<TlsConfig>,
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
     auth: Option<serde_json::Value>,
@@ -227,7 +227,7 @@ impl ClientBuilder {
     ///     .connect();
     ///
     /// ```
-    pub fn tls_config(mut self, tls_config: TlsConnector) -> Self {
+    pub fn tls_config(mut self, tls_config: TlsConfig) -> Self {
         self.tls_config = Some(tls_config);
         self
     }
