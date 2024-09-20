@@ -55,7 +55,7 @@ jobs:
         run: cargo test-all-features --verbose --lib --examples
       
       - name: Run doc tests
-        run: cargo test-all-features --verbose --lib --examples --doc
+        run: cargo test-all-features --verbose --doc
 
       - name: Run integration tests
         run: cargo test --verbose --features "async" --benches --tests

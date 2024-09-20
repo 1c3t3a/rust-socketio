@@ -3,12 +3,11 @@ use log::trace;
 use rust_engineio::{
     asynchronous::ClientBuilder as EngineIoClientBuilder,
     header::{HeaderMap, HeaderValue},
-    TlsConfig,
 };
 use std::collections::HashMap;
 use url::Url;
 
-use crate::{error::Result, Event, Payload, TransportType};
+use crate::{error::Result, Event, Payload, TransportType, TlsConfig};
 
 use super::{
     callback::{

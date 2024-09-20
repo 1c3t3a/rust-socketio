@@ -30,6 +30,10 @@ async-stream = "0.3.5"
 thiserror = "1.0"
 native-tls = { version = "^0.2", optional = true }
 rustls = { version = "^0.22", optional = true }
+# rustls-pemfile is only needed for unit tests
+rustls-pemfile = { version = "2", optional = true }
+# webpki is only needed for unit tests
+webpki = { version = "0.21", optional = true }
 url = "2.5.2"
 
 [dev-dependencies]
@@ -61,7 +65,7 @@ rustls-tls-native-roots = ["tokio-tungstenite/rustls-tls-native-roots", "_rustls
 rustls-tls-webpki-roots = ["tokio-tungstenite/rustls-tls-webpki-roots", "_rustls-tls"]
 # These features are for internal use only
 _native-tls = ["dep:native-tls", "reqwest/native-tls"]
-_rustls-tls = ["dep:rustls", "reqwest/rustls-tls"]
+_rustls-tls = ["dep:rustls", "reqwest/rustls-tls", "dep:rustls-pemfile", "dep:webpki"]
 
 # This is an internal feature to allow us to build using cargo-all-features and guaranteing that we always have one TLS implementation
 # Do not use this feature directly

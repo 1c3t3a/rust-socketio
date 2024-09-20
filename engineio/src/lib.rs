@@ -99,13 +99,14 @@ pub use client::{Client, ClientBuilder};
 pub use error::Error;
 pub use packet::{Packet, PacketId};
 
-// Re-export TLS configurations to make sockio integration easier
+// Re-export TLS configurations. This is the same as the socket.io logic.
+// Needed in both crates so the compiler can know this is a re-export.
 #[cfg(all(feature = "_native-tls", not(feature = "_rustls-tls")))]
 #[doc(hidden)]
-pub use native_tls::TlsConnector as TlsConfig;
+pub(crate) use native_tls::TlsConnector as TlsConfig;
 #[doc(hidden)]
 #[cfg(feature = "_rustls-tls")]
-pub use rustls::ClientConfig as TlsConfig;
+pub(crate) use rustls::ClientConfig as TlsConfig;
 
 // Both native-tls and rustls is not supported at the same time
 #[cfg(not(feature = "_fallback-tls"))]
@@ -118,24 +119,39 @@ compile_error!("No TLS feature is enabled. Please enable either native-tls or ru
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
+    #[cfg(feature = "_native-tls")]
     use native_tls::TlsConnector;
     const CERT_PATH: &str = "../ci/cert/ca.crt";
+    #[cfg(all(feature = "_native-tls", not(feature = "_rustls-tls")))]
     use native_tls::Certificate;
     use std::fs::File;
     use std::io::Read;
 
-    pub(crate) fn tls_connector() -> error::Result<TlsConnector> {
+    pub(crate) fn tls_connector() -> error::Result<TlsConfig> {
         let cert_path = std::env::var("CA_CERT_PATH").unwrap_or_else(|_| CERT_PATH.to_owned());
         let mut cert_file = File::open(cert_path)?;
         let mut buf = vec![];
         cert_file.read_to_end(&mut buf)?;
-        let cert: Certificate = Certificate::from_pem(&buf[..]).unwrap();
-        Ok(TlsConnector::builder()
-            // ONLY USE FOR TESTING!
-            .danger_accept_invalid_hostnames(true)
-            .add_root_certificate(cert)
-            .build()
-            .unwrap())
+        #[cfg(all(feature = "_native-tls", not(feature = "_rustls-tls")))]
+        {
+            let cert: Certificate = Certificate::from_pem(&buf[..]).unwrap();
+            Ok(TlsConnector::builder()
+                // ONLY USE FOR TESTING!
+                .danger_accept_invalid_hostnames(true)
+                .add_root_certificate(cert)
+                .build()
+                .unwrap())
+        }
+        #[cfg(feature = "_rustls-tls")]
+        {
+            let mut root_store = rustls::RootCertStore::empty();
+            for cert in rustls_pemfile::certs(&mut buf.as_slice()) {
+                root_store.add(cert.expect("Invalid PEM cert")).expect("Failed to add cert to store");
+            }
+            let mut config = rustls::ClientConfig::builder().with_root_certificates(root_store).with_no_client_auth();
+            config.enable_sni = false;
+            Ok(config)
+        }
     }
     /// The `engine.io` server for testing runs on port 4201
     const SERVER_URL: &str = "http://localhost:4201";

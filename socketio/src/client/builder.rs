@@ -1,10 +1,9 @@
 use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
 use super::client::Client;
-use crate::RawClient;
+use crate::{RawClient, TlsConfig};
 use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
 use rust_engineio::header::{HeaderMap, HeaderValue};
-use rust_engineio::TlsConfig;
 use url::Url;
 
 use crate::client::callback::{SocketAnyCallback, SocketCallback};

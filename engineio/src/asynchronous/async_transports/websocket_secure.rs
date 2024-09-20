@@ -61,7 +61,7 @@ impl WebsocketSecureTransport {
             #[cfg(feature = "_rustls-tls")]
             tls_config.map(Arc::new).map(Connector::Rustls),
             #[cfg(not(any(feature = "_native-tls", feature = "_rustls-tls")))]
-            None,
+            compile_error!("Either feature `_native-tls` or `_rustls-tls` must be enabled"),
         )
         .await?;
 

@@ -376,7 +376,7 @@ impl<'a> Iterator for Iter<'a> {
 #[cfg(test)]
 mod test {
 
-    use crate::packet::PacketId;
+    use crate::{packet::PacketId, test::tls_connector};
 
     use super::*;
 
@@ -649,10 +649,7 @@ mod test {
 
         let _ = builder(url.clone())
             .tls_config(
-                TlsConfig::builder()
-                    .danger_accept_invalid_certs(true)
-                    .build()
-                    .unwrap(),
+                tls_connector()?
             )
             .build()?;
         let _ = builder(url).headers(headers).build()?;

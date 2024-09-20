@@ -29,7 +29,7 @@ async-stream = { version = "0.3.5", optional = true }
 log = "0.4.22"
 serde = "1.0.209"
 native-tls = { version = "0.2", optional = true }
-rustls = { version = "0.23", optional = true }
+rustls = { version = "0.22", optional = true }
 getrandom = "0.2.10"
 
 [dev-dependencies]
@@ -60,6 +60,11 @@ _fallback-tls = ["native-tls", "rust_engineio/_fallback-tls"]
 name = "async"
 path = "examples/async.rs"
 required-features = ["async", "native-tls"]
+
+[[example]]
+name = "secure"
+path = "examples/secure.rs"
+required-features = ["native-tls"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
