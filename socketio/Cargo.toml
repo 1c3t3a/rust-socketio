@@ -23,7 +23,7 @@ adler32 = "1.2.0"
 serde_json = "1.0"
 thiserror = "1.0"
 url = "2.5.2"
-tokio = { version = "1.37.0", optional = true }
+tokio = { version = "1.40.0", optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["sink"], optional = true }
 async-stream = { version = "0.3.5", optional = true }
 log = "0.4.22"
@@ -37,7 +37,7 @@ cargo-tarpaulin = "0.18.5"
 serial_test = "3.0.0"
 
 [dev-dependencies.tokio]
-version = "1.37.0"
+version = "1.40.0"
 # we need the `#[tokio::test]` macro
 features = ["macros", "rt-multi-thread"]
 
