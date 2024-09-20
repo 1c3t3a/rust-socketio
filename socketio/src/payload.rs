@@ -1,3 +1,5 @@
+use std::{fmt, str::FromStr};
+
 use bytes::Bytes;
 
 /// A type which represents a `payload` in the `socket.io` context.
@@ -69,6 +71,29 @@ impl From<&'static [u8]> for Payload {
 impl From<Bytes> for Payload {
     fn from(bytes: Bytes) -> Self {
         Self::Binary(bytes)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+pub struct AckId(i32);
+
+impl AckId {
+    pub(crate) const fn new(id: i32) -> Self {
+        Self(id)
+    }
+}
+
+impl fmt::Display for AckId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for AckId {
+    type Err = <i32 as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse().map(Self)
     }
 }
 

@@ -1,7 +1,7 @@
 use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
 use super::client::Client;
-use crate::RawClient;
+use crate::{AckId, RawClient};
 use native_tls::TlsConnector;
 use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
 use rust_engineio::header::{HeaderMap, HeaderValue};
@@ -174,6 +174,41 @@ impl ClientBuilder {
     where
         F: FnMut(Payload, RawClient) + 'static + Send,
     {
+        let callback = Callback::<SocketCallback>::new_no_ack(callback);
+        // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
+        self.on.lock().unwrap().insert(event.into(), callback);
+        self
+    }
+
+    /// Registers a new callback for a certain [`crate::event::Event`] that expects the client to
+    /// ack. The event could either be one of the common events like `message`, `error`, `open`,
+    /// `close` or a custom event defined by a string, e.g. `onPayment` or `foo`.
+    ///
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{ClientBuilder, Payload};
+    ///
+    /// let socket = ClientBuilder::new("http://localhost:4200/")
+    ///     .namespace("/admin")
+    ///     .on("test", |payload: Payload, client, ack_id| {
+    ///            match payload {
+    ///                Payload::Text(values) => println!("Received: {:#?}", values),
+    ///                Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///                // This payload type is deprecated, use Payload::Text instead
+    ///                Payload::String(str) => println!("Received: {}", str),
+    ///            }
+    ///            client.ack(ack_id, "received");
+    ///     })
+    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    ///     .connect();
+    ///
+    /// ```
+    // While present implementation doesn't require mut, it's reasonable to require mutability.
+    #[allow(unused_mut)]
+    pub fn on_with_ack<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
+    where
+        F: FnMut(Payload, RawClient, AckId) + 'static + Send,
+    {
         let callback = Callback::<SocketCallback>::new(callback);
         // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
         self.on.lock().unwrap().insert(event.into(), callback);
@@ -201,6 +236,36 @@ impl ClientBuilder {
     pub fn on_any<F>(mut self, callback: F) -> Self
     where
         F: FnMut(Event, Payload, RawClient) + 'static + Send,
+    {
+        let callback = Some(Callback::<SocketAnyCallback>::new_no_ack(callback));
+        // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held
+        *self.on_any.lock().unwrap() = callback;
+        self
+    }
+
+    /// Registers a Callback for all [`crate::event::Event::Custom`] and
+    /// [`crate::event::Event::Message`] that expects the client to ack.
+    ///
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{ClientBuilder, Payload};
+    ///
+    /// let client = ClientBuilder::new("http://localhost:4200/")
+    ///     .namespace("/admin")
+    ///     .on_any(|event, payload, client, ack_id| {
+    ///         if let Payload::String(str) = payload {
+    ///           println!("{} {}", String::from(event), str);
+    ///         }
+    ///         client.ack(ack_id, "received")
+    ///     })
+    ///     .connect();
+    ///
+    /// ```
+    // While present implementation doesn't require mut, it's reasonable to require mutability.
+    #[allow(unused_mut)]
+    pub fn on_any_with_ack<F>(mut self, callback: F) -> Self
+    where
+        F: FnMut(Event, Payload, RawClient, AckId) + 'static + Send,
     {
         let callback = Some(Callback::<SocketAnyCallback>::new(callback));
         // SAFETY: Lock is held for such amount of time no code paths lead to a panic while lock is held

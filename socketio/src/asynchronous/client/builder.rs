@@ -17,6 +17,7 @@ use super::{
     client::{Client, ReconnectSettings},
 };
 use crate::asynchronous::socket::Socket as InnerSocket;
+use crate::AckId;
 
 /// A builder class for a `socket.io` socket. This handles setting up the client and
 /// configuring the callback, the namespace and metadata of the socket. If no
@@ -191,6 +192,51 @@ impl ClientBuilder {
             + Send
             + Sync,
     {
+        self.on.insert(
+            event.into(),
+            Callback::<DynAsyncCallback>::new_no_ack(callback),
+        );
+        self
+    }
+
+    /// Registers a new callback for a certain [`crate::event::Event`] that expects the client to
+    /// ack. The event could either be one of the common events like `message`, `error`, `open`,
+    /// `close` or a custom event defined by a string, e.g. `onPayment` or `foo`.
+    ///
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{asynchronous::{ClientBuilder, Client}, AckId, Payload};
+    /// use futures_util::FutureExt;
+    ///
+    ///  #[tokio::main]
+    /// async fn main() {
+    ///     let socket = ClientBuilder::new("http://localhost:4200/")
+    ///         .namespace("/admin")
+    ///         .on("test", |payload: Payload, client: Client, ack: AckId| {
+    ///             async move {
+    ///                 match payload {
+    ///                     Payload::Text(values) => println!("Received: {:#?}", values),
+    ///                     Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+    ///                     // This is deprecated, use Payload::Text instead
+    ///                     Payload::String(str) => println!("Received: {}", str),
+    ///                 }
+    ///                 client.ack(ack, "received").await;
+    ///             }
+    ///             .boxed()
+    ///         })
+    ///         .on("error", |err, _| async move { eprintln!("Error: {:#?}", err) }.boxed())
+    ///         .connect()
+    ///         .await;
+    /// }
+    ///
+    #[cfg(feature = "async-callbacks")]
+    pub fn on_with_ack<T: Into<Event>, F>(mut self, event: T, callback: F) -> Self
+    where
+        F: for<'a> std::ops::FnMut(Payload, Client, AckId) -> BoxFuture<'static, ()>
+            + 'static
+            + Send
+            + Sync,
+    {
         self.on
             .insert(event.into(), Callback::<DynAsyncCallback>::new(callback));
         self
@@ -257,6 +303,41 @@ impl ClientBuilder {
     pub fn on_any<F>(mut self, callback: F) -> Self
     where
         F: for<'a> FnMut(Event, Payload, Client) -> BoxFuture<'static, ()> + 'static + Send + Sync,
+    {
+        self.on_any = Some(Callback::<DynAsyncAnyCallback>::new_no_ack(callback));
+        self
+    }
+
+    /// Registers a Callback for all [`crate::event::Event::Custom`] and
+    /// [`crate::event::Event::Message`] that expect the client to ack.
+    ///
+    /// # Example
+    /// ```rust
+    /// use rust_socketio::{asynchronous::ClientBuilder, Payload};
+    /// use futures_util::future::FutureExt;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let client = ClientBuilder::new("http://localhost:4200/")
+    ///         .namespace("/admin")
+    ///         .on_any(|event, payload, client, ack| {
+    ///             async {
+    ///                 if let Payload::String(str) = payload {
+    ///                     println!("{}: {}", String::from(event), str);
+    ///                 }
+    ///                 client.ack(ack, "received").await;
+    ///             }.boxed()
+    ///         })
+    ///         .connect()
+    ///         .await;
+    /// }
+    /// ```
+    pub fn on_any_with_ack<F>(mut self, callback: F) -> Self
+    where
+        F: for<'a> FnMut(Event, Payload, Client, AckId) -> BoxFuture<'static, ()>
+            + 'static
+            + Send
+            + Sync,
     {
         self.on_any = Some(Callback::<DynAsyncAnyCallback>::new(callback));
         self

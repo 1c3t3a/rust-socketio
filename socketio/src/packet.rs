@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::{Event, Payload};
+use crate::{AckId, Event, Payload};
 use bytes::Bytes;
 use serde::de::IgnoredAny;
 
@@ -25,7 +25,7 @@ pub struct Packet {
     pub packet_type: PacketId,
     pub nsp: String,
     pub data: Option<String>,
-    pub id: Option<i32>,
+    pub id: Option<AckId>,
     pub attachment_count: u8,
     pub attachments: Option<Vec<Bytes>>,
 }
@@ -38,7 +38,7 @@ impl Packet {
         payload: Payload,
         event: Event,
         nsp: &'a str,
-        id: Option<i32>,
+        id: Option<AckId>,
     ) -> Result<Packet> {
         match payload {
             Payload::Binary(bin_data) => Ok(Packet::new(
@@ -88,6 +88,43 @@ impl Packet {
             }
         }
     }
+
+    pub(crate) fn new_ack(payload: Payload, nsp: &str, id: AckId) -> Self {
+        match payload {
+            Payload::Text(data) => Packet::new(
+                PacketId::Ack,
+                nsp.to_owned(),
+                Some(serde_json::Value::Array(data).to_string()),
+                Some(id),
+                0,
+                None,
+            ),
+            #[allow(deprecated)]
+            Payload::String(str_data) => {
+                let payload = if serde_json::from_str::<IgnoredAny>(&str_data).is_ok() {
+                    format!("[{str_data}]")
+                } else {
+                    format!("[{str_data:?}]")
+                };
+                Packet::new(
+                    PacketId::Ack,
+                    nsp.to_owned(),
+                    Some(payload),
+                    Some(id),
+                    0,
+                    None,
+                )
+            }
+            Payload::Binary(data) => Packet::new(
+                PacketId::BinaryAck,
+                nsp.to_owned(),
+                None,
+                Some(id),
+                1,
+                Some(vec![data]),
+            ),
+        }
+    }
 }
 
 impl Default for Packet {
@@ -132,7 +169,7 @@ impl Packet {
         packet_type: PacketId,
         nsp: String,
         data: Option<String>,
-        id: Option<i32>,
+        id: Option<AckId>,
         attachment_count: u8,
         attachments: Option<Vec<Bytes>>,
     ) -> Self {
@@ -360,7 +397,7 @@ mod test {
                 PacketId::Event,
                 "/admin".to_owned(),
                 Some(String::from("[\"project:delete\",123]")),
-                Some(456),
+                Some(AckId::new(10)),
                 0,
                 None,
             ),
@@ -376,7 +413,7 @@ mod test {
                 PacketId::Ack,
                 "/admin".to_owned(),
                 Some(String::from("[]")),
-                Some(456),
+                Some(AckId::new(10)),
                 0,
                 None,
             ),
@@ -426,7 +463,7 @@ mod test {
                 PacketId::BinaryEvent,
                 "/admin".to_owned(),
                 Some(String::from("\"project:delete\"")),
-                Some(456),
+                Some(AckId::new(10)),
                 1,
                 None,
             ),
@@ -442,7 +479,7 @@ mod test {
                 PacketId::BinaryAck,
                 "/admin".to_owned(),
                 None,
-                Some(456),
+                Some(AckId::new(10)),
                 1,
                 None,
             ),
@@ -511,7 +548,7 @@ mod test {
             PacketId::Event,
             "/admin".to_owned(),
             Some(String::from("[\"project:delete\",123]")),
-            Some(456),
+            Some(AckId::new(10)),
             0,
             None,
         );
@@ -527,7 +564,7 @@ mod test {
             PacketId::Ack,
             "/admin".to_owned(),
             Some(String::from("[]")),
-            Some(456),
+            Some(AckId::new(10)),
             0,
             None,
         );
@@ -573,7 +610,7 @@ mod test {
             PacketId::BinaryEvent,
             "/admin".to_owned(),
             Some(String::from("\"project:delete\"")),
-            Some(456),
+            Some(AckId::new(10)),
             1,
             Some(vec![Bytes::from_static(&[1, 2, 3])]),
         );
@@ -589,7 +626,7 @@ mod test {
             PacketId::BinaryAck,
             "/admin".to_owned(),
             None,
-            Some(456),
+            Some(AckId::new(10)),
             1,
             Some(vec![Bytes::from_static(&[3, 2, 1])]),
         );
@@ -605,7 +642,7 @@ mod test {
     #[test]
     fn test_illegal_packet_id() {
         let _sut = PacketId::try_from(42).expect_err("error!");
-        assert!(matches!(Error::InvalidPacketId(42 as char), _sut))
+        assert!(matches!(Error::InvalidPacketId(42u8 as char), _sut))
     }
 
     #[test]
@@ -635,7 +672,7 @@ mod test {
             payload.clone(),
             "other_event".into(),
             "other_namespace",
-            Some(10),
+            Some(AckId::new(10)),
         )
         .unwrap();
         assert_eq!(
@@ -644,7 +681,7 @@ mod test {
                 packet_type: PacketId::Event,
                 nsp: "other_namespace".to_owned(),
                 data: Some("[\"other_event\",\"test\"]".to_owned()),
-                id: Some(10),
+                id: Some(AckId::new(10)),
                 attachment_count: 0,
                 attachments: None
             }
@@ -657,15 +694,20 @@ mod test {
             serde_json::json!("String test"),
             serde_json::json!({"type":"object"}),
         ]);
-        let result =
-            Packet::new_from_payload(payload.clone(), "third_event".into(), "/", Some(10)).unwrap();
+        let result = Packet::new_from_payload(
+            payload.clone(),
+            "third_event".into(),
+            "/",
+            Some(AckId::new(10)),
+        )
+        .unwrap();
         assert_eq!(
             result,
             Packet {
                 packet_type: PacketId::Event,
                 nsp: "/".to_owned(),
                 data: Some("[\"third_event\",\"String test\",{\"type\":\"object\"}]".to_owned()),
-                id: Some(10),
+                id: Some(AckId::new(10)),
                 attachment_count: 0,
                 attachments: None
             }
