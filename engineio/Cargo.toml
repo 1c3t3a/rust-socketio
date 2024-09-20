@@ -16,19 +16,24 @@ all-features = true
 [dependencies]
 base64 = "0.22.0"
 bytes = "1"
-reqwest = { version = "0.12.4", features = ["blocking", "native-tls", "stream"] }
+reqwest = { version = "0.12.4", features = ["blocking", "stream"] }
 adler32 = "1.2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 http = "1.1.0"
-tokio-tungstenite = { version = "0.21.0", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.21.0", features = [] }
 tungstenite = "0.21.0"
 tokio = "1.40.0"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 async-trait = "0.1.81"
 async-stream = "0.3.5"
 thiserror = "1.0"
-native-tls = "0.2.12"
+native-tls = { version = "^0.2", optional = true }
+rustls = { version = "^0.22", optional = true }
+# rustls-pemfile is only needed for unit tests
+rustls-pemfile = { version = "2", optional = true }
+# webpki is only needed for unit tests
+webpki = { version = "0.21", optional = true }
 url = "2.5.2"
 
 [dev-dependencies]
@@ -51,6 +56,39 @@ harness = false
 bench = false
 
 [features]
-default = ["async"]
+default = ["async", "native-tls"]
 async-callbacks = []
 async = ["async-callbacks"]
+native-tls = ["tokio-tungstenite/native-tls", "_native-tls"]
+native-tls-vendored = ["tokio-tungstenite/native-tls-vendored", "_native-tls"]
+rustls-tls-native-roots = ["tokio-tungstenite/rustls-tls-native-roots", "_rustls-tls"]
+rustls-tls-webpki-roots = ["tokio-tungstenite/rustls-tls-webpki-roots", "_rustls-tls"]
+# These features are for internal use only
+_native-tls = ["dep:native-tls", "reqwest/native-tls"]
+_rustls-tls = ["dep:rustls", "reqwest/rustls-tls", "dep:rustls-pemfile", "dep:webpki"]
+
+# This is an internal feature to allow us to build using cargo-all-features and guaranteing that we always have one TLS implementation
+# Do not use this feature directly
+_fallback-tls = ["native-tls"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
+
+[package.metadata.cargo-all-features]
+skip_optional_dependencies = true
+skip_feature_sets = [
+    # Don't allow both at once
+    ["_native-tls", "_rustls-tls"],
+    # No need to compile with both native-tls options
+    ["native-tls", "native-tls-vendored"],
+    # No need to compile with both rustls options
+    ["rustls-tls-native-roots", "rustls-tls-webpki-roots"],
+    # Don't compile with both native-tls and rustls
+    ["native-tls", "rustls-tls-native-roots"],
+    ["native-tls", "rustls-tls-webpki-roots"],
+    ["native-tls-vendored", "rustls-tls-native-roots"],
+    ["native-tls-vendored", "rustls-tls-webpki-roots"],
+]
+always_include_features = ["_fallback-tls"]
+# Don't use the internal features in the build matrix
+denylist = ["_native-tls", "_rustls-tls"]

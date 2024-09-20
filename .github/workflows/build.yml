@@ -35,8 +35,11 @@ jobs:
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install cargo-all-features
+        run: cargo install cargo-all-features
+
       - name: Build
-        run: cargo build --verbose --all-features
+        run: cargo build-all-features --verbose
       - name: Linting
         run: cargo clippy --verbose --all-features
       - name: Check formatting

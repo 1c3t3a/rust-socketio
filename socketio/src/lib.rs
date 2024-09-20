@@ -199,6 +199,23 @@ pub use client::{ClientBuilder, RawClient, TransportType};
 #[deprecated(since = "0.3.0-alpha-2", note = "Socket renamed to Client")]
 pub use client::{ClientBuilder as SocketBuilder, RawClient as Socket};
 
+// Re-export TLS configurations. This is the same as the engine.io logic.
+// Needed here so it knows it's actually a re-import, not a new type.
+#[cfg(all(feature = "_native-tls", not(feature = "_rustls-tls")))]
+#[doc(hidden)]
+pub use native_tls::TlsConnector as TlsConfig;
+#[doc(hidden)]
+#[cfg(feature = "_rustls-tls")]
+pub use rustls::ClientConfig as TlsConfig;
+
+// Both native-tls and rustls is not supported at the same time
+#[cfg(not(feature = "_fallback-tls"))]
+#[cfg(all(feature = "_native-tls", feature = "_rustls-tls"))]
+compile_error!("Both native-tls and rustls features are enabled. Please enable only one of them.");
+
+#[cfg(not(any(feature = "_native-tls", feature = "_rustls-tls")))]
+compile_error!("No TLS feature is enabled. Please enable either native-tls or rustls.");
+
 #[cfg(test)]
 pub(crate) mod test {
     use url::Url;
