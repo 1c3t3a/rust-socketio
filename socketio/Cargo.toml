@@ -48,3 +48,8 @@ async = ["async-callbacks", "rust_engineio/async", "tokio", "futures-util", "asy
 name = "async"
 path = "examples/async.rs"
 required-features = ["async"]
+
+[[example]]
+name = "async-transmitter"
+path = "examples/async_transmitter.rs"
+required-features = ["async"]

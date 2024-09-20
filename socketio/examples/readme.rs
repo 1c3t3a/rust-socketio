@@ -1,5 +1,6 @@
 use rust_socketio::{ClientBuilder, Payload, RawClient};
 use serde_json::json;
+use std::thread::sleep;
 use std::time::Duration;
 
 fn main() {
@@ -44,6 +45,8 @@ fn main() {
     socket
         .emit_with_ack("test", json_payload, Duration::from_secs(2), ack_callback)
         .expect("Server unreachable");
+
+    sleep(Duration::from_secs(2));
 
     socket.disconnect().expect("Disconnect failed")
 }

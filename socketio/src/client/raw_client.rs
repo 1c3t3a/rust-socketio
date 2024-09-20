@@ -41,6 +41,7 @@ pub struct RawClient {
     nsp: String,
     // Data send in the opening packet (commonly used as for auth)
     auth: Option<Value>,
+    transmitter: Arc<dyn std::any::Any + Send + Sync>,
 }
 
 impl RawClient {
@@ -54,6 +55,7 @@ impl RawClient {
         on: Arc<Mutex<HashMap<Event, Callback<SocketCallback>>>>,
         on_any: Arc<Mutex<Option<Callback<SocketAnyCallback>>>>,
         auth: Option<Value>,
+        transmitter: Arc<dyn std::any::Any + Send + Sync>,
     ) -> Result<Self> {
         Ok(RawClient {
             socket,
@@ -62,7 +64,47 @@ impl RawClient {
             on_any,
             outstanding_acks: Arc::new(Mutex::new(Vec::new())),
             auth,
+            transmitter,
         })
+    }
+
+    /// Attempts to retrieve the transmitted data of type `D` from the transmitter.
+    ///
+    /// This function clones the transmitter and attempts to downcast it to an `Arc<D>`.
+    /// If the downcast is successful, it returns the cloned data wrapped in a `Result`.
+    /// If the downcast fails, indicating that the transmitter contains data of an incompatible type,
+    /// it returns an `Err` with an `Error::TransmitterTypeResolutionFailure`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use rust_socketio::{
+    ///     client::Client, ClientBuilder,
+    ///     Error , Payload, RawClient,
+    /// };
+    /// use std::sync::mpsc;
+    ///
+    /// fn event_handler(payload: Payload, socket: RawClient) {
+    ///     if let Payload::Text(values) = payload {
+    ///         match socket.try_transmitter::<mpsc::Sender<Vec<serde_json::Value>>>() {
+    ///             Ok(tx) => {
+    ///                 tx.send(values.to_owned()).map_or_else(
+    ///                     |err| eprintln!("{}", err),
+    ///                     |_| println!("Data transmitted successfully"),
+    ///                 );
+    ///             }
+    ///             Err(err) => {
+    ///                 eprintln!("{}", err);
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub fn try_transmitter<D: Send + Sync + 'static>(&self) -> Result<Arc<D>> {
+        match Arc::clone(&self.transmitter).downcast() {
+            Ok(data) => Ok(data),
+            Err(_) => Err(Error::TransmitterTypeResolutionFailure),
+        }
     }
 
     /// Connects the client to a server. Afterwards the `emit_*` methods can be
