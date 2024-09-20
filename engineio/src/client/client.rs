@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 use crate::header::HeaderMap;
 use crate::packet::{HandshakePacket, Packet, PacketId};
 use crate::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
-use crate::{ENGINE_IO_VERSION, TlsConfig};
+use crate::{TlsConfig, ENGINE_IO_VERSION};
 use bytes::Bytes;
 use std::convert::TryFrom;
 use std::convert::TryInto;

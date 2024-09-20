@@ -13,8 +13,8 @@ use tokio::sync::RwLock;
 use url::Url;
 
 use crate::asynchronous::generator::StreamGenerator;
-use crate::{asynchronous::transport::AsyncTransport, error::Result, Error};
 use crate::TlsConfig;
+use crate::{asynchronous::transport::AsyncTransport, error::Result, Error};
 
 /// An asynchronous polling type. Makes use of the nonblocking reqwest types and
 /// methods.

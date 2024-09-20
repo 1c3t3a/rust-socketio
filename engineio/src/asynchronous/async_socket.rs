@@ -12,14 +12,14 @@ use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
 use tokio::{runtime::Handle, sync::Mutex, time::Instant};
 
+#[cfg(feature = "async-callbacks")]
+use super::callback::OptionalCallback;
 use crate::{
     asynchronous::transport::AsyncTransportType,
     error::Result,
     packet::{HandshakePacket, Payload},
     Error, Packet, PacketId,
 };
-#[cfg(feature = "async-callbacks")]
-use super::callback::OptionalCallback;
 
 #[derive(Clone)]
 pub struct Socket {
@@ -48,16 +48,11 @@ impl Socket {
     pub(crate) fn new(
         transport: AsyncTransportType,
         handshake: HandshakePacket,
-        #[cfg(feature = "async-callbacks")]
-        on_close: OptionalCallback<()>,
-        #[cfg(feature = "async-callbacks")]
-        on_data: OptionalCallback<Bytes>,
-        #[cfg(feature = "async-callbacks")]
-        on_error: OptionalCallback<String>,
-        #[cfg(feature = "async-callbacks")]
-        on_open: OptionalCallback<()>,
-        #[cfg(feature = "async-callbacks")]
-        on_packet: OptionalCallback<Packet>,
+        #[cfg(feature = "async-callbacks")] on_close: OptionalCallback<()>,
+        #[cfg(feature = "async-callbacks")] on_data: OptionalCallback<Bytes>,
+        #[cfg(feature = "async-callbacks")] on_error: OptionalCallback<String>,
+        #[cfg(feature = "async-callbacks")] on_open: OptionalCallback<()>,
+        #[cfg(feature = "async-callbacks")] on_packet: OptionalCallback<Packet>,
     ) -> Self {
         let max_ping_timeout = handshake.ping_interval + handshake.ping_timeout;
 
@@ -324,7 +319,7 @@ impl Debug for Socket {
             .field("on_error", &self.on_error)
             .field("on_open", &self.on_open)
             .field("on_packet", &self.on_packet);
-        
+
         debug.finish()
     }
 }

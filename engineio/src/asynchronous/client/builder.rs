@@ -8,8 +8,7 @@ use crate::{
     error::Result,
     header::HeaderMap,
     packet::HandshakePacket,
-    Error, Packet, ENGINE_IO_VERSION,
-    TlsConfig,
+    Error, Packet, TlsConfig, ENGINE_IO_VERSION,
 };
 use bytes::Bytes;
 use futures_util::{future::BoxFuture, StreamExt};

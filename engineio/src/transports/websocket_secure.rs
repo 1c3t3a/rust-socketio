@@ -5,8 +5,7 @@ use crate::{
     },
     error::Result,
     transport::Transport,
-    Error,
-    TlsConfig,
+    Error, TlsConfig,
 };
 use bytes::Bytes;
 use http::HeaderMap;
