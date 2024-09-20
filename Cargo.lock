@@ -140,12 +140,6 @@ dependencies = [
 
 [[package]]
 name = "base64"
-version = "0.21.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35636a1494ede3b646cc98f74f8e62c773a38a659ebc777a2cf26b9b74171df9"
-
-[[package]]
-name = "base64"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9475866fec1451be56a3c2400fd081ff546538961565ccb5b7142cbd22bc7a51"
@@ -1708,7 +1702,7 @@ version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "566cafdd92868e0939d3fb961bd0dc25fcfaaed179291093b3d43e6b3150ea10"
 dependencies = [
- "base64 0.22.0",
+ "base64",
  "bytes",
  "encoding_rs",
  "futures-channel",
@@ -1754,7 +1748,7 @@ dependencies = [
  "adler32",
  "async-stream",
  "async-trait",
- "base64 0.21.5",
+ "base64",
  "bytes",
  "criterion",
  "futures-util",
@@ -1778,7 +1772,7 @@ dependencies = [
  "adler32",
  "async-stream",
  "backoff",
- "base64 0.21.5",
+ "base64",
  "bytes",
  "cargo-tarpaulin",
  "futures-util",
@@ -1842,7 +1836,7 @@ version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29993a25686778eb88d4189742cd713c9bce943bc54251a33509dc63cbacf73d"
 dependencies = [
- "base64 0.22.0",
+ "base64",
  "rustls-pki-types",
 ]
 
