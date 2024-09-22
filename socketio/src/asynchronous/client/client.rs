@@ -19,7 +19,7 @@ use crate::{
     asynchronous::socket::Socket as InnerSocket,
     error::{Error, Result},
     packet::{Packet, PacketId},
-    Event, Payload,
+    CloseReason, Event, Payload,
 };
 
 #[derive(Default)]
@@ -168,7 +168,7 @@ impl Client {
                         // We don't need to do that in the other cases, since proper server close
                         // and manual client close are handled explicitly.
                         if let Some(err) = client_clone
-                            .callback(&Event::Close, "transport close")
+                            .callback(&Event::Close, CloseReason::TransportClose.as_str())
                             .await
                             .err()
                         {
@@ -524,7 +524,8 @@ impl Client {
                 }
                 PacketId::Disconnect => {
                     *(self.disconnect_reason.write().await) = DisconnectReason::Server;
-                    self.callback(&Event::Close, "").await?;
+                    self.callback(&Event::Close, CloseReason::IOServerDisconnect.as_str())
+                        .await?;
                 }
                 PacketId::ConnectError => {
                     self.callback(
@@ -604,8 +605,7 @@ mod test {
         },
         error::Result,
         packet::{Packet, PacketId},
-        Event,
-        Payload, TransportType,
+        CloseReason, Event, Payload, TransportType,
     };
 
     #[tokio::test]
@@ -977,7 +977,10 @@ mod test {
         let rx_timeout = timeout(Duration::from_secs(1), rx.recv()).await;
         assert!(rx_timeout.is_ok());
 
-        assert_eq!(rx_timeout.unwrap(), Some(Payload::from("transport close")));
+        assert_eq!(
+            rx_timeout.unwrap(),
+            Some(Payload::from(CloseReason::TransportClose.as_str()))
+        );
 
         Ok(())
     }

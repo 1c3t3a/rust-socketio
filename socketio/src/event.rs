@@ -57,3 +57,38 @@ impl Display for Event {
         f.write_str(self.as_str())
     }
 }
+
+/// A `CloseReason` is the payload of the [`Event::Close`] and specifies the reason for
+/// why it was fired.
+/// These are aligned with the official Socket.IO disconnect reasons, see
+/// https://socket.io/docs/v4/client-socket-instance/#disconnect
+#[derive(Debug, PartialEq, PartialOrd, Clone, Eq, Hash)]
+pub enum CloseReason {
+    IOServerDisconnect,
+    IOClientDisconnect,
+    TransportClose,
+}
+
+impl CloseReason {
+    pub fn as_str(&self) -> &str {
+        match self {
+            // Inspired by https://github.com/socketio/socket.io/blob/d0fc72042068e7eaef448941add617f05e1ec236/packages/socket.io-client/lib/socket.ts#L865
+            CloseReason::IOServerDisconnect => "io server disconnect",
+            // Inspired by https://github.com/socketio/socket.io/blob/d0fc72042068e7eaef448941add617f05e1ec236/packages/socket.io-client/lib/socket.ts#L911
+            CloseReason::IOClientDisconnect => "io client disconnect",
+            CloseReason::TransportClose => "transport close",
+        }
+    }
+}
+
+impl From<CloseReason> for String {
+    fn from(event: CloseReason) -> Self {
+        Self::from(event.as_str())
+    }
+}
+
+impl Display for CloseReason {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.write_str(self.as_str())
+    }
+}
