@@ -20,6 +20,8 @@ pub enum Error {
     IncompletePacket(),
     #[error("Got an invalid packet which did not follow the protocol format")]
     InvalidPacket(),
+    #[error("Error while parsing an incomplete packet: {0}")]
+    ParsePacketFailed(String),
     #[error("An error occurred while decoding the utf-8 text: {0}")]
     InvalidUtf8(#[from] Utf8Error),
     #[error("An error occurred while encoding/decoding base64: {0}")]

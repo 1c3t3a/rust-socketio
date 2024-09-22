@@ -8,7 +8,7 @@ use rust_engineio::{
 use std::collections::HashMap;
 use url::Url;
 
-use crate::{error::Result, Event, Payload, TransportType};
+use crate::{error::Result, packet::PacketParser, Event, Payload, TransportType};
 
 use super::{
     callback::{
@@ -31,6 +31,7 @@ pub struct ClientBuilder {
     tls_config: Option<TlsConnector>,
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
+    packet_parser: PacketParser,
     pub(crate) auth: Option<serde_json::Value>,
     pub(crate) reconnect: bool,
     pub(crate) reconnect_on_disconnect: bool,
@@ -90,6 +91,7 @@ impl ClientBuilder {
             tls_config: None,
             opening_headers: None,
             transport_type: TransportType::Any,
+            packet_parser: PacketParser::default(),
             auth: None,
             reconnect: true,
             reconnect_on_disconnect: false,
@@ -453,7 +455,7 @@ impl ClientBuilder {
             TransportType::WebsocketUpgrade => builder.build_websocket_with_upgrade().await?,
         };
 
-        let inner_socket = InnerSocket::new(engine_client)?;
+        let inner_socket = InnerSocket::new(engine_client, self.packet_parser.clone())?;
         Ok(inner_socket)
     }
 
