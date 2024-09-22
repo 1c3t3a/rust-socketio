@@ -1,7 +1,7 @@
 use super::callback::Callback;
 use crate::packet::{Packet, PacketId};
 use crate::Error;
-pub(crate) use crate::{event::Event, payload::Payload};
+pub(crate) use crate::{event::CloseReason, event::Event, payload::Payload};
 use rand::{thread_rng, Rng};
 use serde_json::Value;
 
@@ -149,7 +149,7 @@ impl RawClient {
         let _ = self.socket.send(disconnect_packet);
         self.socket.disconnect()?;
 
-        let _ = self.callback(&Event::Close, ""); // trigger on_close
+        let _ = self.callback(&Event::Close, CloseReason::IOClientDisconnect.as_str()); // trigger on_close
         Ok(())
     }
 
@@ -372,7 +372,7 @@ impl RawClient {
                     self.callback(&Event::Connect, "")?;
                 }
                 PacketId::Disconnect => {
-                    self.callback(&Event::Close, "")?;
+                    self.callback(&Event::Close, CloseReason::IOServerDisconnect.as_str())?;
                 }
                 PacketId::ConnectError => {
                     self.callback(
