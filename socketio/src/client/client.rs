@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use super::{ClientBuilder, RawClient};
+use super::{raw_client::DisconnectReason, ClientBuilder, RawClient};
 use crate::{
     error::Result,
     packet::{Packet, PacketId},
@@ -165,6 +165,11 @@ impl Client {
         client.disconnect()
     }
 
+    fn do_disconnect(&self) -> Result<()> {
+        let client = self.client.read()?;
+        client.do_disconnect()
+    }
+
     fn reconnect(&mut self) -> Result<()> {
         let mut reconnect_attempts = 0;
         let (reconnect, max_reconnect_attempts) = {
@@ -174,6 +179,17 @@ impl Client {
 
         if reconnect {
             loop {
+                // Check if disconnect_reason is Manual
+                {
+                    let disconnect_reason = {
+                        let client = self.client.read()?;
+                        client.get_disconnect_reason()
+                    };
+                    if disconnect_reason == DisconnectReason::Manual {
+                        // Exit the loop, stop reconnecting
+                        break;
+                    }
+                }
                 if let Some(max_reconnect_attempts) = max_reconnect_attempts {
                     reconnect_attempts += 1;
                     if reconnect_attempts > max_reconnect_attempts {
@@ -186,6 +202,12 @@ impl Client {
                 }
 
                 if self.do_reconnect().is_ok() {
+                    // Reset disconnect_reason to Unknown after successful reconnection
+                    {
+                        let client = self.client.read()?;
+                        let mut reason = client.disconnect_reason.write()?;
+                        *reason = DisconnectReason::Unknown;
+                    }
                     break;
                 }
             }
@@ -213,29 +235,43 @@ impl Client {
         let mut self_clone = self.clone();
         // Use thread to consume items in iterator in order to call callbacks
         std::thread::spawn(move || {
-            // tries to restart a poll cycle whenever a 'normal' error occurs,
-            // it just panics on network errors, in case the poll cycle returned
-            // `Result::Ok`, the server receives a close frame so it's safe to
-            // terminate
-            for packet in self_clone.iter() {
-                let should_reconnect = match packet {
-                    Err(Error::IncompleteResponseFromEngineIo(_)) => {
-                        //TODO: 0.3.X handle errors
-                        //TODO: logging error
-                        true
+            loop {
+                let next_item = self_clone.iter().next();
+                match next_item {
+                    Some(Ok(_packet)) => {
+                        // Process packet normally
+                        continue;
                     }
-                    Ok(Packet {
-                        packet_type: PacketId::Disconnect,
-                        ..
-                    }) => match self_clone.builder.lock() {
-                        Ok(builder) => builder.reconnect_on_disconnect,
-                        Err(_) => false,
-                    },
-                    _ => false,
-                };
-                if should_reconnect {
-                    let _ = self_clone.disconnect();
-                    let _ = self_clone.reconnect();
+                    Some(Err(_)) => {
+                        let should_reconnect = {
+                            let disconnect_reason = {
+                                let client = self_clone.client.read().unwrap();
+                                client.get_disconnect_reason()
+                            };
+                            match disconnect_reason {
+                                DisconnectReason::Unknown => {
+                                    let builder = self_clone.builder.lock().unwrap();
+                                    builder.reconnect
+                                }
+                                DisconnectReason::Manual => false,
+                                DisconnectReason::Server => {
+                                    let builder = self_clone.builder.lock().unwrap();
+                                    builder.reconnect_on_disconnect
+                                }
+                            }
+                        };
+                        if should_reconnect {
+                            let _ = self_clone.do_disconnect();
+                            let _ = self_clone.reconnect();
+                        } else {
+                            // No reconnection needed, exit the loop
+                            break;
+                        }
+                    }
+                    None => {
+                        // Iterator has ended, exit the loop
+                        break;
+                    }
                 }
             }
         });
