@@ -9,11 +9,22 @@ use crate::client::callback::{SocketAnyCallback, SocketCallback};
 use crate::error::Result;
 use std::collections::HashMap;
 use std::ops::DerefMut;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use std::time::Instant;
 
 use crate::socket::Socket as InnerSocket;
+
+#[derive(Default, Clone, Copy, PartialEq)]
+pub enum DisconnectReason {
+    /// There is no known reason for the disconnect; likely a network error
+    #[default]
+    Unknown,
+    /// The user disconnected manually
+    Manual,
+    /// The server disconnected
+    Server,
+}
 
 /// Represents an `Ack` as given back to the caller. Holds the internal `id` as
 /// well as the current ack'ed state. Holds data which will be accessible as
@@ -41,6 +52,7 @@ pub struct RawClient {
     nsp: String,
     // Data send in the opening packet (commonly used as for auth)
     auth: Option<Value>,
+    pub(crate) disconnect_reason: Arc<RwLock<DisconnectReason>>,
 }
 
 impl RawClient {
@@ -62,6 +74,7 @@ impl RawClient {
             on_any,
             outstanding_acks: Arc::new(Mutex::new(Vec::new())),
             auth,
+            disconnect_reason: Arc::new(RwLock::new(DisconnectReason::default())),
         })
     }
 
@@ -142,7 +155,14 @@ impl RawClient {
     ///
     /// ```
     pub fn disconnect(&self) -> Result<()> {
-        let disconnect_packet =
+        *(self.disconnect_reason.write()?) = DisconnectReason::Manual;
+        self.do_disconnect()
+    }
+
+    /// Disconnects this client the same way as `disconnect()` but
+    /// without setting the `DisconnectReason` to `DisconnectReason::Manual`
+    pub fn do_disconnect(&self) -> Result<()> {
+        let disconnect_packet = 
             Packet::new(PacketId::Disconnect, self.nsp.clone(), None, None, 0, None);
 
         // TODO: logging
@@ -151,6 +171,10 @@ impl RawClient {
 
         let _ = self.callback(&Event::Close, ""); // trigger on_close
         Ok(())
+    }
+
+    pub fn get_disconnect_reason(&self) -> DisconnectReason {
+        *self.disconnect_reason.read().unwrap()
     }
 
     /// Sends a message to the server but `alloc`s an `ack` to check whether the
@@ -222,18 +246,32 @@ impl RawClient {
     }
 
     pub(crate) fn poll(&self) -> Result<Option<Packet>> {
+        {
+            let disconnect_reason = *self.disconnect_reason.read()?;
+            if disconnect_reason == DisconnectReason::Manual {
+                // If disconnected manually, return Ok(None) to end iterator
+                return Ok(None);
+            }
+        }
         loop {
             match self.socket.poll() {
                 Err(err) => {
-                    self.callback(&Event::Error, err.to_string())?;
-                    return Err(err);
+                    // Check if the disconnection was manual
+                    let disconnect_reason = *self.disconnect_reason.read()?;
+                    if disconnect_reason == DisconnectReason::Manual {
+                        // Return Ok(None) to signal the end of the iterator
+                        return Ok(None);
+                    } else {
+                        self.callback(&Event::Error, err.to_string())?;
+                        return Err(err);
+                    }
                 }
                 Ok(Some(packet)) => {
                     if packet.nsp == self.nsp {
                         self.handle_socketio_packet(&packet)?;
                         return Ok(Some(packet));
                     } else {
-                        // Not our namespace continue polling
+                        // Not our namespace, continue polling
                     }
                 }
                 Ok(None) => return Ok(None),
@@ -369,9 +407,11 @@ impl RawClient {
                     }
                 }
                 PacketId::Connect => {
+                    *(self.disconnect_reason.write()?) = DisconnectReason::default();
                     self.callback(&Event::Connect, "")?;
                 }
                 PacketId::Disconnect => {
+                    *(self.disconnect_reason.write()?) = DisconnectReason::Server;
                     self.callback(&Event::Close, "")?;
                 }
                 PacketId::ConnectError => {
