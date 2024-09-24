@@ -36,6 +36,14 @@ var callback = client => {
             ack(Buffer.from([1, 2, 3]));
         }
     });
+
+    // This event allows the test framework to arbitrarily close the underlying connection
+    client.on('close_transport', data => {
+        console.log(['close_transport', 'Request to close transport received'])
+        // Close underlying websocket connection
+        client.client.conn.close();
+    })
+
     client.emit('Hello from the message event!');
     client.emit('test', 'Hello from the test event!');
     client.emit(Buffer.from([4, 5, 6]));

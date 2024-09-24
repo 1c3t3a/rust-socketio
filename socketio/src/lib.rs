@@ -191,7 +191,7 @@ pub mod asynchronous;
 
 pub use error::Error;
 
-pub use {event::Event, payload::Payload};
+pub use {event::CloseReason, event::Event, payload::Payload};
 
 pub use client::{ClientBuilder, RawClient, TransportType};
 

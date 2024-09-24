@@ -2,7 +2,7 @@ use std::{ops::DerefMut, pin::Pin, sync::Arc};
 
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures_util::{future::BoxFuture, stream, Stream, StreamExt};
-use log::trace;
+use log::{error, trace};
 use rand::{thread_rng, Rng};
 use serde_json::Value;
 use tokio::{
@@ -19,7 +19,7 @@ use crate::{
     asynchronous::socket::Socket as InnerSocket,
     error::{Error, Result},
     packet::{Packet, PacketId},
-    Event, Payload,
+    CloseReason, Event, Payload,
 };
 
 #[derive(Default)]
@@ -162,7 +162,21 @@ impl Client {
                 drop(stream);
 
                 let should_reconnect = match *(client_clone.disconnect_reason.read().await) {
-                    DisconnectReason::Unknown => reconnect,
+                    DisconnectReason::Unknown => {
+                        // If we disconnected for an unknown reason, the client might not have noticed
+                        // the closure yet. Hence, fire a transport close event to notify it.
+                        // We don't need to do that in the other cases, since proper server close
+                        // and manual client close are handled explicitly.
+                        if let Some(err) = client_clone
+                            .callback(&Event::Close, CloseReason::TransportClose.as_str())
+                            .await
+                            .err()
+                        {
+                            error!("Error while notifying client of transport close: {err}")
+                        }
+
+                        reconnect
+                    }
                     DisconnectReason::Manual => false,
                     DisconnectReason::Server => reconnect_on_disconnect,
                 };
@@ -510,7 +524,8 @@ impl Client {
                 }
                 PacketId::Disconnect => {
                     *(self.disconnect_reason.write().await) = DisconnectReason::Server;
-                    self.callback(&Event::Close, "").await?;
+                    self.callback(&Event::Close, CloseReason::IOServerDisconnect.as_str())
+                        .await?;
                 }
                 PacketId::ConnectError => {
                     self.callback(
@@ -590,7 +605,7 @@ mod test {
         },
         error::Result,
         packet::{Packet, PacketId},
-        Payload, TransportType,
+        CloseReason, Event, Payload, TransportType,
     };
 
     #[tokio::test]
@@ -921,6 +936,50 @@ mod test {
                 0,
                 None
             )
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn socket_io_transport_close() -> Result<()> {
+        let url = crate::test::socket_io_server();
+
+        let (tx, mut rx) = mpsc::channel(1);
+
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let notify_clone = notify.clone();
+
+        let socket = ClientBuilder::new(url)
+            .on(Event::Connect, move |_, _| {
+                let cl = notify_clone.clone();
+                async move {
+                    cl.notify_one();
+                }
+                .boxed()
+            })
+            .on(Event::Close, move |payload, _| {
+                let clone_tx = tx.clone();
+                async move { clone_tx.send(payload).await.unwrap() }.boxed()
+            })
+            .connect()
+            .await?;
+
+        // Wait until socket is connected
+        let connect_timeout = timeout(Duration::from_secs(1), notify.notified()).await;
+        assert!(connect_timeout.is_ok());
+
+        // Instruct server to close transport
+        let result = socket.emit("close_transport", Payload::from("")).await;
+        assert!(result.is_ok());
+
+        // Wait for Event::Close
+        let rx_timeout = timeout(Duration::from_secs(1), rx.recv()).await;
+        assert!(rx_timeout.is_ok());
+
+        assert_eq!(
+            rx_timeout.unwrap(),
+            Some(Payload::from(CloseReason::TransportClose.as_str()))
         );
 
         Ok(())
