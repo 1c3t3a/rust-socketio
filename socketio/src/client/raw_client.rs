@@ -277,11 +277,18 @@ impl RawClient {
             return Ok(());
         };
 
-        self.outstanding_acks.lock()?.retain_mut(|ack| {
-            if ack.id != id {
-                return true;
-            }
+        let outstanding_ack = {
+            let mut outstanding_acks = self.outstanding_acks.lock()?;
+            outstanding_acks
+                .iter()
+                .position(|ack| ack.id == id)
+                .map(|pos| outstanding_acks.remove(pos))
+        };
 
+        // If we found a matching ack, call its callback otherwise ignore it.
+        // The official implementation just removes the ack id on timeout:
+        // https://github.com/socketio/socket.io-client/blob/main/lib/socket.ts#L467-L495
+        if let Some(mut ack) = outstanding_ack {
             if ack.time_started.elapsed() < ack.timeout {
                 if let Some(ref payload) = socket_packet.data {
                     ack.callback.deref_mut()(Payload::from(payload.to_owned()), self.clone());
@@ -293,10 +300,7 @@ impl RawClient {
                     }
                 }
             }
-            // nope, just ignore it, the official implment just remove the ack id when timeout
-            // https://github.com/socketio/socket.io-client/blob/main/lib/socket.ts#L467-L495
-            false
-        });
+        }
 
         Ok(())
     }
