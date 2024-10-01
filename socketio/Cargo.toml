@@ -31,7 +31,7 @@ log = "0.4.22"
 serde = "1.0.209"
 
 [dev-dependencies]
-cargo-tarpaulin = "0.18.5"
+cargo-tarpaulin = "0.25.1"
 serial_test = "3.0.0"
 
 [dev-dependencies.tokio]
