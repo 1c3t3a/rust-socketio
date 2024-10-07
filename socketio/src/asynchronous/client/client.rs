@@ -4,6 +4,7 @@ use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures_util::{future::BoxFuture, stream, Stream, StreamExt};
 use log::trace;
 use rand::{thread_rng, Rng};
+use rust_engineio::header::{HeaderMap, HeaderValue};
 use serde_json::Value;
 use tokio::{
     sync::RwLock,
@@ -38,6 +39,7 @@ enum DisconnectReason {
 pub struct ReconnectSettings {
     address: Option<String>,
     auth: Option<serde_json::Value>,
+    headers: Option<HeaderMap>,
 }
 
 impl ReconnectSettings {
@@ -57,6 +59,19 @@ impl ReconnectSettings {
     /// Sets the authentication data that will be send in the opening request
     pub fn auth(&mut self, auth: serde_json::Value) {
         self.auth = Some(auth);
+    }
+
+    /// Adds an http header to a container that is going to completely replace opening headers on reconnect.
+    /// If there are no headers set in `ReconnectSettings`, client will use headers initially set via the builder.
+    pub fn opening_header<T: Into<HeaderValue>, K: Into<String>>(
+        &mut self,
+        key: K,
+        val: T,
+    ) -> &mut Self {
+        self.headers
+            .get_or_insert_with(|| HeaderMap::default())
+            .insert(key.into(), val.into());
+        self
     }
 }
 
@@ -112,12 +127,17 @@ impl Client {
 
         if let Some(config) = builder.on_reconnect.as_mut() {
             let reconnect_settings = config().await;
+
             if let Some(address) = reconnect_settings.address {
                 builder.address = address;
             }
 
             if let Some(auth) = reconnect_settings.auth {
                 self.auth = Some(auth);
+            }
+
+            if reconnect_settings.headers.is_some() {
+                builder.opening_headers = reconnect_settings.headers;
             }
         }
 
@@ -579,7 +599,7 @@ mod test {
     use serde_json::json;
     use serial_test::serial;
     use tokio::{
-        sync::mpsc,
+        sync::{mpsc, Mutex},
         time::{sleep, timeout},
     };
 
@@ -740,6 +760,8 @@ mod test {
         static CONNECT_NUM: AtomicUsize = AtomicUsize::new(0);
         static MESSAGE_NUM: AtomicUsize = AtomicUsize::new(0);
         static ON_RECONNECT_CALLED: AtomicUsize = AtomicUsize::new(0);
+        let latest_message = Arc::new(Mutex::new(String::new()));
+        let handler_latest_message = latest_message.clone();
 
         let url = crate::test::socket_io_restart_server();
 
@@ -757,6 +779,7 @@ mod test {
                     // Try setting the address to what we already have, just
                     // to test. This is not strictly necessary in real usage.
                     settings.address(url.to_string());
+                    settings.opening_header("MESSAGE_BACK", "updated");
                     settings
                 }
                 .boxed()
@@ -774,11 +797,24 @@ mod test {
                 }
                 .boxed()
             })
-            .on("message", |_, _socket| {
+            .on("message", move |payload, _socket| {
+                let latest_message = handler_latest_message.clone();
                 async move {
                     // test the iterator implementation and make sure there is a constant
                     // stream of packets, even when reconnecting
                     MESSAGE_NUM.fetch_add(1, Ordering::Release);
+
+                    let msg = match payload {
+                        Payload::Text(msg) => msg
+                            .into_iter()
+                            .next()
+                            .expect("there should be one text payload"),
+                        _ => panic!(),
+                    };
+
+                    let msg = serde_json::from_value(msg).expect("payload should be json string");
+
+                    *latest_message.lock().await = msg;
                 }
                 .boxed()
             })
@@ -793,6 +829,11 @@ mod test {
 
         assert_eq!(load(&CONNECT_NUM), 1, "should connect once");
         assert_eq!(load(&MESSAGE_NUM), 1, "should receive one");
+        assert_eq!(
+            *latest_message.lock().await,
+            "test",
+            "should receive test message"
+        );
 
         let r = socket.emit("restart_server", json!("")).await;
         assert!(r.is_ok(), "should emit restart success");
@@ -810,6 +851,11 @@ mod test {
         assert!(
             load(&ON_RECONNECT_CALLED) > 1,
             "should call on_reconnect at least once"
+        );
+        assert_eq!(
+            *latest_message.lock().await,
+            "updated",
+            "should receive updated message"
         );
 
         socket.disconnect().await?;
