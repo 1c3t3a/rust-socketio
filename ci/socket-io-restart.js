@@ -1,5 +1,3 @@
-const { Socket } = require("socket.io");
-
 let createServer = require("http").createServer;
 let server = createServer();
 const io = require("socket.io")(server);
@@ -8,8 +6,12 @@ const timeout = 2000;
 
 console.log("Started");
 var callback = (client) => {
+  const headers = client.request.headers;
+  console.log("headers", headers);
+  const message = headers.message_back || "test";
+
   console.log("Connected!");
-  client.emit("message", "test");
+  client.emit("message", message);
   client.on("restart_server", () => {
     console.log("will restart in ", timeout, "ms");
     io.close();

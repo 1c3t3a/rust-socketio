@@ -29,7 +29,7 @@ pub struct ClientBuilder {
     pub(crate) on_reconnect: Option<Callback<DynAsyncReconnectSettingsCallback>>,
     pub(crate) namespace: String,
     tls_config: Option<TlsConnector>,
-    opening_headers: Option<HeaderMap>,
+    pub(crate) opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
     pub(crate) auth: Option<serde_json::Value>,
     pub(crate) reconnect: bool,
@@ -214,6 +214,7 @@ impl ClientBuilder {
     ///                 let mut settings = ReconnectSettings::new();
     ///                 settings.address("http://server?test=123");
     ///                 settings.auth(json!({ "token": "abc" }));
+    ///                 settings.opening_header("TRAIL", "abc-123");
     ///                 settings
     ///             }.boxed()
     ///         })
