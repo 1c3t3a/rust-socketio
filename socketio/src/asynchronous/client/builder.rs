@@ -6,6 +6,7 @@ use rust_engineio::{
     header::{HeaderMap, HeaderValue},
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 use url::Url;
 
 use crate::{error::Result, Event, Payload, TransportType};
@@ -38,6 +39,7 @@ pub struct ClientBuilder {
     pub(crate) max_reconnect_attempts: Option<u8>,
     pub(crate) reconnect_delay_min: u64,
     pub(crate) reconnect_delay_max: u64,
+    pub(crate) data: Option<Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 impl ClientBuilder {
@@ -97,7 +99,15 @@ impl ClientBuilder {
             max_reconnect_attempts: None,
             reconnect_delay_min: 1000,
             reconnect_delay_max: 5000,
+            data: None,
         }
+    }
+
+    /// Sets the client's custom data.
+    // TODO: write example usage
+    pub fn set_data<D: std::any::Any + Send + Sync>(mut self, data: Arc<D>) -> Self {
+        self.data = Some(data);
+        self
     }
 
     /// Sets the target namespace of the client. The namespace should start

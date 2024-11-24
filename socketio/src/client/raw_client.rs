@@ -14,6 +14,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::socket::Socket as InnerSocket;
+use crate::client::builder::ClientBuilder;
 
 /// Represents an `Ack` as given back to the caller. Holds the internal `id` as
 /// well as the current ack'ed state. Holds data which will be accessible as
@@ -41,6 +42,7 @@ pub struct RawClient {
     nsp: String,
     // Data send in the opening packet (commonly used as for auth)
     auth: Option<Value>,
+    data: Arc<dyn std::any::Any + Send + Sync>,
 }
 
 impl RawClient {
@@ -54,6 +56,7 @@ impl RawClient {
         on: Arc<Mutex<HashMap<Event, Callback<SocketCallback>>>>,
         on_any: Arc<Mutex<Option<Callback<SocketAnyCallback>>>>,
         auth: Option<Value>,
+        data: Arc<dyn std::any::Any + Send + Sync>,
     ) -> Result<Self> {
         Ok(RawClient {
             socket,
@@ -62,7 +65,15 @@ impl RawClient {
             on_any,
             outstanding_acks: Arc::new(Mutex::new(Vec::new())),
             auth,
+            data,
         })
+    }
+
+    /// Attempts to fetch data given by [`ClientBuilder::set_data`]
+    ///
+    /// None is returned if data was not given or data does not match [`ClientBuilder::data`]
+    pub fn custom_data<D: Send + Sync + 'static>(&self) -> Option<Arc<D>> {
+        Arc::clone(&self.data).downcast().ok()
     }
 
     /// Connects the client to a server. Afterwards the `emit_*` methods can be
