@@ -7,9 +7,8 @@ use crate::error::{Error, Result};
 use crate::header::HeaderMap;
 use crate::packet::{HandshakePacket, Packet, PacketId};
 use crate::transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
-use crate::ENGINE_IO_VERSION;
+use crate::{TlsConfig, ENGINE_IO_VERSION};
 use bytes::Bytes;
-use native_tls::TlsConnector;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt::Debug;
@@ -30,7 +29,7 @@ pub struct Client {
 #[derive(Clone, Debug)]
 pub struct ClientBuilder {
     url: Url,
-    tls_config: Option<TlsConnector>,
+    tls_config: Option<TlsConfig>,
     headers: Option<HeaderMap>,
     handshake: Option<HandshakePacket>,
     on_error: OptionalCallback<String>,
@@ -64,7 +63,7 @@ impl ClientBuilder {
     }
 
     /// Specify transport's tls config
-    pub fn tls_config(mut self, tls_config: TlsConnector) -> Self {
+    pub fn tls_config(mut self, tls_config: TlsConfig) -> Self {
         self.tls_config = Some(tls_config);
         self
     }
@@ -377,7 +376,7 @@ impl<'a> Iterator for Iter<'a> {
 #[cfg(test)]
 mod test {
 
-    use crate::packet::PacketId;
+    use crate::{packet::PacketId, test::tls_connector};
 
     use super::*;
 
@@ -650,10 +649,7 @@ mod test {
 
         let _ = builder(url.clone())
             .tls_config(
-                TlsConnector::builder()
-                    .danger_accept_invalid_certs(true)
-                    .build()
-                    .unwrap(),
+                tls_connector()?
             )
             .build()?;
         let _ = builder(url).headers(headers).build()?;

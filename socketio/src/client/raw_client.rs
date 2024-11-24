@@ -422,9 +422,23 @@ mod test {
     use super::*;
     use crate::{client::TransportType, payload::Payload, ClientBuilder};
     use bytes::Bytes;
-    use native_tls::TlsConnector;
     use serde_json::json;
     use std::time::Duration;
+
+    #[cfg(feature = "_native-tls")]
+    fn tls_config() -> native_tls::TlsConnector {
+        native_tls::TlsConnector::builder()
+            .use_sni(true)
+            .build()
+            .expect("Found illegal configuration")
+    }
+
+    #[cfg(feature = "_rustls-tls")]
+    fn tls_config() -> rustls::ClientConfig {
+        rustls::ClientConfig::builder()
+            .with_root_certificates(rustls::RootCertStore::empty())
+            .with_no_client_auth()
+    }
 
     #[test]
     fn socket_io_integration() -> Result<()> {
@@ -478,14 +492,9 @@ mod test {
         // test socket build logic
         let socket_builder = ClientBuilder::new(url);
 
-        let tls_connector = TlsConnector::builder()
-            .use_sni(true)
-            .build()
-            .expect("Found illegal configuration");
-
         let socket = socket_builder
             .namespace("/admin")
-            .tls_config(tls_connector)
+            .tls_config(tls_config())
             .opening_header("accept-encoding", "application/json")
             .on("test", |str, _| println!("Received: {:#?}", str))
             .on("message", |payload, _| println!("{:#?}", payload))
@@ -519,14 +528,9 @@ mod test {
         // test socket build logic
         let socket_builder = ClientBuilder::new(url);
 
-        let tls_connector = TlsConnector::builder()
-            .use_sni(true)
-            .build()
-            .expect("Found illegal configuration");
-
         let socket = socket_builder
             .namespace("/admin")
-            .tls_config(tls_connector)
+            .tls_config(tls_config())
             .opening_header("accept-encoding", "application/json")
             .on("test", |str, _| println!("Received: {:#?}", str))
             .on("message", |payload, _| println!("{:#?}", payload))
