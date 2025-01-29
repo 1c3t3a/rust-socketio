@@ -82,6 +82,42 @@ impl RawClient {
         Ok(())
     }
 
+    /// Example code for handling ACK response when calling emitWithAck on the server
+    ///
+    /// # Example
+    /// ```
+    /// use rust_socketio::{ClientBuilder, Payload, RawClient};
+    /// use std::time::Duration;
+    /// use std::thread::sleep;
+    ///
+    ///
+    /// let ack_callback = |message: Payload, socket: RawClient| {
+    ///     match message {
+    ///         Payload::Text(values) => println!("{:#?}", values),
+    ///         Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
+    ///         // This is deprecated, use Payload::Text instead
+    ///         Payload::String(str) => println!("{}", str),
+    ///    }
+    ///    socket.ack("foo").unwrap();
+    /// };
+    ///
+    /// let mut socket = ClientBuilder::new("http://localhost:4200/")
+    ///     .on("foo", ack_callback)
+    ///     .connect()
+    ///     .expect("connection failed");
+    ///
+    ///
+    ///
+    /// sleep(Duration::from_secs(2));
+    /// ```
+    #[inline]
+    pub fn ack<D>(&self, data: D) -> Result<()>
+    where
+        D: Into<Payload>,
+    {
+        self.socket.ack(&self.nsp, data.into())
+    }
+
     /// Sends a message to the server using the underlying `engine.io` protocol.
     /// This message takes an event, which could either be one of the common
     /// events like "message" or "error" or a custom event like "foo". But be

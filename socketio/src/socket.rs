@@ -3,6 +3,7 @@ use crate::packet::{Packet, PacketId};
 use bytes::Bytes;
 use rust_engineio::{Client as EngineClient, Packet as EnginePacket, PacketId as EnginePacketId};
 use std::convert::TryFrom;
+use std::sync::atomic::AtomicI32;
 use std::sync::{atomic::AtomicBool, Arc};
 use std::{fmt::Debug, sync::atomic::Ordering};
 
@@ -14,15 +15,19 @@ pub(crate) struct Socket {
     //TODO: 0.4.0 refactor this
     engine_client: Arc<EngineClient>,
     connected: Arc<AtomicBool>,
+    ack_id: Arc<AtomicI32>,
 }
 
 impl Socket {
     /// Creates an instance of `Socket`.
 
     pub(super) fn new(engine_client: EngineClient) -> Result<Self> {
+        let ack_id = Arc::new(AtomicI32::new(-1));
+
         Ok(Socket {
             engine_client: Arc::new(engine_client),
             connected: Arc::new(AtomicBool::default()),
+            ack_id: ack_id.clone(),
         })
     }
 
@@ -46,6 +51,9 @@ impl Socket {
         }
         if self.connected.load(Ordering::Acquire) {
             self.connected.store(false, Ordering::Release);
+        }
+        if self.ack_id.load(Ordering::Acquire) != -1 {
+            self.ack_id.store(-1, Ordering::Release);
         }
         Ok(())
     }
@@ -78,6 +86,13 @@ impl Socket {
         self.send(socket_packet)
     }
 
+    /// Emits to connected other side with given data
+    pub fn ack(&self, nsp: &str, data: Payload) -> Result<()> {
+        let socket_packet =
+            Packet::ack_from_payload(data, nsp, Some(self.ack_id.load(Ordering::Acquire)))?;
+        self.send(socket_packet)
+    }
+
     pub(crate) fn poll(&self) -> Result<Option<Packet>> {
         loop {
             match self.engine_client.poll() {
@@ -86,6 +101,10 @@ impl Socket {
                         || packet.packet_id == EnginePacketId::MessageBinary
                     {
                         let packet = self.handle_engineio_packet(packet)?;
+                        if self.ack_id.load(Ordering::Acquire) != packet.id.unwrap_or(-1) {
+                            self.ack_id
+                                .store(packet.id.unwrap_or(-1), Ordering::Release);
+                        }
                         self.handle_socketio_packet(&packet);
                         return Ok(Some(packet));
                     } else {

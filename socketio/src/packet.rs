@@ -88,6 +88,53 @@ impl Packet {
             }
         }
     }
+
+    #[inline]
+    pub(crate) fn ack_from_payload<'a>(
+        payload: Payload,
+        nsp: &'a str,
+        ack_id: Option<i32>,
+    ) -> Result<Packet> {
+        match payload {
+            Payload::Binary(bin_data) => Ok(Packet::new(
+                PacketId::BinaryAck,
+                nsp.to_owned(),
+                None,
+                ack_id,
+                1,
+                Some(vec![bin_data]),
+            )),
+            #[allow(deprecated)]
+            Payload::String(str_data) => {
+                let payload = if serde_json::from_str::<IgnoredAny>(&str_data).is_ok() {
+                    format!("[{str_data}]")
+                } else {
+                    format!("[\"{str_data}\"]")
+                };
+
+                Ok(Packet::new(
+                    PacketId::Ack,
+                    nsp.to_owned(),
+                    Some(payload),
+                    ack_id,
+                    0,
+                    None,
+                ))
+            }
+            Payload::Text(data) => {
+                let payload = serde_json::Value::Array(data).to_string();
+
+                Ok(Packet::new(
+                    PacketId::Ack,
+                    nsp.to_owned(),
+                    Some(payload),
+                    ack_id,
+                    0,
+                    None,
+                ))
+            }
+        }
+    }
 }
 
 impl Default for Packet {
@@ -668,6 +715,62 @@ mod test {
                 id: Some(10),
                 attachment_count: 0,
                 attachments: None
+            }
+        )
+    }
+
+    #[test]
+    fn ack_from_payload_binary() {
+        let payload = Payload::Binary(Bytes::from_static(&[0, 4, 9]));
+        let result = Packet::ack_from_payload(payload.clone(), "namespace", None).unwrap();
+        assert_eq!(
+            result,
+            Packet {
+                packet_type: PacketId::BinaryAck,
+                nsp: "namespace".to_owned(),
+                data: None,
+                id: None,
+                attachment_count: 1,
+                attachments: Some(vec![Bytes::from_static(&[0, 4, 9])]),
+            }
+        )
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn ack_from_payload_string() {
+        let payload = Payload::String("test".to_owned());
+        let result =
+            Packet::ack_from_payload(payload.clone(), "other_namespace", Some(10)).unwrap();
+        assert_eq!(
+            result,
+            Packet {
+                packet_type: PacketId::Ack,
+                nsp: "other_namespace".to_owned(),
+                data: Some("[\"test\"]".to_owned()),
+                id: Some(10),
+                attachment_count: 0,
+                attachments: None,
+            }
+        )
+    }
+
+    #[test]
+    fn ack_from_payload_json() {
+        let payload = Payload::Text(vec![
+            serde_json::json!("String test"),
+            serde_json::json!({"type":"object"}),
+        ]);
+        let result = Packet::ack_from_payload(payload.clone(), "/", Some(10)).unwrap();
+        assert_eq!(
+            result,
+            Packet {
+                packet_type: PacketId::Ack,
+                nsp: "/".to_owned(),
+                data: Some("[\"String test\",{\"type\":\"object\"}]".to_owned()),
+                id: Some(10),
+                attachment_count: 0,
+                attachments: None,
             }
         )
     }
