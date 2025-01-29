@@ -24,16 +24,20 @@ pub(crate) struct Socket {
     engine_client: Arc<EngineClient>,
     connected: Arc<AtomicBool>,
     generator: StreamGenerator<Packet>,
+    ack_id: Arc<AtomicI32>,
 }
 
 impl Socket {
     /// Creates an instance of `Socket`.
     pub(super) fn new(engine_client: EngineClient) -> Result<Self> {
         let connected = Arc::new(AtomicBool::default());
+        let ack_id = Arc::new(AtomicI32::new(-1));
+
         Ok(Socket {
             engine_client: Arc::new(engine_client.clone()),
             connected: connected.clone(),
-            generator: StreamGenerator::new(Self::stream(engine_client, connected)),
+            ack_id: ack_id.clone(),
+            generator: StreamGenerator::new(Self::stream(engine_client, connected, ack_id)),
         })
     }
 
@@ -57,6 +61,9 @@ impl Socket {
         }
         if self.connected.load(Ordering::Acquire) {
             self.connected.store(false, Ordering::Release);
+        }
+        if self.ack_id.load(Ordering::Acquire) != -1 {
+            self.ack_id.store(-1, Ordering::Release);
         }
         Ok(())
     }
@@ -92,6 +99,7 @@ impl Socket {
     fn stream(
         client: EngineClient,
         is_connected: Arc<AtomicBool>,
+        ack_id: Arc<AtomicI32>,
     ) -> Pin<Box<impl Stream<Item = Result<Packet>> + Send>> {
         Box::pin(try_stream! {
                 for await received_data in client.clone() {
@@ -101,6 +109,10 @@ impl Socket {
                         || packet.packet_id == EnginePacketId::MessageBinary
                     {
                         let packet = Self::handle_engineio_packet(packet, client.clone()).await?;
+
+                        if ack_id.load(Ordering::Acquire) != packet.id.unwrap_or(-1) {
+                            ack_id.store(packet.id.unwrap_or(-1), Ordering::Release);
+                        }
                         Self::handle_socketio_packet(&packet, is_connected.clone());
 
                         yield packet;
