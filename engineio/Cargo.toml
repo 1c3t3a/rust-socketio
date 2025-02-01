@@ -25,10 +25,10 @@ tokio-tungstenite = { version = "0.21.0", features = ["native-tls"] }
 tungstenite = "0.21.0"
 tokio = "1.40.0"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
-async-trait = "0.1.83"
+async-trait = "0.1.86"
 async-stream = "0.3.6"
 thiserror = "1.0"
-native-tls = "0.2.12"
+native-tls = "0.2.13"
 url = "2.5.4"
 
 [dev-dependencies]
