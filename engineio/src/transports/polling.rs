@@ -1,8 +1,8 @@
 use crate::error::{Error, Result};
 use crate::transport::Transport;
+use crate::TlsConfig;
 use base64::{engine::general_purpose, Engine as _};
 use bytes::{BufMut, Bytes, BytesMut};
-use native_tls::TlsConnector;
 use reqwest::{
     blocking::{Client, ClientBuilder},
     header::HeaderMap,
@@ -21,7 +21,7 @@ impl PollingTransport {
     /// Creates an instance of `PollingTransport`.
     pub fn new(
         base_url: Url,
-        tls_config: Option<TlsConnector>,
+        tls_config: Option<TlsConfig>,
         opening_headers: Option<HeaderMap>,
     ) -> Self {
         let client = match (tls_config, opening_headers) {

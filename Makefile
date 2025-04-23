@@ -15,6 +15,8 @@ run-test-servers:
 
 test-all: keys run-test-servers
 	@cargo test --verbose --all-features
+	# Test using the native-tls implementation since rustls overrides native-tls
+	@cargo test --verbose --features async
 	docker stop socketio_test
 
 clippy:

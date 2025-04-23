@@ -5,11 +5,10 @@ use crate::{
     },
     error::Result,
     transport::Transport,
-    Error,
+    Error, TlsConfig,
 };
 use bytes::Bytes;
 use http::HeaderMap;
-use native_tls::TlsConnector;
 use std::{sync::Arc, time::Duration};
 use tokio::runtime::Runtime;
 use url::Url;
@@ -24,7 +23,7 @@ impl WebsocketSecureTransport {
     /// Creates an instance of `WebsocketSecureTransport`.
     pub fn new(
         base_url: Url,
-        tls_config: Option<TlsConnector>,
+        tls_config: Option<TlsConfig>,
         headers: Option<HeaderMap>,
     ) -> Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()

@@ -59,7 +59,6 @@ impl From<WebsocketSecureTransport> for AsyncTransportType {
     }
 }
 
-#[cfg(feature = "async")]
 impl AsyncTransportType {
     pub fn as_transport(&self) -> &(dyn AsyncTransport + Send) {
         match self {

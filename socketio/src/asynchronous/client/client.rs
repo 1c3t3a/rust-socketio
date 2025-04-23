@@ -610,7 +610,6 @@ mod test {
 
     use bytes::Bytes;
     use futures_util::{FutureExt, StreamExt};
-    use native_tls::TlsConnector;
     use serde_json::json;
     use serial_test::serial;
     use tokio::{
@@ -627,6 +626,8 @@ mod test {
         packet::{Packet, PacketId},
         CloseReason, Event, Payload, TransportType,
     };
+
+    use rust_engineio::test::tls_connector;
 
     #[tokio::test]
     async fn socket_io_integration() -> Result<()> {
@@ -725,14 +726,9 @@ mod test {
         // test socket build logic
         let socket_builder = ClientBuilder::new(url);
 
-        let tls_connector = TlsConnector::builder()
-            .use_sni(true)
-            .build()
-            .expect("Found illegal configuration");
-
         let socket = socket_builder
             .namespace("/admin")
-            .tls_config(tls_connector)
+            .tls_config(tls_connector()?)
             .opening_header("accept-encoding", "application/json")
             .on("test", |str, _| {
                 async move { println!("Received: {:#?}", str) }.boxed()
@@ -884,14 +880,9 @@ mod test {
         // test socket build logic
         let socket_builder = ClientBuilder::new(url);
 
-        let tls_connector = TlsConnector::builder()
-            .use_sni(true)
-            .build()
-            .expect("Found illegal configuration");
-
         let socket = socket_builder
             .namespace("/admin")
-            .tls_config(tls_connector)
+            .tls_config(tls_connector()?)
             .opening_header("accept-encoding", "application/json")
             .on("test", |str, _| {
                 async move { println!("Received: {:#?}", str) }.boxed()

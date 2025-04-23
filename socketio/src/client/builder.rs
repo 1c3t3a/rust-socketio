@@ -1,8 +1,7 @@
 use super::super::{event::Event, payload::Payload};
 use super::callback::Callback;
 use super::client::Client;
-use crate::RawClient;
-use native_tls::TlsConnector;
+use crate::{RawClient, TlsConfig};
 use rust_engineio::client::ClientBuilder as EngineIoClientBuilder;
 use rust_engineio::header::{HeaderMap, HeaderValue};
 use url::Url;
@@ -37,7 +36,7 @@ pub struct ClientBuilder {
     on: Arc<Mutex<HashMap<Event, Callback<SocketCallback>>>>,
     on_any: Arc<Mutex<Option<Callback<SocketAnyCallback>>>>,
     namespace: String,
-    tls_config: Option<TlsConnector>,
+    tls_config: Option<TlsConfig>,
     opening_headers: Option<HeaderMap>,
     transport_type: TransportType,
     auth: Option<serde_json::Value>,
@@ -210,24 +209,48 @@ impl ClientBuilder {
 
     /// Uses a preconfigured TLS connector for secure communication. This configures
     /// both the `polling` as well as the `websocket` transport type.
-    /// # Example
-    /// ```rust
-    /// use rust_socketio::{ClientBuilder, Payload};
-    /// use native_tls::TlsConnector;
-    ///
-    /// let tls_connector =  TlsConnector::builder()
-    ///            .use_sni(true)
-    ///            .build()
-    ///            .expect("Found illegal configuration");
-    ///
-    /// let socket = ClientBuilder::new("http://localhost:4200/")
-    ///     .namespace("/admin")
-    ///     .on("error", |err, _| eprintln!("Error: {:#?}", err))
-    ///     .tls_config(tls_connector)
-    ///     .connect();
-    ///
-    /// ```
-    pub fn tls_config(mut self, tls_config: TlsConnector) -> Self {
+    #[cfg_attr(
+        feature = "_native-tls",
+        doc = r#"
+# Example for native-tls
+
+```rust
+use rust_socketio::{ClientBuilder, Payload};
+
+let tls_connector = native_tls::TlsConnector::builder()
+            .use_sni(true)
+            .build()
+            .expect("Found illegal configuration");
+
+# #[cfg(not(feature = "_rustls-tls"))] {
+let socket = ClientBuilder::new("http://localhost:4200/")
+    .namespace("/admin")
+    .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    .tls_config(tls_connector)
+    .connect();
+# }
+```"#
+    )]
+    #[cfg_attr(
+        feature = "_rustls-tls",
+        doc = r#"
+# Example for rustls
+
+```rust
+use rust_socketio::{ClientBuilder, Payload};
+
+let tls_config = rustls::ClientConfig::builder()
+    .with_root_certificates(rustls::RootCertStore::empty())
+    .with_no_client_auth();
+
+let socket = ClientBuilder::new("http://localhost:4200/")
+    .namespace("/admin")
+    .on("error", |err, _| eprintln!("Error: {:#?}", err))
+    .tls_config(tls_config)
+    .connect();
+```"#
+    )]
+    pub fn tls_config(mut self, tls_config: TlsConfig) -> Self {
         self.tls_config = Some(tls_config);
         self
     }

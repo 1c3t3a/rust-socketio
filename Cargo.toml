@@ -1,2 +1,3 @@
 [workspace]
 members = ["engineio", "socketio"]
+resolver = "2"

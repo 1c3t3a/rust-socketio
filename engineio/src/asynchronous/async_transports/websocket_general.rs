@@ -1,4 +1,4 @@
-use std::{borrow::Cow, str::from_utf8, sync::Arc, task::Poll};
+use std::{sync::Arc, task::Poll};
 
 use crate::{error::Result, Error, Packet, PacketId};
 use bytes::{BufMut, Bytes, BytesMut};
@@ -9,7 +9,7 @@ use futures_util::{
 };
 use tokio::{net::TcpStream, sync::Mutex};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use tungstenite::Message;
+use tungstenite::{Message, Utf8Bytes};
 
 type AsyncWebsocketSender = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 type AsyncWebsocketReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
@@ -42,9 +42,9 @@ impl AsyncWebsocketGeneralTransport {
         let mut sender = self.sender.lock().await;
 
         sender
-            .send(Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
+            .send(Message::text(Utf8Bytes::try_from(Bytes::from(
                 Packet::new(PacketId::Ping, Bytes::from("probe")),
-            ))?)))
+            ))?))
             .await?;
 
         let msg = receiver
@@ -57,9 +57,9 @@ impl AsyncWebsocketGeneralTransport {
         }
 
         sender
-            .send(Message::text(Cow::Borrowed(from_utf8(&Bytes::from(
+            .send(Message::text(Utf8Bytes::try_from(Bytes::from(
                 Packet::new(PacketId::Upgrade, Bytes::from("")),
-            ))?)))
+            ))?))
             .await?;
 
         Ok(())
@@ -69,9 +69,9 @@ impl AsyncWebsocketGeneralTransport {
         let mut sender = self.sender.lock().await;
 
         let message = if is_binary_att {
-            Message::binary(Cow::Borrowed(data.as_ref()))
+            Message::binary(data)
         } else {
-            Message::text(Cow::Borrowed(std::str::from_utf8(data.as_ref())?))
+            Message::text(Utf8Bytes::try_from(data)?)
         };
 
         sender.send(message).await?;

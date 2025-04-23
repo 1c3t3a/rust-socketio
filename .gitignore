@@ -4,4 +4,5 @@ target
 ci/node_modules
 ci/package-lock.json
 ci/cert
+ci/keygen/Cargo.lock
 
