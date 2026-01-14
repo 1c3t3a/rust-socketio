@@ -6,6 +6,15 @@ use std::str::Utf8Error;
 use thiserror::Error;
 use tungstenite::Error as TungsteniteError;
 use url::ParseError as UrlParseError;
+#[cfg(feature = "webtransport")]
+use wtransport::error::{
+    ConnectingError as WtConnectingError,
+    ConnectionError as WtConnectionError,
+    SendDatagramError as WtSendDatagramError,
+    StreamOpeningError as WtStreamOpeningError,
+    StreamReadError as WtStreamReadError,
+    StreamWriteError as WtStreamWriteError,
+};
 
 /// Enumeration of all possible errors in the `socket.io` context.
 #[derive(Error, Debug)]
@@ -54,6 +63,27 @@ pub enum Error {
     InvalidHeaderValueFromReqwest(#[from] reqwest::header::InvalidHeaderValue),
     #[error("The server did not send a PING packet in time")]
     PingTimeout(),
+    #[cfg(feature = "webtransport")]
+    #[error("WebTransport connection error: {0}")]
+    WebTransportConnectionError(#[from] WtConnectionError),
+    #[cfg(feature = "webtransport")]
+    #[error("WebTransport connecting error: {0}")]
+    WebTransportConnectingError(#[from] WtConnectingError),
+    #[cfg(feature = "webtransport")]
+    #[error("WebTransport stream opening error: {0}")]
+    WebTransportStreamError(#[from] WtStreamOpeningError),
+    #[cfg(feature = "webtransport")]
+    #[error("WebTransport datagram send error: {0}")]
+    WebTransportDatagramError(#[from] WtSendDatagramError),
+    #[cfg(feature = "webtransport")]
+    #[error("Server did not allow upgrading to WebTransport")]
+    IllegalWebTransportUpgrade(),
+    #[cfg(feature = "webtransport")]
+    #[error("WebTransport stream read error: {0}")]
+    WebTransportStreamReadError(#[from] WtStreamReadError),
+    #[cfg(feature = "webtransport")]
+    #[error("WebTransport stream write error: {0}")]
+    WebTransportStreamWriteError(#[from] WtStreamWriteError),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;

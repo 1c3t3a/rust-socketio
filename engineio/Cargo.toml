@@ -30,6 +30,8 @@ async-stream = "0.3.6"
 thiserror = "1.0"
 native-tls = "0.2.12"
 url = "2.5.4"
+# WebTransport support (optional)
+wtransport = { version = "0.6", optional = true, features = ["dangerous-configuration"] }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }
@@ -54,3 +56,4 @@ bench = false
 default = ["async"]
 async-callbacks = []
 async = ["async-callbacks"]
+webtransport = ["wtransport"]

@@ -10,6 +10,8 @@ use crate::{
     packet::HandshakePacket,
     Error, Packet, ENGINE_IO_VERSION,
 };
+#[cfg(feature = "webtransport")]
+use crate::asynchronous::async_transports::WebTransportTransport;
 use bytes::Bytes;
 use futures_util::{future::BoxFuture, StreamExt};
 use native_tls::TlsConnector;
@@ -286,5 +288,74 @@ impl ClientBuilder {
             .upgrades
             .iter()
             .any(|upgrade| upgrade.to_lowercase() == *"websocket"))
+    }
+
+    /// Checks the handshake to see if WebTransport upgrades are allowed
+    #[cfg(feature = "webtransport")]
+    fn webtransport_upgrade(&mut self) -> Result<bool> {
+        if self.handshake.is_none() {
+            return Ok(false);
+        }
+
+        Ok(self
+            .handshake
+            .as_ref()
+            .unwrap()
+            .upgrades
+            .iter()
+            .any(|upgrade| upgrade.to_lowercase() == *"webtransport"))
+    }
+
+    /// Build socket with a WebTransport transport
+    ///
+    /// WebTransport provides lower latency than WebSocket by using HTTP/3 + QUIC.
+    /// This method creates a new WebTransport connection and performs the handshake.
+    ///
+    /// Note: The URL scheme should be "https" for WebTransport connections.
+    #[cfg(feature = "webtransport")]
+    pub async fn build_webtransport(mut self) -> Result<Client> {
+        let headers = if let Some(map) = self.headers.clone() {
+            Some(map.try_into()?)
+        } else {
+            None
+        };
+
+        // WebTransport requires HTTPS
+        if self.url.scheme() != "https" {
+            return Err(Error::InvalidUrlScheme(
+                "WebTransport requires https scheme".to_string(),
+            ));
+        }
+
+        let mut transport = WebTransportTransport::new(self.url.clone(), headers).await?;
+
+        if self.handshake.is_some() {
+            transport.upgrade().await?;
+        } else {
+            self.handshake_with_transport(&mut transport).await?;
+        }
+
+        // SAFETY: handshake function called previously.
+        Ok(Client::new(InnerSocket::new(
+            transport.into(),
+            self.handshake.unwrap(),
+            self.on_close,
+            self.on_data,
+            self.on_error,
+            self.on_open,
+            self.on_packet,
+        )))
+    }
+
+    /// Build socket with WebTransport if allowed by handshake, otherwise fall back to websocket
+    #[cfg(feature = "webtransport")]
+    pub async fn build_webtransport_with_upgrade(mut self) -> Result<Client> {
+        self.handshake().await?;
+
+        if self.webtransport_upgrade()? {
+            self.build_webtransport().await
+        } else {
+            Err(Error::IllegalWebTransportUpgrade())
+        }
     }
 }

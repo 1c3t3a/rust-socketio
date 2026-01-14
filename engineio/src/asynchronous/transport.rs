@@ -7,6 +7,8 @@ use std::{pin::Pin, time::SystemTime};
 use url::Url;
 
 use super::async_transports::{PollingTransport, WebsocketSecureTransport, WebsocketTransport};
+#[cfg(feature = "webtransport")]
+use super::async_transports::WebTransportTransport;
 
 #[async_trait]
 pub trait AsyncTransport: Stream<Item = Result<Bytes>> + Unpin {
@@ -39,6 +41,8 @@ pub enum AsyncTransportType {
     Polling(PollingTransport),
     Websocket(WebsocketTransport),
     WebsocketSecure(WebsocketSecureTransport),
+    #[cfg(feature = "webtransport")]
+    WebTransport(WebTransportTransport),
 }
 
 impl From<PollingTransport> for AsyncTransportType {
@@ -59,6 +63,13 @@ impl From<WebsocketSecureTransport> for AsyncTransportType {
     }
 }
 
+#[cfg(feature = "webtransport")]
+impl From<WebTransportTransport> for AsyncTransportType {
+    fn from(transport: WebTransportTransport) -> Self {
+        AsyncTransportType::WebTransport(transport)
+    }
+}
+
 #[cfg(feature = "async")]
 impl AsyncTransportType {
     pub fn as_transport(&self) -> &(dyn AsyncTransport + Send) {
@@ -66,6 +77,8 @@ impl AsyncTransportType {
             AsyncTransportType::Polling(transport) => transport,
             AsyncTransportType::Websocket(transport) => transport,
             AsyncTransportType::WebsocketSecure(transport) => transport,
+            #[cfg(feature = "webtransport")]
+            AsyncTransportType::WebTransport(transport) => transport,
         }
     }
 
@@ -74,6 +87,8 @@ impl AsyncTransportType {
             AsyncTransportType::Polling(transport) => Box::pin(transport),
             AsyncTransportType::Websocket(transport) => Box::pin(transport),
             AsyncTransportType::WebsocketSecure(transport) => Box::pin(transport),
+            #[cfg(feature = "webtransport")]
+            AsyncTransportType::WebTransport(transport) => Box::pin(transport),
         }
     }
 }
