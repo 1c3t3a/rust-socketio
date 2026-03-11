@@ -39,6 +39,9 @@ version = "1.40.0"
 # we need the `#[tokio::test]` macro
 features = ["macros", "rt-multi-thread"]
 
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(tarpaulin)'] }
+
 [features]
 default = []
 async-callbacks = ["rust_engineio/async-callbacks"]

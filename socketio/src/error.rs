@@ -40,7 +40,7 @@ pub enum Error {
     IncompleteIo(#[from] IoError),
     #[error("Error while parsing an integer")]
     InvalidInteger(#[from] ParseIntError),
-    #[error("EngineIO Error")]
+    #[error("EngineIO Error: {0}")]
     IncompleteResponseFromEngineIo(#[from] rust_engineio::Error),
     #[error("Invalid packet type while reading attachments")]
     InvalidAttachmentPacketType(u8),

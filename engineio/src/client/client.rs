@@ -353,12 +353,14 @@ impl Client {
         self.socket.is_connected()
     }
 
-    pub fn iter(&self) -> Iter {
+    #[allow(dead_code)]
+    pub fn iter(&self) -> Iter<'_> {
         Iter { socket: self }
     }
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct Iter<'a> {
     socket: &'a Client,
 }

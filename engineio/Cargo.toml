@@ -50,6 +50,9 @@ harness = false
 [lib]
 bench = false
 
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(tarpaulin)'] }
+
 [features]
 default = ["async"]
 async-callbacks = []

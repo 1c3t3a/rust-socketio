@@ -472,8 +472,34 @@ impl Client {
     /// Handles a binary event.
     #[inline]
     async fn handle_binary_event(&self, packet: &Packet) -> Result<()> {
-        let event = if let Some(string_data) = &packet.data {
-            string_data.replace('\"', "").into()
+        // Extract event name from packet data
+        // The packet parser strips brackets and placeholder, so data format is:
+        // - `"event_name"` (just the quoted event name)
+        // - `"event_name",{metadata}` (event name followed by metadata)
+        let event = if let Some(ref data) = packet.data {
+            // Try to extract the event name - it's the first quoted string
+            let trimmed = data.trim();
+            if trimmed.starts_with('"') {
+                // Find the end of the quoted string
+                if let Some(end_quote) = trimmed[1..].find('"') {
+                    let event_name = &trimmed[1..end_quote + 1];
+                    Event::from(event_name)
+                } else {
+                    Event::Message
+                }
+            } else {
+                // Try parsing as JSON array (fallback)
+                match serde_json::from_str::<serde_json::Value>(data) {
+                    Ok(serde_json::Value::Array(contents)) if !contents.is_empty() => {
+                        if let Some(serde_json::Value::String(ev)) = contents.first() {
+                            Event::from(ev.as_str())
+                        } else {
+                            Event::Message
+                        }
+                    }
+                    _ => Event::Message
+                }
+            }
         } else {
             Event::Message
         };

@@ -90,22 +90,57 @@ impl Socket {
     }
 
     fn stream(
-        client: EngineClient,
+        mut client: EngineClient,
         is_connected: Arc<AtomicBool>,
     ) -> Pin<Box<impl Stream<Item = Result<Packet>> + Send>> {
         Box::pin(try_stream! {
-                for await received_data in client.clone() {
-                    let packet = received_data?;
+            loop {
+                let received_data = match client.next().await {
+                    Some(result) => result,
+                    None => break,
+                };
+                let packet = received_data?;
 
-                    if packet.packet_id == EnginePacketId::Message
-                        || packet.packet_id == EnginePacketId::MessageBinary
-                    {
-                        let packet = Self::handle_engineio_packet(packet, client.clone()).await?;
-                        Self::handle_socketio_packet(&packet, is_connected.clone());
+                if packet.packet_id == EnginePacketId::Message
+                    || packet.packet_id == EnginePacketId::MessageBinary
+                {
+                    let mut socket_packet = Packet::try_from(&packet.data)?;
 
-                        yield packet;
+                    // Collect binary attachments inline from the same stream.
+                    // This fixes a race condition where `client.clone()` caused
+                    // the outer loop and the attachment loop to compete for packets,
+                    // resulting in binary WebSocket frames being misinterpreted as
+                    // Socket.IO text packets (causing EngineIO Error / InvalidUtf8).
+                    if socket_packet.attachment_count > 0 {
+                        let mut attachments_left = socket_packet.attachment_count;
+                        let mut attachments = Vec::new();
+                        while attachments_left > 0 {
+                            let next = match client.next().await {
+                                Some(result) => result,
+                                None => Err(Error::IncompletePacket())?,
+                            };
+                            match next {
+                                Err(err) => Err(err)?,
+                                Ok(att_packet) => match att_packet.packet_id {
+                                    EnginePacketId::MessageBinary | EnginePacketId::Message => {
+                                        attachments.push(att_packet.data);
+                                        attachments_left -= 1;
+                                    }
+                                    _ => {
+                                        Err(Error::InvalidAttachmentPacketType(
+                                            att_packet.packet_id.into(),
+                                        ))?;
+                                    }
+                                },
+                            }
+                        }
+                        socket_packet.attachments = Some(attachments);
                     }
+
+                    Self::handle_socketio_packet(&socket_packet, is_connected.clone());
+                    yield socket_packet;
                 }
+            }
         })
     }
 
@@ -126,40 +161,9 @@ impl Socket {
         }
     }
 
-    /// Handles new incoming engineio packets
-    async fn handle_engineio_packet(
-        packet: EnginePacket,
-        mut client: EngineClient,
-    ) -> Result<Packet> {
-        let mut socket_packet = Packet::try_from(&packet.data)?;
-
-        // Only handle attachments if there are any
-        if socket_packet.attachment_count > 0 {
-            let mut attachments_left = socket_packet.attachment_count;
-            let mut attachments = Vec::new();
-            while attachments_left > 0 {
-                // TODO: This is not nice! Find a different way to peek the next element while mapping the stream
-                let next = client.next().await.unwrap();
-                match next {
-                    Err(err) => return Err(err.into()),
-                    Ok(packet) => match packet.packet_id {
-                        EnginePacketId::MessageBinary | EnginePacketId::Message => {
-                            attachments.push(packet.data);
-                            attachments_left -= 1;
-                        }
-                        _ => {
-                            return Err(Error::InvalidAttachmentPacketType(
-                                packet.packet_id.into(),
-                            ));
-                        }
-                    },
-                }
-            }
-            socket_packet.attachments = Some(attachments);
-        }
-
-        Ok(socket_packet)
-    }
+    // Note: handle_engineio_packet was removed and its logic inlined into stream()
+    // to fix a race condition where client.clone() caused the outer iteration loop
+    // and the binary attachment collection loop to compete for the same packets.
 
     fn is_engineio_connected(&self) -> bool {
         self.engine_client.is_connected()

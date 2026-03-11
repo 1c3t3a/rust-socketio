@@ -399,6 +399,7 @@ impl RawClient {
     }
 }
 
+#[allow(dead_code)]
 pub struct Iter<'a> {
     socket: &'a RawClient,
 }

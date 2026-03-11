@@ -86,8 +86,10 @@ impl AsyncWebsocketGeneralTransport {
             match next {
                 Some(Ok(Message::Text(str))) => return Ok(Some(Bytes::from(str))),
                 Some(Ok(Message::Binary(data))) => {
+                    // For WebSocket binary frames (attachments), use 'B' (0x42) as marker
+                    // This indicates raw binary that should bypass normal packet parsing
                     let mut msg = BytesMut::with_capacity(data.len() + 1);
-                    msg.put_u8(PacketId::Message as u8);
+                    msg.put_u8(b'B'); // Raw binary marker
                     msg.put(data.as_ref());
 
                     return Ok(Some(msg.freeze()));
@@ -115,8 +117,10 @@ impl Stream for AsyncWebsocketGeneralTransport {
             match next {
                 Some(Ok(Message::Text(str))) => return Poll::Ready(Some(Ok(Bytes::from(str)))),
                 Some(Ok(Message::Binary(data))) => {
+                    // For WebSocket binary frames (attachments), use 'B' (0x42) as marker
+                    // This indicates raw binary that should bypass normal packet parsing
                     let mut msg = BytesMut::with_capacity(data.len() + 1);
-                    msg.put_u8(PacketId::Message as u8);
+                    msg.put_u8(b'B'); // Raw binary marker (not a standard Engine.IO packet type)
                     msg.put(data.as_ref());
 
                     return Poll::Ready(Some(Ok(msg.freeze())));

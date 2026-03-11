@@ -15,7 +15,7 @@ use tokio::{runtime::Handle, sync::Mutex, time::Instant};
 use crate::{
     asynchronous::{callback::OptionalCallback, transport::AsyncTransportType},
     error::Result,
-    packet::{HandshakePacket, Payload},
+    packet::{HandshakePacket, Payload, RAW_BINARY_MARKER},
     Error, Packet, PacketId,
 };
 
@@ -119,10 +119,20 @@ impl Socket {
     /// Helper method that parses bytes and returns an iterator over the elements.
     fn parse_payload(bytes: Bytes) -> impl Stream<Item = Result<Packet>> {
         try_stream! {
-            let payload = Payload::try_from(bytes);
-
-            for elem in payload?.into_iter() {
-                yield elem;
+            let first_byte = bytes.first().copied();
+            
+            // Check for raw binary marker - always single packet, never split
+            if first_byte == Some(RAW_BINARY_MARKER) {
+                yield Packet::try_from(bytes)?;
+            } else if !bytes.iter().any(|&b| b == 0x1e) {
+                // No separator - definitely a single packet
+                yield Packet::try_from(bytes)?;
+            } else {
+                // Has separator - use standard Payload parsing for batched packets
+                let payload = Payload::try_from(bytes)?;
+                for elem in payload.into_iter() {
+                    yield elem;
+                }
             }
         }
     }

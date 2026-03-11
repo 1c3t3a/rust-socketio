@@ -8,6 +8,10 @@ use std::fmt::{Display, Formatter, Result as FmtResult, Write};
 use std::ops::Index;
 
 use crate::error::{Error, Result};
+
+/// Byte marker for raw binary payloads (WebSocket binary frames), as opposed to base64 'b'.
+pub const RAW_BINARY_MARKER: u8 = b'B';
+
 /// Enumeration of the `engine.io` `Packet` types.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum PacketId {
@@ -65,6 +69,7 @@ impl TryFrom<u8> for PacketId {
             4 | b'4' => Ok(PacketId::Message),
             5 | b'5' => Ok(PacketId::Upgrade),
             6 | b'6' => Ok(PacketId::Noop),
+            RAW_BINARY_MARKER => Ok(PacketId::MessageBinary), // Raw binary marker from WebSocket binary frames
             _ => Err(Error::InvalidPacketId(b)),
         }
     }
@@ -115,13 +120,17 @@ impl TryFrom<Bytes> for Packet {
             return Err(Error::IncompletePacket());
         }
 
-        let is_base64 = *bytes.first().ok_or(Error::IncompletePacket())? == b'b';
+        let first_byte = *bytes.first().ok_or(Error::IncompletePacket())?;
+        let is_base64 = first_byte == b'b';
+        let is_raw_binary = first_byte == RAW_BINARY_MARKER;
 
-        // only 'messages' packets could be encoded
+        // Determine packet type
         let packet_id = if is_base64 {
             PacketId::MessageBinary
+        } else if is_raw_binary {
+            PacketId::MessageBinary // Raw binary also becomes MessageBinary
         } else {
-            (*bytes.first().ok_or(Error::IncompletePacket())?).try_into()?
+            first_byte.try_into()?
         };
 
         if bytes.len() == 1 && packet_id == PacketId::Message {
@@ -133,8 +142,10 @@ impl TryFrom<Bytes> for Packet {
         Ok(Packet {
             packet_id,
             data: if is_base64 {
+                // Base64 encoded binary needs decoding
                 Bytes::from(general_purpose::STANDARD.decode(data.as_ref())?)
             } else {
+                // Raw binary (from 'B' marker) or regular text - pass through as-is
                 data
             },
         })
