@@ -270,6 +270,10 @@ impl RawClient {
         Ok(())
     }
 
+    pub(crate) fn notify_close(&self) -> Result<()> {
+        self.callback(&Event::Close, "")
+    }
+
     /// Handles the incoming acks and classifies what callbacks to call and how.
     #[inline]
     fn handle_ack(&self, socket_packet: &Packet) -> Result<()> {
