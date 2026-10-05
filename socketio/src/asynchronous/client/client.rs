@@ -393,7 +393,8 @@ impl Client {
         E: Into<Event>,
         D: Into<Payload>,
     {
-        let id = thread_rng().gen_range(0..999);
+        let mut outstanding_acks = self.outstanding_acks.write().await;
+        let id = Ack::next_id(&outstanding_acks, thread_rng().gen_range(0..=i32::MAX));
         let socket_packet =
             Packet::new_from_payload(data.into(), event.into(), &self.nsp, Some(id))?;
 
@@ -405,7 +406,8 @@ impl Client {
         };
 
         // add the ack to the tuple of outstanding acks
-        self.outstanding_acks.write().await.push(ack);
+        outstanding_acks.push(ack);
+        drop(outstanding_acks);
 
         self.socket.read().await.send(socket_packet).await
     }
@@ -434,36 +436,26 @@ impl Client {
     /// Handles the incoming acks and classifies what callbacks to call and how.
     #[inline]
     async fn handle_ack(&self, socket_packet: &Packet) -> Result<()> {
-        let mut to_be_removed = Vec::new();
         if let Some(id) = socket_packet.id {
-            for (index, ack) in self.outstanding_acks.write().await.iter_mut().enumerate() {
-                if ack.id == id {
-                    to_be_removed.push(index);
-
-                    if ack.time_started.elapsed() < ack.timeout {
-                        if let Some(ref payload) = socket_packet.data {
+            let matching = Ack::take_matching(&mut *self.outstanding_acks.write().await, id);
+            for mut ack in matching {
+                if ack.time_started.elapsed() < ack.timeout {
+                    if let Some(ref payload) = socket_packet.data {
+                        ack.callback.deref_mut()(Payload::from(payload.to_owned()), self.clone())
+                            .await;
+                    }
+                    if let Some(ref attachments) = socket_packet.attachments {
+                        if let Some(payload) = attachments.get(0) {
                             ack.callback.deref_mut()(
-                                Payload::from(payload.to_owned()),
+                                Payload::Binary(payload.to_owned()),
                                 self.clone(),
                             )
                             .await;
                         }
-                        if let Some(ref attachments) = socket_packet.attachments {
-                            if let Some(payload) = attachments.get(0) {
-                                ack.callback.deref_mut()(
-                                    Payload::Binary(payload.to_owned()),
-                                    self.clone(),
-                                )
-                                .await;
-                            }
-                        }
-                    } else {
-                        trace!("Received an Ack that is now timed out (elapsed time was longer than specified duration)");
                     }
+                } else {
+                    trace!("Received an Ack that is now timed out (elapsed time was longer than specified duration)");
                 }
-            }
-            for index in to_be_removed {
-                self.outstanding_acks.write().await.remove(index);
             }
         }
         Ok(())
