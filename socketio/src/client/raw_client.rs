@@ -27,6 +27,67 @@ pub struct Ack {
     callback: Callback<SocketCallback>,
 }
 
+impl Ack {
+    // The caller holds the registry lock until this ID has been inserted.
+    fn next_id(acks: &[Self], mut candidate: i32) -> i32 {
+        while acks.iter().any(|ack| ack.id == candidate) {
+            candidate = if candidate == i32::MAX {
+                0
+            } else {
+                candidate + 1
+            };
+        }
+        candidate
+    }
+    fn take_matching(acks: &mut Vec<Self>, id: i32) -> Vec<Self> {
+        let mut matching = Vec::new();
+        let mut index = 0;
+        while index < acks.len() {
+            if acks[index].id == id {
+                matching.push(acks.remove(index));
+            } else {
+                index += 1;
+            }
+        }
+        matching
+    }
+}
+#[cfg(test)]
+mod regression_tests {
+    use super::*;
+    fn ack(id: i32) -> Ack {
+        Ack {
+            id,
+            timeout: Duration::from_secs(60),
+            time_started: Instant::now(),
+            callback: Callback::<SocketCallback>::new(|_, _| {}),
+        }
+    }
+    #[test]
+    fn occupied_id_is_not_reused() {
+        let mut pending = vec![ack(i32::MAX), ack(0), ack(1)];
+        let id = Ack::next_id(&pending, i32::MAX);
+        assert!(!pending.iter().any(|ack| ack.id == id));
+        pending.push(ack(id));
+        let next = Ack::next_id(&pending, i32::MAX);
+        assert!(!pending.iter().any(|ack| ack.id == next));
+    }
+    #[test]
+    fn duplicate_ack_removes_all_matches_and_preserves_other_requests() {
+        let mut pending = vec![ack(7), ack(8), ack(7)];
+        let matches = Ack::take_matching(&mut pending, 7);
+        assert_eq!(
+            matches.iter().map(|ack| ack.id).collect::<Vec<_>>(),
+            vec![7, 7]
+        );
+        assert_eq!(
+            pending.iter().map(|ack| ack.id).collect::<Vec<_>>(),
+            vec![8]
+        );
+        assert!(Ack::take_matching(&mut pending, 7).is_empty());
+    }
+}
+
 /// A socket which handles communication with the server. It's initialized with
 /// a specific address as well as an optional namespace to connect to. If `None`
 /// is given the server will connect to the default namespace `"/"`.
@@ -203,7 +264,8 @@ impl RawClient {
         E: Into<Event>,
         D: Into<Payload>,
     {
-        let id = thread_rng().gen_range(0..999);
+        let mut outstanding_acks = self.outstanding_acks.lock()?;
+        let id = Ack::next_id(&outstanding_acks, thread_rng().gen_range(0..=i32::MAX));
         let socket_packet =
             Packet::new_from_payload(data.into(), event.into(), &self.nsp, Some(id))?;
 
@@ -215,7 +277,8 @@ impl RawClient {
         };
 
         // add the ack to the tuple of outstanding acks
-        self.outstanding_acks.lock()?.push(ack);
+        outstanding_acks.push(ack);
+        drop(outstanding_acks);
 
         self.socket.send(socket_packet)?;
         Ok(())
@@ -279,16 +342,13 @@ impl RawClient {
 
         let outstanding_ack = {
             let mut outstanding_acks = self.outstanding_acks.lock()?;
-            outstanding_acks
-                .iter()
-                .position(|ack| ack.id == id)
-                .map(|pos| outstanding_acks.remove(pos))
+            Ack::take_matching(&mut outstanding_acks, id)
         };
 
         // If we found a matching ack, call its callback otherwise ignore it.
         // The official implementation just removes the ack id on timeout:
         // https://github.com/socketio/socket.io-client/blob/main/lib/socket.ts#L467-L495
-        if let Some(mut ack) = outstanding_ack {
+        for mut ack in outstanding_ack {
             if ack.time_started.elapsed() < ack.timeout {
                 if let Some(ref payload) = socket_packet.data {
                     ack.callback.deref_mut()(Payload::from(payload.to_owned()), self.clone());
