@@ -1,16 +1,28 @@
 use std::{
     fmt::Debug,
+    future::Future,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex as StdMutex,
     },
 };
+
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
+
+#[cfg(test)]
+use tokio::sync::Notify;
 
 use async_stream::try_stream;
 use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
-use tokio::{runtime::Handle, sync::Mutex, time::Instant};
+use tokio::{
+    runtime::Handle,
+    sync::{Mutex, Mutex as AsyncMutex},
+    task::{AbortHandle, JoinHandle},
+    time::Instant,
+};
 
 use crate::{
     asynchronous::{callback::OptionalCallback, transport::AsyncTransportType},
@@ -34,6 +46,120 @@ pub struct Socket {
     last_pong: Arc<Mutex<Instant>>,
     connection_data: Arc<HandshakePacket>,
     max_ping_timeout: u64,
+    callback_tasks: Arc<CallbackTasks>,
+}
+
+#[derive(Default)]
+struct CallbackTasks {
+    tasks: StdMutex<Vec<Arc<CallbackTask>>>,
+    cancelled: AtomicBool,
+    #[cfg(test)]
+    join_calls: AtomicUsize,
+    #[cfg(test)]
+    join_calls_changed: Notify,
+    #[cfg(test)]
+    handle_joins: AtomicUsize,
+    #[cfg(test)]
+    handle_joins_changed: Notify,
+}
+
+struct CallbackTask {
+    abort: AbortHandle,
+    join: AsyncMutex<Option<JoinHandle<()>>>,
+    finished: Arc<AtomicBool>,
+}
+
+struct CallbackTaskFinished(Arc<AtomicBool>);
+
+impl Drop for CallbackTaskFinished {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+impl CallbackTasks {
+    fn spawn(&self, handle: &Handle, callback: impl Future<Output = ()> + Send + 'static) {
+        let mut tasks = self.tasks.lock().expect("callback task lock poisoned");
+        if !self.cancelled.load(Ordering::Acquire) {
+            tasks.retain(|task| !task.finished.load(Ordering::Acquire));
+            let finished = Arc::new(AtomicBool::new(false));
+            let task_finished = finished.clone();
+            let join = handle.spawn(async move {
+                let _finished = CallbackTaskFinished(task_finished);
+                callback.await;
+            });
+            let abort = join.abort_handle();
+            tasks.push(Arc::new(CallbackTask {
+                abort,
+                join: AsyncMutex::new(Some(join)),
+                finished,
+            }));
+        }
+    }
+
+    async fn abort_and_join(&self) {
+        #[cfg(test)]
+        {
+            self.join_calls.fetch_add(1, Ordering::AcqRel);
+            self.join_calls_changed.notify_one();
+        }
+        self.abort();
+        let tasks = self
+            .tasks
+            .lock()
+            .expect("callback task lock poisoned")
+            .clone();
+        for task in tasks {
+            let mut join_guard = task.join.lock().await;
+            if let Some(join) = join_guard.as_mut() {
+                #[cfg(test)]
+                {
+                    self.handle_joins.fetch_add(1, Ordering::AcqRel);
+                    self.handle_joins_changed.notify_one();
+                }
+                let _ = join.await;
+                *join_guard = None;
+            }
+        }
+        self.tasks
+            .lock()
+            .expect("callback task lock poisoned")
+            .retain(|task| !task.finished.load(Ordering::Acquire));
+    }
+
+    fn abort(&self) {
+        let tasks = self.tasks.lock().expect("callback task lock poisoned");
+        self.cancelled.store(true, Ordering::Release);
+        for task in tasks.iter() {
+            task.abort.abort();
+        }
+    }
+}
+
+impl Drop for CallbackTasks {
+    fn drop(&mut self) {
+        if let Ok(tasks) = self.tasks.get_mut() {
+            for task in tasks.drain(..) {
+                task.abort.abort();
+            }
+        }
+    }
+}
+
+/// Controls callback tasks started by an asynchronous Engine.IO client.
+#[derive(Clone)]
+pub struct CallbackTaskControl(Arc<CallbackTasks>);
+
+impl CallbackTaskControl {
+    /// Abort all callbacks for this connection and prevent future callbacks.
+    pub fn abort(&self) {
+        self.0.abort();
+    }
+
+    /// Abort all callbacks and wait until each task has stopped.
+    pub async fn abort_and_join(&self) {
+        self.0.abort_and_join().await;
+    }
 }
 
 impl Socket {
@@ -62,6 +188,7 @@ impl Socket {
             last_pong: Arc::new(Mutex::new(Instant::now())),
             connection_data: Arc::new(handshake),
             max_ping_timeout,
+            callback_tasks: Arc::new(CallbackTasks::default()),
         }
     }
 
@@ -73,7 +200,8 @@ impl Socket {
 
         if let Some(on_open) = self.on_open.as_ref() {
             let on_open = on_open.clone();
-            self.handle.spawn(async move { on_open(()).await });
+            self.callback_tasks
+                .spawn(&self.handle, async move { on_open(()).await });
         }
 
         // set the last ping to now and set the connected state
@@ -146,7 +274,8 @@ impl Socket {
     pub async fn disconnect(&self) -> Result<()> {
         if let Some(on_close) = self.on_close.as_ref() {
             let on_close = on_close.clone();
-            self.handle.spawn(async move { on_close(()).await });
+            self.callback_tasks
+                .spawn(&self.handle, async move { on_close(()).await });
         }
 
         self.emit(Packet::new(PacketId::Close, Bytes::new()))
@@ -191,7 +320,8 @@ impl Socket {
     fn call_error_callback(&self, text: String) {
         if let Some(on_error) = self.on_error.as_ref() {
             let on_error = on_error.clone();
-            self.handle.spawn(async move { on_error(text).await });
+            self.callback_tasks
+                .spawn(&self.handle, async move { on_error(text).await });
         }
     }
 
@@ -224,24 +354,31 @@ impl Socket {
     pub(crate) fn handle_packet(&self, packet: Packet) {
         if let Some(on_packet) = self.on_packet.as_ref() {
             let on_packet = on_packet.clone();
-            self.handle.spawn(async move { on_packet(packet).await });
+            self.callback_tasks
+                .spawn(&self.handle, async move { on_packet(packet).await });
         }
     }
 
     pub(crate) fn handle_data(&self, data: Bytes) {
         if let Some(on_data) = self.on_data.as_ref() {
             let on_data = on_data.clone();
-            self.handle.spawn(async move { on_data(data).await });
+            self.callback_tasks
+                .spawn(&self.handle, async move { on_data(data).await });
         }
     }
 
     pub(crate) fn handle_close(&self) {
         if let Some(on_close) = self.on_close.as_ref() {
             let on_close = on_close.clone();
-            self.handle.spawn(async move { on_close(()).await });
+            self.callback_tasks
+                .spawn(&self.handle, async move { on_close(()).await });
         }
 
         self.connected.store(false, Ordering::Release);
+    }
+
+    pub(crate) fn callback_task_control(&self) -> CallbackTaskControl {
+        CallbackTaskControl(self.callback_tasks.clone())
     }
 
     /// Returns the packet stream for the client.
@@ -290,5 +427,137 @@ impl Debug for Socket {
             .field("last_pong", &self.last_pong)
             .field("connection_data", &self.connection_data)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod callback_task_tests {
+    use super::{CallbackTaskControl, CallbackTasks};
+    use std::sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc, Condvar, Mutex,
+    };
+    use tokio::{
+        runtime::Handle,
+        sync::{oneshot, Notify},
+    };
+
+    struct MarkDropped(Arc<AtomicBool>);
+
+    impl Drop for MarkDropped {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
+    #[tokio::test]
+    async fn callback_shutdown_aborts_and_joins_running_callback() {
+        let tasks = CallbackTasks::default();
+        let (started_tx, started_rx) = oneshot::channel();
+        let dropped = Arc::new(AtomicBool::new(false));
+        let callback_dropped = dropped.clone();
+
+        tasks.spawn(&Handle::current(), async move {
+            let _drop_guard = MarkDropped(callback_dropped);
+            let _ = started_tx.send(());
+            std::future::pending::<()>().await;
+        });
+
+        started_rx.await.expect("callback should start");
+        tasks.abort_and_join().await;
+
+        assert!(dropped.load(Ordering::Acquire));
+    }
+
+    struct BlockingDrop {
+        started: Option<oneshot::Sender<()>>,
+        release: Arc<(Mutex<bool>, Condvar)>,
+    }
+
+    async fn wait_for(counter: &AtomicUsize, changed: &Notify, expected: usize) {
+        while counter.load(Ordering::Acquire) < expected {
+            changed.notified().await;
+        }
+    }
+
+    impl Drop for BlockingDrop {
+        fn drop(&mut self) {
+            if let Some(started) = self.started.take() {
+                let _ = started.send(());
+            }
+            let (lock, changed) = &*self.release;
+            let mut released = lock.lock().expect("drop release lock poisoned");
+            while !*released {
+                released = changed.wait(released).expect("drop release lock poisoned");
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn canceled_callback_join_retains_handle_for_a_later_join() {
+        let tasks = Arc::new(CallbackTasks::default());
+        let control = CallbackTaskControl(tasks.clone());
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (started_tx, started_rx) = oneshot::channel();
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let callback_release = release.clone();
+        tasks.spawn(&Handle::current(), async move {
+            let _drop_guard = BlockingDrop {
+                started: Some(started_tx),
+                release: callback_release,
+            };
+            let _ = entered_tx.send(());
+            std::future::pending::<()>().await;
+        });
+
+        entered_rx.await.expect("callback should start");
+        control.abort();
+        started_rx.await.expect("callback teardown should start");
+
+        let first_control = control.clone();
+        let first_join = tokio::spawn(async move { first_control.abort_and_join().await });
+        wait_for(&tasks.join_calls, &tasks.join_calls_changed, 1).await;
+        wait_for(&tasks.handle_joins, &tasks.handle_joins_changed, 1).await;
+        first_join.abort();
+        assert!(first_join.await.unwrap_err().is_cancelled());
+
+        let later_control = control.clone();
+        let later_join = tokio::spawn(async move { later_control.abort_and_join().await });
+        let concurrent_control = control.clone();
+        let concurrent_join =
+            tokio::spawn(async move { concurrent_control.abort_and_join().await });
+        wait_for(&tasks.join_calls, &tasks.join_calls_changed, 3).await;
+        let handle_join_observed = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            wait_for(&tasks.handle_joins, &tasks.handle_joins_changed, 2),
+        )
+        .await
+        .is_ok();
+        let later_was_pending = !later_join.is_finished();
+        let concurrent_was_pending = !concurrent_join.is_finished();
+
+        let (lock, changed) = &*release;
+        *lock.lock().unwrap() = true;
+        changed.notify_all();
+        tokio::time::timeout(std::time::Duration::from_secs(2), later_join)
+            .await
+            .expect("later join should finish after callback teardown")
+            .expect("join task should not panic");
+        tokio::time::timeout(std::time::Duration::from_secs(2), concurrent_join)
+            .await
+            .expect("concurrent join should finish after callback teardown")
+            .expect("concurrent join task should not panic");
+        assert!(
+            handle_join_observed,
+            "a cloned join should await the retained task handle"
+        );
+        assert!(
+            later_was_pending,
+            "later join should remain pending until callback teardown"
+        );
+        assert!(
+            concurrent_was_pending,
+            "concurrent join should remain pending until callback teardown"
+        );
     }
 }

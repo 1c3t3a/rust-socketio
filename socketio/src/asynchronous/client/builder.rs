@@ -14,7 +14,7 @@ use super::{
     callback::{
         Callback, DynAsyncAnyCallback, DynAsyncCallback, DynAsyncReconnectSettingsCallback,
     },
-    client::{Client, ReconnectSettings},
+    client::{Client, ManagedClient, ReconnectSettings},
 };
 use crate::asynchronous::socket::Socket as InnerSocket;
 
@@ -428,6 +428,20 @@ impl ClientBuilder {
         socket.poll_stream().await?;
 
         Ok(socket)
+    }
+
+    /// Connect while retaining ownership of the packet polling and reconnect task.
+    ///
+    /// Call [`ManagedClient::shutdown`] to stop and join all connection-owned
+    /// background work. Dropping the returned handle requests cancellation and
+    /// aborts its polling task. Existing [`connect`](Self::connect) behavior and
+    /// reconnect defaults are unchanged.
+    // Keep the crate's established unboxed Error return type for this public API.
+    #[allow(clippy::result_large_err)]
+    pub async fn connect_managed(self) -> Result<ManagedClient> {
+        let mut socket = self.connect_manual().await?;
+        let (stop_tx, poll_task) = socket.poll_stream_managed().await;
+        Ok(ManagedClient::new(socket, stop_tx, poll_task))
     }
 
     /// Creates a new Socket that can be used for reconnections

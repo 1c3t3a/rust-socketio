@@ -1,7 +1,9 @@
 use std::{fmt::Debug, pin::Pin};
 
 use crate::{
-    asynchronous::{async_socket::Socket as InnerSocket, generator::StreamGenerator},
+    asynchronous::{
+        async_socket::Socket as InnerSocket, generator::StreamGenerator, CallbackTaskControl,
+    },
     error::Result,
     Packet,
 };
@@ -42,6 +44,11 @@ impl Client {
     /// Disconnects the connection.
     pub async fn disconnect(&self) -> Result<()> {
         self.socket.disconnect().await
+    }
+
+    /// Return a handle for aborting and joining callbacks created by this client.
+    pub fn callback_task_control(&self) -> CallbackTaskControl {
+        self.socket.callback_task_control()
     }
 
     /// Sends a packet to the server.

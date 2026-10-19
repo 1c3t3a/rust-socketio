@@ -168,6 +168,32 @@ async fn main() {
 }
 ```
 
+Callers that supervise their own reconnect policy can use the managed
+connection API. It preserves the builder's reconnect settings, but retains the
+polling task so shutdown can stop and join it:
+
+```rust
+use rust_socketio::asynchronous::ClientBuilder;
+
+#[tokio::main]
+async fn main() {
+    let mut socket = ClientBuilder::new("http://localhost:4200/")
+        .reconnect(false)
+        .connect_managed()
+        .await
+        .expect("Connection failed");
+
+    // Use the same emit and acknowledgement methods as `Client`.
+    socket.shutdown().await.expect("Shutdown failed");
+}
+```
+
+`ManagedClient::shutdown` can be bounded with `tokio::time::timeout`. If that
+future is canceled, its stop signal remains sent and the managed handle retains
+the task handle for a later call to finish joining. Dropping a managed handle
+requests cancellation and aborts the poller; use `shutdown` when the caller can
+await task termination.
+
 ## Content of this repository
 
 This repository contains a rust implementation of the socket.io protocol as well as the underlying engine.io protocol.

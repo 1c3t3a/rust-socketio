@@ -33,6 +33,7 @@ serde = "1.0.215"
 [dev-dependencies]
 cargo-tarpaulin = "0.18.5"
 serial_test = "3.0.0"
+tokio-tungstenite = "0.21.0"
 
 [dev-dependencies.tokio]
 version = "1.40.0"

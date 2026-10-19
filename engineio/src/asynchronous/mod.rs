@@ -9,6 +9,8 @@ pub mod client;
 mod generator;
 
 #[cfg(feature = "async")]
+pub use async_socket::CallbackTaskControl;
+#[cfg(feature = "async")]
 pub use client::Client;
 
 #[cfg(feature = "async")]

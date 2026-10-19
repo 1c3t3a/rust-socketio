@@ -1,4 +1,11 @@
-use std::{ops::DerefMut, pin::Pin, sync::Arc};
+use std::{
+    ops::{Deref, DerefMut},
+    pin::Pin,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex as StdMutex,
+    },
+};
 
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures_util::{future::BoxFuture, stream, Stream, StreamExt};
@@ -7,7 +14,8 @@ use rand::{thread_rng, Rng};
 use rust_engineio::header::{HeaderMap, HeaderValue};
 use serde_json::Value;
 use tokio::{
-    sync::RwLock,
+    sync::{oneshot, RwLock},
+    task::JoinHandle,
     time::{sleep, Duration, Instant},
 };
 
@@ -22,6 +30,7 @@ use crate::{
     packet::{Packet, PacketId},
     CloseReason, Event, Payload,
 };
+use rust_engineio::asynchronous::CallbackTaskControl;
 
 #[derive(Default)]
 enum DisconnectReason {
@@ -89,6 +98,8 @@ pub struct Client {
     auth: Option<serde_json::Value>,
     builder: Arc<RwLock<ClientBuilder>>,
     disconnect_reason: Arc<RwLock<DisconnectReason>>,
+    callback_tasks: Arc<StdMutex<CallbackTaskControl>>,
+    shutdown_requested: Arc<AtomicBool>,
 }
 
 impl Client {
@@ -97,6 +108,7 @@ impl Client {
     /// `"/"` is taken.
     /// ```
     pub(crate) fn new(socket: InnerSocket, builder: ClientBuilder) -> Result<Self> {
+        let callback_tasks = socket.callback_task_control();
         Ok(Client {
             socket: Arc::new(RwLock::new(socket)),
             nsp: builder.namespace.to_owned(),
@@ -104,6 +116,8 @@ impl Client {
             auth: builder.auth.clone(),
             builder: Arc::new(RwLock::new(builder)),
             disconnect_reason: Arc::new(RwLock::new(DisconnectReason::default())),
+            callback_tasks: Arc::new(StdMutex::new(callback_tasks)),
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -142,6 +156,7 @@ impl Client {
         }
 
         let socket = builder.inner_create().await?;
+        let callback_tasks = socket.callback_task_control();
 
         // New inner socket that can be connected
         let mut client_socket = self.socket.write().await;
@@ -151,6 +166,17 @@ impl Client {
         // because the `connect` method we call below will need to use it
         drop(client_socket);
 
+        {
+            let mut task_control = self
+                .callback_tasks
+                .lock()
+                .expect("callback task lock poisoned");
+            *task_control = callback_tasks;
+            if self.shutdown_requested.load(Ordering::Acquire) {
+                task_control.abort();
+            }
+        }
+
         self.connect().await?;
 
         Ok(())
@@ -158,6 +184,20 @@ impl Client {
 
     /// Drives the stream using a thread so messages are processed
     pub(crate) async fn poll_stream(&mut self) -> Result<()> {
+        self.spawn_poll_stream(None).await;
+        Ok(())
+    }
+
+    pub(crate) async fn poll_stream_managed(&mut self) -> (oneshot::Sender<()>, JoinHandle<()>) {
+        let (stop_tx, stop_rx) = oneshot::channel();
+        let task = self.spawn_poll_stream(Some(stop_rx)).await;
+        (stop_tx, task)
+    }
+
+    async fn spawn_poll_stream(
+        &mut self,
+        mut stop_rx: Option<oneshot::Receiver<()>>,
+    ) -> JoinHandle<()> {
         let builder = self.builder.read().await;
         let reconnect_delay_min = builder.reconnect_delay_min;
         let reconnect_delay_max = builder.reconnect_delay_max;
@@ -168,76 +208,111 @@ impl Client {
 
         let mut client_clone = self.clone();
 
-        tokio::runtime::Handle::current().spawn(async move {
-            loop {
-                let mut stream = client_clone.as_stream().await;
-                // Consume the stream until it returns None and the stream is closed.
-                while let Some(item) = stream.next().await {
-                    if let Err(e) = item {
-                        trace!("Network error occurred: {}", e);
+        let task = tokio::runtime::Handle::current().spawn(async move {
+            'poll: loop {
+                let mut stream = match select_or_stop(&mut stop_rx, client_clone.as_stream()).await
+                {
+                    PollControl::Stopped => break 'poll,
+                    PollControl::Value(stream) => stream,
+                };
+
+                loop {
+                    match select_or_stop(&mut stop_rx, stream.next()).await {
+                        PollControl::Stopped => break 'poll,
+                        PollControl::Value(Some(Err(e))) => {
+                            trace!("Network error occurred: {}", e);
+                        }
+                        PollControl::Value(Some(Ok(_))) => {}
+                        PollControl::Value(None) => break,
                     }
                 }
 
-                // Drop the stream so we can once again use `socket_clone` as mutable
                 drop(stream);
-
                 let should_reconnect = match *(client_clone.disconnect_reason.read().await) {
                     DisconnectReason::Unknown => {
-                        // If we disconnected for an unknown reason, the client might not have noticed
-                        // the closure yet. Hence, fire a transport close event to notify it.
-                        // We don't need to do that in the other cases, since proper server close
-                        // and manual client close are handled explicitly.
-                        if let Some(err) = client_clone
-                            .callback(&Event::Close, CloseReason::TransportClose.as_str())
-                            .await
-                            .err()
+                        match select_or_stop(
+                            &mut stop_rx,
+                            client_clone
+                                .callback(&Event::Close, CloseReason::TransportClose.as_str()),
+                        )
+                        .await
                         {
-                            error!("Error while notifying client of transport close: {err}")
+                            PollControl::Stopped => break 'poll,
+                            PollControl::Value(Err(err)) => {
+                                error!("Error while notifying client of transport close: {err}");
+                                reconnect
+                            }
+                            PollControl::Value(Ok(())) => reconnect,
                         }
-
-                        reconnect
                     }
                     DisconnectReason::Manual => false,
                     DisconnectReason::Server => reconnect_on_disconnect,
                 };
 
-                if should_reconnect {
-                    let mut reconnect_attempts = 0;
-                    let mut backoff = ExponentialBackoffBuilder::new()
-                        .with_initial_interval(Duration::from_millis(reconnect_delay_min))
-                        .with_max_interval(Duration::from_millis(reconnect_delay_max))
-                        .build();
+                if !should_reconnect {
+                    break 'poll;
+                }
 
-                    loop {
-                        if let Some(max_reconnect_attempts) = max_reconnect_attempts {
-                            reconnect_attempts += 1;
-                            if reconnect_attempts > max_reconnect_attempts {
-                                trace!("Max reconnect attempts reached without success");
-                                break;
-                            }
+                let mut reconnect_attempts = 0;
+                let mut backoff = ExponentialBackoffBuilder::new()
+                    .with_initial_interval(Duration::from_millis(reconnect_delay_min))
+                    .with_max_interval(Duration::from_millis(reconnect_delay_max))
+                    .build();
+
+                loop {
+                    if let Some(max_reconnect_attempts) = max_reconnect_attempts {
+                        reconnect_attempts += 1;
+                        if reconnect_attempts > max_reconnect_attempts {
+                            trace!("Max reconnect attempts reached without success");
+                            break;
                         }
-                        match client_clone.reconnect().await {
-                            Ok(_) => {
-                                trace!("Reconnected after {reconnect_attempts} attempts");
-                                break;
-                            }
-                            Err(e) => {
-                                trace!("Failed to reconnect: {e:?}");
-                                if let Some(delay) = backoff.next_backoff() {
-                                    let delay_ms = delay.as_millis();
-                                    trace!("Waiting for {delay_ms}ms before reconnecting");
-                                    sleep(delay).await;
+                    }
+
+                    match select_or_stop(&mut stop_rx, client_clone.reconnect()).await {
+                        PollControl::Stopped => break 'poll,
+                        PollControl::Value(Ok(())) => {
+                            trace!("Reconnected after {reconnect_attempts} attempts");
+                            break;
+                        }
+                        PollControl::Value(Err(e)) => {
+                            trace!("Failed to reconnect: {e:?}");
+                            if let Some(delay) = backoff.next_backoff() {
+                                let delay_ms = delay.as_millis();
+                                trace!("Waiting for {delay_ms}ms before reconnecting");
+                                if matches!(
+                                    select_or_stop(&mut stop_rx, sleep(delay)).await,
+                                    PollControl::Stopped
+                                ) {
+                                    break 'poll;
                                 }
                             }
                         }
                     }
-                } else {
-                    break;
                 }
             }
         });
 
-        Ok(())
+        task
+    }
+
+    /// Stops connection-owned background tasks and waits for them to terminate.
+    ///
+    /// Prefer [`ManagedClient::shutdown`] when the client was created through
+    /// [`ClientBuilder::connect_managed`].
+    pub(crate) fn abort_callbacks(&self) {
+        self.callback_tasks
+            .lock()
+            .expect("callback task lock poisoned")
+            .abort();
+    }
+
+    pub(crate) async fn abort_callbacks_and_join(&self) {
+        let callback_tasks = self
+            .callback_tasks
+            .lock()
+            .expect("callback task lock poisoned")
+            .clone();
+        callback_tasks.abort_and_join().await;
     }
 
     /// Sends a message to the server using the underlying `engine.io` protocol.
@@ -278,6 +353,9 @@ impl Client {
         E: Into<Event>,
         D: Into<Payload>,
     {
+        if self.shutdown_requested.load(Ordering::Acquire) {
+            return Err(Error::StoppedEngineIoSocket);
+        }
         self.socket
             .read()
             .await
@@ -319,15 +397,17 @@ impl Client {
     /// }
     /// ```
     pub async fn disconnect(&self) -> Result<()> {
+        self.shutdown_requested.store(true, Ordering::Release);
         *(self.disconnect_reason.write().await) = DisconnectReason::Manual;
 
         let disconnect_packet =
             Packet::new(PacketId::Disconnect, self.nsp.clone(), None, None, 0, None);
 
-        self.socket.read().await.send(disconnect_packet).await?;
-        self.socket.read().await.disconnect().await?;
-
-        Ok(())
+        let socket = self.socket.read().await;
+        // A namespace disconnect is best effort: the namespace handshake may
+        // still be pending even though the Engine.IO transport is open.
+        let _ = socket.send(disconnect_packet).await;
+        socket.disconnect().await
     }
 
     /// Sends a message to the server but `alloc`s an `ack` to check whether the
@@ -393,6 +473,9 @@ impl Client {
         E: Into<Event>,
         D: Into<Payload>,
     {
+        if self.shutdown_requested.load(Ordering::Acquire) {
+            return Err(Error::StoppedEngineIoSocket);
+        }
         let id = thread_rng().gen_range(0..999);
         let socket_packet =
             Packet::new_from_payload(data.into(), event.into(), &self.nsp, Some(id))?;
@@ -597,6 +680,114 @@ impl Client {
     }
 }
 
+enum PollControl<T> {
+    Stopped,
+    Value(T),
+}
+
+async fn select_or_stop<T, F: std::future::Future<Output = T>>(
+    stop_rx: &mut Option<oneshot::Receiver<()>>,
+    future: F,
+) -> PollControl<T> {
+    if let Some(stop_rx) = stop_rx {
+        tokio::select! {
+            biased;
+            _ = stop_rx => PollControl::Stopped,
+            value = future => PollControl::Value(value),
+        }
+    } else {
+        PollControl::Value(future.await)
+    }
+}
+
+/// A connected client whose polling and reconnect task is owned by the handle.
+///
+/// Dropping the handle requests cancellation and aborts its polling task.
+/// Call [`shutdown`](Self::shutdown) when the caller can await completion.
+pub struct ManagedClient {
+    client: Client,
+    stop_tx: Option<oneshot::Sender<()>>,
+    poll_task: Option<JoinHandle<()>>,
+    closed: bool,
+}
+
+impl ManagedClient {
+    pub(crate) fn new(
+        client: Client,
+        stop_tx: oneshot::Sender<()>,
+        poll_task: JoinHandle<()>,
+    ) -> Self {
+        Self {
+            client,
+            stop_tx: Some(stop_tx),
+            poll_task: Some(poll_task),
+            closed: false,
+        }
+    }
+
+    /// Signal shutdown, close the transport, and wait until polling, reconnect,
+    /// and Engine.IO callback tasks for this connection have stopped.
+    ///
+    /// The future can be wrapped in `tokio::time::timeout`. If it is canceled,
+    /// the stop signal remains sent and the join handle remains owned by this
+    /// value, so calling `shutdown` again resumes waiting for completion.
+    // Preserve the crate's established unboxed Error return type for Client operations.
+    #[allow(clippy::result_large_err)]
+    pub async fn shutdown(&mut self) -> Result<()> {
+        self.client
+            .shutdown_requested
+            .store(true, Ordering::Release);
+        if let Some(stop_tx) = self.stop_tx.take() {
+            let _ = stop_tx.send(());
+        }
+
+        self.client.abort_callbacks();
+        let close_result = if self.closed {
+            Ok(())
+        } else {
+            let result = self.client.disconnect().await;
+            self.closed = result.is_ok();
+            result
+        };
+
+        if let Some(poll_task) = self.poll_task.as_mut() {
+            let _ = poll_task.await;
+        }
+        self.poll_task = None;
+        self.client.abort_callbacks_and_join().await;
+
+        close_result
+    }
+
+    /// Whether the managed poll/reconnect task has been joined.
+    pub fn is_shutdown(&self) -> bool {
+        self.poll_task.is_none()
+    }
+}
+
+impl Deref for ManagedClient {
+    type Target = Client;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+impl Drop for ManagedClient {
+    fn drop(&mut self) {
+        self.client
+            .shutdown_requested
+            .store(true, Ordering::Release);
+        if let Some(stop_tx) = self.stop_tx.take() {
+            let _ = stop_tx.send(());
+        }
+        self.client.abort_callbacks();
+        if let Some(poll_task) = self.poll_task.as_ref() {
+            poll_task.abort();
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
 
@@ -609,14 +800,17 @@ mod test {
     };
 
     use bytes::Bytes;
-    use futures_util::{FutureExt, StreamExt};
+    use futures_util::{FutureExt, SinkExt, StreamExt};
     use native_tls::TlsConnector;
     use serde_json::json;
     use serial_test::serial;
     use tokio::{
-        sync::{mpsc, Mutex},
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+        sync::{mpsc, oneshot, Mutex},
         time::{sleep, timeout},
     };
+    use tokio_tungstenite::{accept_async, tungstenite::Message};
 
     use crate::{
         asynchronous::{
@@ -627,6 +821,160 @@ mod test {
         packet::{Packet, PacketId},
         CloseReason, Event, Payload, TransportType,
     };
+
+    async fn local_websocket_fixture() -> (
+        String,
+        oneshot::Receiver<()>,
+        oneshot::Receiver<()>,
+        oneshot::Sender<()>,
+        oneshot::Receiver<bool>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (namespace_ready_tx, namespace_ready_rx) = oneshot::channel();
+        let (closed_tx, closed_rx) = oneshot::channel();
+        let (release_peer_tx, release_peer_rx) = oneshot::channel();
+        let (late_event_tx, late_event_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            let mut namespace_ready_tx = Some(namespace_ready_tx);
+            socket
+                .send(Message::Text(
+                    "0{\"sid\":\"fixture\",\"upgrades\":[],\"pingInterval\":60000,\"pingTimeout\":60000,\"maxPayload\":1000000}".into(),
+                ))
+                .await
+                .unwrap();
+
+            while let Some(Ok(message)) = socket.next().await {
+                if let Message::Text(text) = message {
+                    if text.starts_with("40") {
+                        if let Some(namespace_ready_tx) = namespace_ready_tx.take() {
+                            let _ = namespace_ready_tx.send(());
+                        }
+                        socket
+                            .send(Message::Text("40{\"sid\":\"fixture-namespace\"}".into()))
+                            .await
+                            .unwrap();
+                    } else if text == "1" {
+                        let _ = closed_tx.send(());
+                        let _ = release_peer_rx.await;
+                        let sent = socket
+                            .send(Message::Text("42[\"late\",{\"stale\":true}]".into()))
+                            .await
+                            .is_ok();
+                        let _ = late_event_tx.send(sent);
+                        break;
+                    }
+                }
+            }
+        });
+        (
+            format!("http://{address}"),
+            namespace_ready_rx,
+            closed_rx,
+            release_peer_tx,
+            late_event_rx,
+            server,
+        )
+    }
+
+    async fn local_polling_close_fixture() -> (
+        String,
+        oneshot::Receiver<()>,
+        oneshot::Sender<()>,
+        oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let namespace_ready = Arc::new(tokio::sync::Notify::new());
+        let (close_tx, close_rx) = oneshot::channel();
+        let close_tx = Arc::new(Mutex::new(Some(close_tx)));
+        let (release_tx, release_rx) = oneshot::channel();
+        let release_rx = Arc::new(Mutex::new(Some(release_rx)));
+        let (stop_tx, mut stop_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let namespace_ready = namespace_ready.clone();
+            let close_tx = close_tx.clone();
+            let release_rx = release_rx.clone();
+            loop {
+                let accepted = tokio::select! {
+                    _ = &mut stop_rx => break,
+                    accepted = listener.accept() => accepted,
+                };
+                let Ok((mut stream, _)) = accepted else { break };
+                let namespace_ready = namespace_ready.clone();
+                let close_tx = close_tx.clone();
+                let release_rx = release_rx.clone();
+                tokio::spawn(async move {
+                    let mut request = Vec::new();
+                    let mut chunk = [0_u8; 1024];
+                    let (header_end, content_length) = loop {
+                        let count = stream.read(&mut chunk).await.unwrap_or(0);
+                        if count == 0 {
+                            return;
+                        }
+                        request.extend_from_slice(&chunk[..count]);
+                        if let Some(index) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                            let header_end = index + 4;
+                            let headers = String::from_utf8_lossy(&request[..header_end]);
+                            let length = headers
+                                .lines()
+                                .find_map(|line| {
+                                    let (name, value) = line.split_once(':')?;
+                                    name.eq_ignore_ascii_case("content-length")
+                                        .then(|| value.trim().parse::<usize>().ok())
+                                        .flatten()
+                                })
+                                .unwrap_or(0);
+                            break (header_end, length);
+                        }
+                    };
+                    while request.len() < header_end + content_length {
+                        let count = stream.read(&mut chunk).await.unwrap_or(0);
+                        if count == 0 {
+                            return;
+                        }
+                        request.extend_from_slice(&chunk[..count]);
+                    }
+                    let first_line = String::from_utf8_lossy(&request[..header_end]);
+                    let is_get = first_line.starts_with("GET ");
+                    let body =
+                        String::from_utf8_lossy(&request[header_end..header_end + content_length]);
+                    let response = if is_get && !first_line.contains("sid=") {
+                        "0{\"sid\":\"polling-fixture\",\"upgrades\":[],\"pingInterval\":60000,\"pingTimeout\":60000,\"maxPayload\":1000000}".to_owned()
+                    } else if is_get {
+                        namespace_ready.notified().await;
+                        "40{\"sid\":\"polling-namespace\"}".to_owned()
+                    } else {
+                        if body.starts_with("40") {
+                            namespace_ready.notify_one();
+                        }
+                        if body == "1" {
+                            if let Some(tx) = close_tx.lock().await.take() {
+                                let _ = tx.send(());
+                            }
+                            if let Some(rx) = release_rx.lock().await.take() {
+                                let _ = rx.await;
+                            }
+                        }
+                        "ok".to_owned()
+                    };
+                    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response);
+                    let _ = stream.write_all(response.as_bytes()).await;
+                });
+            }
+        });
+        (
+            format!("http://{address}"),
+            close_rx,
+            release_tx,
+            stop_tx,
+            server,
+        )
+    }
 
     #[tokio::test]
     async fn socket_io_integration() -> Result<()> {
@@ -716,6 +1064,363 @@ mod test {
         assert!(timeout.is_ok());
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn managed_shutdown_joins_polling_task() {
+        let (url, namespace_ready, closed, release_peer, late_event_sent, server) =
+            local_websocket_fixture().await;
+        let late_events = Arc::new(AtomicUsize::new(0));
+        let late_events_callback = late_events.clone();
+        let mut client = ClientBuilder::new(url)
+            .reconnect(false)
+            .transport_type(TransportType::Websocket)
+            .on("late", move |_, _| {
+                let late_events = late_events_callback.clone();
+                async move {
+                    late_events.fetch_add(1, Ordering::AcqRel);
+                }
+                .boxed()
+            })
+            .connect_managed()
+            .await
+            .expect("managed connection should establish");
+
+        namespace_ready
+            .await
+            .expect("fixture should accept namespace");
+        client.shutdown().await.expect("shutdown should succeed");
+
+        assert!(client.is_shutdown());
+        assert!(client.emit("test", Payload::Text(vec![])).await.is_err());
+        client
+            .shutdown()
+            .await
+            .expect("repeated shutdown should succeed");
+        closed
+            .await
+            .expect("fixture should observe transport close");
+        release_peer.send(()).unwrap();
+        let late_event_sent = late_event_sent
+            .await
+            .expect("fixture should release the stale peer");
+        assert!(late_event_sent, "fixture should release the stale event");
+        assert_eq!(late_events.load(Ordering::Acquire), 0);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn canceled_managed_shutdown_keeps_join_handle_for_retry() {
+        let (url, namespace_ready, closed, release_peer, late_event_sent, server) =
+            local_websocket_fixture().await;
+        let mut client = ClientBuilder::new(url)
+            .reconnect(false)
+            .transport_type(TransportType::Websocket)
+            .connect_managed()
+            .await
+            .expect("managed connection should establish");
+        namespace_ready
+            .await
+            .expect("fixture should observe namespace connect");
+
+        let socket_lock = client.client.socket.clone();
+        let socket_guard = socket_lock.write().await;
+        let mut shutdown = Box::pin(client.shutdown());
+        tokio::select! {
+            biased;
+            result = &mut shutdown => panic!("shutdown should wait for the held socket lock: {result:?}"),
+            _ = tokio::task::yield_now() => {}
+        }
+        drop(shutdown);
+        assert!(
+            !client.is_shutdown(),
+            "canceled shutdown must retain the poll join handle"
+        );
+        drop(socket_guard);
+
+        timeout(Duration::from_secs(2), client.shutdown())
+            .await
+            .expect("a later shutdown should resume the join")
+            .expect("repeated shutdown should close cleanly");
+        closed
+            .await
+            .expect("fixture should observe transport close");
+        release_peer.send(()).unwrap();
+        let _ = late_event_sent
+            .await
+            .expect("fixture should release stale peer");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn canceled_managed_shutdown_retains_ownership_during_stalled_polling_close() {
+        let (url, close_requested, release_close, stop_server, server) =
+            local_polling_close_fixture().await;
+        let mut client = ClientBuilder::new(url)
+            .reconnect(false)
+            .transport_type(TransportType::Polling)
+            .connect_managed()
+            .await
+            .expect("polling namespace should connect");
+
+        let mut shutdown = Box::pin(client.shutdown());
+        tokio::select! {
+            biased;
+            result = &mut shutdown => panic!("shutdown should block on the fixture's close POST: {result:?}"),
+            _ = close_requested => {}
+        }
+        drop(shutdown);
+        timeout(Duration::from_secs(2), async {
+            while !client
+                .poll_task
+                .as_ref()
+                .expect("shutdown retains its join handle until joined")
+                .is_finished()
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("polling/reconnect task should stop while close send is stalled");
+        assert!(
+            !client.is_shutdown(),
+            "canceling an in-flight transport close must retain the poll task handle"
+        );
+
+        release_close
+            .send(())
+            .expect("fixture should release the close response");
+        timeout(Duration::from_secs(2), client.shutdown())
+            .await
+            .expect("retry should finish after peer releases close")
+            .expect("retry should complete shutdown");
+        assert!(client.is_shutdown());
+        stop_server.send(()).expect("fixture server should stop");
+        server.await.expect("fixture server task should finish");
+    }
+
+    #[tokio::test]
+    async fn dropping_managed_client_stops_polling_before_releasing_peer() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (namespace_ready_tx, namespace_ready_rx) = oneshot::channel();
+        let (release_peer_tx, release_peer_rx) = oneshot::channel();
+        let (late_send_tx, late_send_rx) = oneshot::channel();
+        let (peer_closed_tx, peer_closed_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            socket
+                .send(Message::Text(
+                    "0{\"sid\":\"fixture\",\"upgrades\":[],\"pingInterval\":60000,\"pingTimeout\":60000,\"maxPayload\":1000000}".into(),
+                ))
+                .await
+                .unwrap();
+            while let Some(Ok(message)) = socket.next().await {
+                if matches!(message, Message::Text(ref text) if text.starts_with("40")) {
+                    let _ = namespace_ready_tx.send(());
+                    break;
+                }
+            }
+            let _ = release_peer_rx.await;
+            let _ = socket
+                .send(Message::Text("40{\"sid\":\"fixture-namespace\"}".into()))
+                .await;
+            let sent = socket
+                .send(Message::Text("42[\"late\",{\"stale\":true}]".into()))
+                .await
+                .is_ok();
+            let _ = late_send_tx.send(sent);
+            if timeout(Duration::from_secs(2), socket.next()).await.is_ok() {
+                let _ = peer_closed_tx.send(());
+            }
+        });
+
+        let late_events = Arc::new(AtomicUsize::new(0));
+        let callback_events = late_events.clone();
+        let client = ClientBuilder::new(format!("http://{address}"))
+            .transport_type(TransportType::Websocket)
+            .reconnect(false)
+            .on("late", move |_, _| {
+                let events = callback_events.clone();
+                async move {
+                    events.fetch_add(1, Ordering::AcqRel);
+                }
+                .boxed()
+            })
+            .connect_managed()
+            .await
+            .expect("managed connection should establish");
+        namespace_ready_rx
+            .await
+            .expect("fixture should observe namespace connect");
+        drop(client);
+        release_peer_tx.send(()).unwrap();
+        let late_event_sent = late_send_rx
+            .await
+            .expect("fixture should attempt late event");
+        assert!(
+            !late_event_sent,
+            "dropped client should close its transport"
+        );
+        assert_eq!(late_events.load(Ordering::Acquire), 0);
+        timeout(Duration::from_secs(2), peer_closed_rx)
+            .await
+            .expect("dropped client should close the peer transport")
+            .expect("fixture should observe transport closure");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn managed_shutdown_stops_real_reconnect_attempts_and_auth_updates() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (namespace_ready_tx, namespace_ready_rx) = oneshot::channel();
+        let (close_first_tx, close_first_rx) = oneshot::channel();
+        let (retry_failed_tx, retry_failed_rx) = oneshot::channel();
+        let (stop_server_tx, stop_server_rx) = oneshot::channel();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let server_accepted = accepted.clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            server_accepted.fetch_add(1, Ordering::AcqRel);
+            let mut socket = accept_async(stream).await.unwrap();
+            socket
+                .send(Message::Text(
+                    "0{\"sid\":\"fixture\",\"upgrades\":[],\"pingInterval\":60000,\"pingTimeout\":60000,\"maxPayload\":1000000}".into(),
+                ))
+                .await
+                .unwrap();
+            while let Some(Ok(message)) = socket.next().await {
+                if matches!(message, Message::Text(ref text) if text.starts_with("40")) {
+                    let _ = namespace_ready_tx.send(());
+                    socket
+                        .send(Message::Text("40{\"sid\":\"fixture-namespace\"}".into()))
+                        .await
+                        .unwrap();
+                    break;
+                }
+            }
+            let _ = close_first_rx.await;
+            drop(socket);
+
+            // Accept the first actual reconnect attempt, then reject its upgrade.
+            let (mut retry, _) = listener.accept().await.unwrap();
+            server_accepted.fetch_add(1, Ordering::AcqRel);
+            let mut request = Vec::new();
+            loop {
+                let mut bytes = [0; 1024];
+                let count = retry.read(&mut bytes).await.unwrap();
+                if count == 0 {
+                    break;
+                }
+                request.extend_from_slice(&bytes[..count]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            retry
+                .write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            let mut byte = [0; 1];
+            while retry.read(&mut byte).await.unwrap_or(0) > 0 {}
+            let _ = retry_failed_tx.send(());
+
+            tokio::select! {
+                _ = stop_server_rx => {}
+                accepted = listener.accept() => {
+                    if accepted.is_ok() {
+                        server_accepted.fetch_add(1, Ordering::AcqRel);
+                    }
+                }
+            }
+        });
+
+        let reconnect_calls = Arc::new(AtomicUsize::new(0));
+        let reconnect_calls_callback = reconnect_calls.clone();
+        let mut managed = ClientBuilder::new(format!("http://{address}"))
+            .transport_type(TransportType::Websocket)
+            .reconnect(true)
+            .reconnect_delay(30_000, 30_000)
+            .max_reconnect_attempts(4)
+            .on_reconnect(move || {
+                let calls = reconnect_calls_callback.clone();
+                async move {
+                    calls.fetch_add(1, Ordering::AcqRel);
+                    let mut settings = ReconnectSettings::new();
+                    settings.auth(json!({"generation": 2}));
+                    settings
+                }
+                .boxed()
+            })
+            .connect_managed()
+            .await
+            .expect("managed connection should establish");
+        namespace_ready_rx
+            .await
+            .expect("initial namespace should connect");
+        close_first_tx.send(()).unwrap();
+        timeout(Duration::from_secs(3), retry_failed_rx)
+            .await
+            .expect("fixture should observe a failed reconnect")
+            .expect("reconnect failure signal should arrive");
+        assert_eq!(reconnect_calls.load(Ordering::Acquire), 1);
+
+        let _close_result = timeout(Duration::from_secs(2), managed.shutdown())
+            .await
+            .expect("managed shutdown should interrupt reconnect delay");
+        assert!(managed.is_shutdown());
+        assert_eq!(accepted.load(Ordering::Acquire), 2);
+        assert_eq!(reconnect_calls.load(Ordering::Acquire), 1);
+        let _ = stop_server_tx.send(());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn canceling_blocked_managed_connect_closes_its_transport() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = oneshot::channel();
+        let (closed_tx, closed_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut bytes = [0; 1024];
+                let count = stream.read(&mut bytes).await.unwrap();
+                if count == 0 {
+                    break;
+                }
+                request.extend_from_slice(&bytes[..count]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let _ = request_tx.send(());
+            let mut byte = [0; 1];
+            let count = stream.read(&mut byte).await.unwrap();
+            let _ = closed_tx.send(count == 0);
+        });
+
+        let mut connect = Box::pin(
+            ClientBuilder::new(format!("http://{address}"))
+                .transport_type(TransportType::Websocket)
+                .connect_managed(),
+        );
+        tokio::select! {
+            result = &mut connect => panic!("stalled connect unexpectedly returned: {}", result.is_ok()),
+            result = request_rx => result.expect("server should receive the upgrade request"),
+        }
+        drop(connect);
+
+        assert!(timeout(Duration::from_secs(2), closed_rx)
+            .await
+            .expect("canceled connect should release its TCP stream")
+            .expect("server should observe transport closure"));
+        server.await.unwrap();
     }
 
     #[tokio::test]
