@@ -79,9 +79,9 @@ impl PollingTransport {
         Box::pin(try_stream! {
             loop {
                 for await elem in Self::send_request(url.clone(), client.clone()) {
-                    for await bytes in elem?.bytes_stream() {
-                        yield bytes?;
-                    }
+                    // One polling response is one engine.io payload. Read the whole body: yielding
+                    // the chunks of `bytes_stream()` one by one hands partial payloads to the decoder.
+                    yield elem?.bytes().await?;
                 }
             }
         })
