@@ -18,6 +18,9 @@ server.on('connection', socket => {
             console.log(message.toString());
             if (message == "respond") {
                 socket.send("Roger Roger");
+            } else if (message == "respond_large") {
+                // larger than one HTTP body chunk, so the polling response arrives in several frames
+                socket.send("x".repeat(64 * 1024));
             } else if (message == "close") {
                 socket.close();
             }

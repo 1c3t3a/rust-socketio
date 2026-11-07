@@ -139,6 +139,30 @@ mod test {
         Ok(())
     }
 
+    /// A polling response bigger than one HTTP body chunk must still be decoded as one payload.
+    #[tokio::test]
+    async fn test_polling_large_message() -> Result<()> {
+        let url = crate::test::engine_io_polling_server()?;
+        let mut socket = builder(url).build_polling().await?;
+        socket.connect().await?;
+
+        assert_eq!(
+            socket.next().await.unwrap()?,
+            Packet::new(PacketId::Message, "hello client")
+        );
+
+        socket
+            .emit(Packet::new(PacketId::Message, "respond_large"))
+            .await?;
+
+        assert_eq!(
+            socket.next().await.unwrap()?,
+            Packet::new(PacketId::Message, "x".repeat(64 * 1024))
+        );
+
+        socket.disconnect().await
+    }
+
     #[tokio::test]
     async fn test_illegal_actions() -> Result<()> {
         let url = crate::test::engine_io_server()?;
